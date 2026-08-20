@@ -1,0 +1,24 @@
+<?php
+require_once '../includes/auth.php'; require_once '../includes/db.php';
+require_once '../includes/invoice_posting_helper.php'; require_once '../includes/invoice_reference_helper.php'; require_once '../includes/staff_incentive_helper.php';
+require_once '../includes/restaurant_table_helper.php';
+$user_id=(int)$_SESSION['user_id']; ensure_invoice_posting_columns($conn); ensure_invoice_reference_columns($conn); ensure_staff_incentives_table($conn); ensure_restaurant_tables_table($conn); $table_system_is_enabled=table_system_enabled($conn,$user_id);
+if(!$table_system_is_enabled){ header('Location: ../dashboard.php'); exit; }
+$from_date=trim($_GET['from_date'] ?? ''); $to_date=trim($_GET['to_date'] ?? ''); $staff_id=(int)($_GET['staff_id'] ?? 0);
+$date_filter=''; if($from_date!=='' && $to_date!==''){ $date_filter=' AND i.invoice_date BETWEEN ? AND ?'; } elseif($from_date!==''){ $date_filter=' AND i.invoice_date >= ?'; } elseif($to_date!==''){ $date_filter=' AND i.invoice_date <= ?'; }
+$staff_filter=$staff_id>0 ? ' AND si.staff_id='.$staff_id : '';
+$sql="SELECT s.staff_code,s.name,si.commission_percent,COUNT(i.id) invoice_count,COALESCE(SUM(i.total_amount),0) total_sale,COALESCE(SUM(i.total_amount),0)*si.commission_percent/100 commission_amount FROM staff_incentives si INNER JOIN staff s ON s.id=si.staff_id AND s.user_id=si.user_id INNER JOIN invoices i ON i.staff_id=si.staff_id AND i.user_id=si.user_id INNER JOIN restaurant_tables rt ON rt.id=i.restaurant_table_id AND rt.user_id=i.user_id AND rt.status='active' WHERE si.user_id=? AND si.commission_percent>0 AND i.accounting_status='posted'".($table_system_is_enabled ? '' : ' AND 1=0').$staff_filter.$date_filter." GROUP BY s.id,s.staff_code,s.name,si.commission_percent ORDER BY commission_amount DESC,total_sale DESC";
+$stmt=mysqli_prepare($conn,$sql); if($from_date!=='' && $to_date!==''){ mysqli_stmt_bind_param($stmt,'iss',$user_id,$from_date,$to_date); } elseif($from_date!=='' || $to_date!==''){ $date=$from_date!==''?$from_date:$to_date; mysqli_stmt_bind_param($stmt,'is',$user_id,$date); } else { mysqli_stmt_bind_param($stmt,'i',$user_id); } mysqli_stmt_execute($stmt); $result=mysqli_stmt_get_result($stmt);
+$staff_options=mysqli_query($conn,"SELECT s.id,s.staff_code,s.name FROM staff_incentives si INNER JOIN staff s ON s.id=si.staff_id AND s.user_id=si.user_id WHERE si.user_id={$user_id} AND si.commission_percent>0 ORDER BY s.name");
+require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
+?>
+<section class="content"><div class="container-fluid">
+<div class="card"><div class="card-body"><form method="get"><div class="row">
+<div class="col-md-3"><label>From Date</label><input type="date" name="from_date" class="form-control" value="<?=htmlspecialchars($from_date)?>"></div>
+<div class="col-md-3"><label>To Date</label><input type="date" name="to_date" class="form-control" value="<?=htmlspecialchars($to_date)?>"></div>
+<div class="col-md-3"><label>Staff Name</label><select name="staff_id" class="form-control"><option value="">All Commission Staff</option><?php while($staff=mysqli_fetch_assoc($staff_options)){ ?><option value="<?=$staff['id']?>" <?=$staff_id===(int)$staff['id']?'selected':''?>><?=htmlspecialchars($staff['name'])?><?= $staff['staff_code'] ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : '' ?></option><?php } ?></select></div>
+<div class="col-md-2"><label>&nbsp;</label><button class="btn btn-primary btn-block">Search</button></div><div class="col-md-1"><label>&nbsp;</label><a href="staff_commission_report.php" class="btn btn-secondary btn-block">Reset</a></div>
+</div></form></div></div>
+<div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-percent mr-2"></i>Staff Commission Report</h3></div><div class="card-body"><table id="example1" class="table table-bordered table-striped"><thead><tr><th>Staff ID</th><th>Staff Name</th><th>Commission %</th><th>Ref. Invoices</th><th>Ref. Sale</th><th>Commission Amount</th></tr></thead><tbody><?php $sale_total=0; $commission_total=0; while($row=mysqli_fetch_assoc($result)){ $sale_total+=(float)$row['total_sale']; $commission_total+=(float)$row['commission_amount']; ?><tr><td><?=htmlspecialchars($row['staff_code'])?></td><td><?=htmlspecialchars($row['name'])?></td><td><?=number_format((float)$row['commission_percent'],2)?>%</td><td><?=$row['invoice_count']?></td><td>BDT <?=number_format((float)$row['total_sale'],2)?></td><td><strong>BDT <?=number_format((float)$row['commission_amount'],2)?></strong></td></tr><?php } ?></tbody><tfoot><tr><th colspan="4" class="text-right">Total</th><th>BDT <?=number_format($sale_total,2)?></th><th>BDT <?=number_format($commission_total,2)?></th></tr></tfoot></table></div></div>
+</div></section>
+<?php require_once '../includes/footer.php'; ?>
