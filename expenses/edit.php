@@ -4,6 +4,8 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/transaction_helper.php';
+require_once '../includes/staff_helper.php';
+require_once '../includes/expense_helper.php';
 
 if(!manager_can_modify()){
     header("Location:index.php");
@@ -13,6 +15,8 @@ if(!manager_can_modify()){
 $user_id = (int)$_SESSION['user_id'];
 $id = (int)($_GET['id'] ?? 0);
 $message = '';
+ensure_staff_table($conn);
+ensure_expense_support_tables($conn, $user_id);
 
 $stmt = mysqli_prepare($conn, "SELECT * FROM expenses WHERE id=? AND user_id=? LIMIT 1");
 mysqli_stmt_bind_param($stmt, "ii", $id, $user_id);
@@ -26,6 +30,7 @@ if(!$entry){
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $wallet_id = (int)($_POST['wallet_id'] ?? 0);
     $category_id = (int)($_POST['category_id'] ?? 0);
+    $staff_id = (int)($_POST['staff_id'] ?? 0);
     $txn_date = $_POST['txn_date'] ?? date('Y-m-d');
     $amount = (float)($_POST['amount'] ?? 0);
     $note = trim($_POST['note'] ?? '');
@@ -71,6 +76,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             "UPDATE expenses
              SET wallet_id=?,
                  category_id=?,
+                 staff_id=?,
                  txn_date=?,
                  amount=?,
                  note=?
@@ -79,9 +85,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         );
         mysqli_stmt_bind_param(
             $update,
-            "iisdsii",
+            "iiisdsii",
             $wallet_id,
             $category_id,
+            $staff_id,
             $txn_date,
             $amount,
             $note,
@@ -106,7 +113,17 @@ $categories = mysqli_query(
      FROM categories
      WHERE user_id={$user_id}
      AND status='active'
+     AND COALESCE(is_hidden, 0)=0
      ORDER BY category_name ASC"
+);
+
+$staffs = mysqli_query(
+    $conn,
+    "SELECT id, name, staff_code
+     FROM staff
+     WHERE user_id={$user_id}
+     AND status='active'
+     ORDER BY name ASC"
 );
 
 require_once '../includes/header.php';
@@ -155,6 +172,18 @@ require_once '../includes/sidebar.php';
             <div class="form-group">
                 <label>Amount (BDT)</label>
                 <input type="number" step="0.01" min="0.01" name="amount" class="form-control" value="<?= htmlspecialchars($entry['amount']); ?>" required>
+            </div>
+
+            <div class="form-group">
+                <label>For</label>
+                <select name="staff_id" class="form-control">
+                    <option value="">Select Staff</option>
+                    <?php while($staff = mysqli_fetch_assoc($staffs)){ ?>
+                        <option value="<?= (int)$staff['id']; ?>" <?= (int)$staff['id'] === (int)($entry['staff_id'] ?? 0) ? 'selected' : ''; ?>>
+                            <?= htmlspecialchars($staff['name']); ?><?= !empty($staff['staff_code']) ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : ''; ?>
+                        </option>
+                    <?php } ?>
+                </select>
             </div>
 
             <div class="form-group">

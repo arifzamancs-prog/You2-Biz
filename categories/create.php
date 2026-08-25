@@ -2,8 +2,10 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_expense_support_tables($conn, $user_id);
 
 $message = '';
 
@@ -11,36 +13,43 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_name = trim($_POST['category_name']);
 
-    $sql = "INSERT INTO categories
-            (
-                user_id,
-                category_name,
-                status
-            )
-            VALUES
-            (
-                ?,?,
-                'active'
-            )";
+    if(expense_category_is_reserved($category_name)){
+        $message = "This category name is reserved.";
+    } else {
 
-    $stmt = mysqli_prepare($conn,$sql);
+        $sql = "INSERT INTO categories
+                (
+                    user_id,
+                    category_name,
+                    status,
+                    is_hidden
+                )
+                VALUES
+                (
+                    ?,?,
+                    'active',
+                    0
+                )";
 
-    mysqli_stmt_bind_param(
-        $stmt,
-        "is",
-        $user_id,
-        $category_name
-    );
+        $stmt = mysqli_prepare($conn,$sql);
 
-    if(mysqli_stmt_execute($stmt)){
+        mysqli_stmt_bind_param(
+            $stmt,
+            "is",
+            $user_id,
+            $category_name
+        );
 
-        header("Location:index.php");
-        exit;
+        if(mysqli_stmt_execute($stmt)){
 
-    }else{
+            header("Location:index.php");
+            exit;
 
-        $message = "Failed To Save Category";
+        }else{
 
+            $message = "Failed To Save Category";
+
+        }
     }
 }
 

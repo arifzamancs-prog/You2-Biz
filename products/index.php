@@ -120,7 +120,7 @@ require_once '../includes/sidebar.php';
             ?>
 
             <?php if($current_product_type !== $last_product_type){ $last_product_type = $current_product_type; ?>
-            <tr class="table-primary"><td colspan="<?=$product_column_count?>"><strong><?= $current_product_type === 'stock_product' ? 'Stock Products' : 'Non Stock Products' ?></strong></td></tr>
+            <tr class="table-primary"><td colspan="<?=$product_column_count?>"><strong><?= $current_product_type === 'stock_product' ? 'Stock Products' : 'Non Stock/Service Products' ?></strong></td></tr>
             <?php } ?>
 
             <tr>

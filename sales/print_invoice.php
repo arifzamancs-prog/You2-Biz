@@ -706,43 +706,6 @@ window.addEventListener('load', function () {
         <?php } ?>
     </table>
 
-    <?php if(!empty($returnable_summary)){ ?>
-        <table class="summary">
-            <tr>
-                <td colspan="2"><strong>Returnable Products</strong></td>
-            </tr>
-            <?php foreach($returnable_summary as $returnable_row){ ?>
-                <tr>
-                    <td colspan="2">
-                        <strong><?= htmlspecialchars($returnable_row['product_name']); ?></strong>
-                    </td>
-                </tr>
-                <?php if(abs((float)$returnable_row['previous_remaining_qty']) > 0.00001){ ?>
-                <tr>
-                    <td>Previous Remaining</td>
-                    <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['previous_remaining_qty'])); ?></td>
-                </tr>
-                <?php } ?>
-                <?php if(abs((float)$returnable_row['current_given_qty']) > 0.00001){ ?>
-                <tr>
-                    <td>Given Now</td>
-                    <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_given_qty'])); ?></td>
-                </tr>
-                <?php } ?>
-                <?php if(abs((float)$returnable_row['current_returned_qty']) > 0.00001){ ?>
-                <tr>
-                    <td>Returned Now</td>
-                    <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_returned_qty'])); ?></td>
-                </tr>
-                <?php } ?>
-                <tr class="grand">
-                    <td>Remaining</td>
-                    <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_remaining_qty'])); ?></td>
-                </tr>
-            <?php } ?>
-        </table>
-    <?php } ?>
-
     <?php if(!$hide_invoice_notes && !empty($invoice['notes'])){ ?>
         <p><strong>Notes:</strong> <?= nl2br(htmlspecialchars($invoice['notes'])); ?></p>
     <?php } ?>
@@ -1208,32 +1171,6 @@ window.addEventListener('load', function () {
             <?php } ?>
         </table>
     </section>
-
-    <?php if(!empty($returnable_summary)){ ?>
-    <section class="summary">
-        <table>
-            <tr class="grand">
-                <td colspan="5">Returnable Products</td>
-            </tr>
-            <tr>
-                <td><strong>Product</strong></td>
-                <td class="text-right"><strong>Previous</strong></td>
-                <td class="text-right"><strong>Given</strong></td>
-                <td class="text-right"><strong>Returned</strong></td>
-                <td class="text-right"><strong>Remaining</strong></td>
-            </tr>
-            <?php foreach($returnable_summary as $returnable_row){ ?>
-            <tr>
-                <td><?= htmlspecialchars($returnable_row['product_name']); ?></td>
-                <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['previous_remaining_qty'])); ?></td>
-                <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_given_qty'])); ?></td>
-                <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_returned_qty'])); ?></td>
-                <td class="text-right"><?= htmlspecialchars(invoice_plain_qty_display($returnable_row['current_remaining_qty'])); ?></td>
-            </tr>
-            <?php } ?>
-        </table>
-    </section>
-    <?php } ?>
 
     <?php if(!$hide_invoice_notes && !empty($invoice['notes'])){ ?>
     <section class="notes">

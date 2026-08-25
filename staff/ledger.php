@@ -5,10 +5,11 @@ require_once '../includes/staff_helper.php';
 require_once '../includes/staff_ledger_helper.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/transaction_helper.php';
+require_once '../includes/expense_helper.php';
 
 require_admin_user();
 $user_id=(int)$_SESSION['user_id'];
-ensure_staff_table($conn); ensure_staff_ledger_table($conn); ensure_default_cash_wallet($conn,$user_id);
+ensure_staff_table($conn); ensure_staff_ledger_table($conn); ensure_default_cash_wallet($conn,$user_id); ensure_expense_support_tables($conn, $user_id);
 $error='';
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
@@ -32,6 +33,35 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             debit_wallet($conn,$wallet_id,$user_id,$amount);
             $transaction_note='Staff '.staff_ledger_type_label($entry_type).' payment'.($note!=='' ? ': '.$note : '');
             record_wallet_transaction($conn,$txn_no,$user_id,$wallet_id,'staff_payment',$ledger_id,$amount,$transaction_note,$entry_date);
+
+            $reserved_category_name = reserved_expense_category_name_from_entry_type($entry_type);
+            $reserved_category_id = reserved_expense_category_id($conn, $user_id, $reserved_category_name);
+            $approved_at = date('Y-m-d H:i:s');
+            $expense_note = $note !== '' ? $note : ('Staff ' . staff_ledger_type_label($entry_type) . ' payment');
+            $expense_stmt = mysqli_prepare(
+                $conn,
+                "INSERT INTO expenses
+                 (txn_no, user_id, wallet_id, category_id, staff_id, txn_date, amount, note, approval_status, created_by, approved_by, approved_at)
+                 VALUES
+                 (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?)"
+            );
+            mysqli_stmt_bind_param(
+                $expense_stmt,
+                'siiiisdsiis',
+                $txn_no,
+                $user_id,
+                $wallet_id,
+                $reserved_category_id,
+                $staff_id,
+                $entry_date,
+                $amount,
+                $expense_note,
+                $created_by,
+                $created_by,
+                $approved_at
+            );
+            if(!mysqli_stmt_execute($expense_stmt)){ throw new Exception(mysqli_stmt_error($expense_stmt)); }
+
             mysqli_commit($conn); header('Location: ledger.php?success=1'); exit;
         }catch(Exception $exception){ mysqli_rollback($conn); $error=$exception->getMessage(); }
     }

@@ -242,17 +242,6 @@ require_once '../includes/sidebar.php';
                 </div>
                 <?php } ?>
 
-                <?php if($returnable_balance_summary !== ''){ ?>
-                <div class="col-md-8 mt-3">
-
-                    <div class="pt-2">
-                        <strong>Returnable Product Balance:</strong>
-                        <span><?= htmlspecialchars($returnable_balance_summary); ?></span>
-                    </div>
-
-                </div>
-                <?php } ?>
-
                 <div class="col-md-4">
 
                     <label>

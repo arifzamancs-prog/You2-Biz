@@ -170,11 +170,6 @@ require_once '../includes/sidebar.php';
                         <?php while($c=mysqli_fetch_assoc($customers)){ ?>
                             <?php
                             $customer_option_label = $c['customer_name'];
-                            $customer_returnable_summary = customer_returnable_balance_summary_text(
-                                $conn,
-                                $user_id,
-                                (int)$c['id']
-                            );
                             $normalized_customer_phone = preg_replace('/[^0-9]/', '', (string)($c['phone'] ?? ''));
                             if(str_starts_with($normalized_customer_phone, '8801')){
                                 $normalized_customer_phone = '0' . substr($normalized_customer_phone, 3);
@@ -191,8 +186,7 @@ require_once '../includes/sidebar.php';
                                 value="<?= $c['id']; ?>"
                                 <?= $pay_customer_id === (int)$c['id'] ? 'selected' : ''; ?>
                                 data-customer-balance="<?= number_format(customer_signed_balance_total($conn, $user_id, (int)$c['id']), 2, '.', ''); ?>"
-                                data-customer-previous-due="<?= number_format(customer_previous_due_total($conn, $user_id, (int)$c['id']), 2, '.', ''); ?>"
-                                data-customer-returnable-summary="<?= htmlspecialchars($customer_returnable_summary, ENT_QUOTES); ?>">
+                                data-customer-previous-due="<?= number_format(customer_previous_due_total($conn, $user_id, (int)$c['id']), 2, '.', ''); ?>">
 
                                 <?= htmlspecialchars($customer_option_label); ?>
 
@@ -221,18 +215,6 @@ require_once '../includes/sidebar.php';
                         class="form-control"
                         value="BDT 0.00"
                         readonly>
-
-                </div>
-
-                <div
-                    class="col-md-8 mt-3"
-                    id="returnable_balance_div"
-                    style="display:none;">
-
-                    <div class="pt-2">
-                        <strong>Returnable Product Balance:</strong>
-                        <span id="returnable_balance_display"></span>
-                    </div>
 
                 </div>
 
@@ -750,7 +732,6 @@ if($(this).val()=="instant"){
     $("#previous_due_div").hide();
     $("#customer_balance_label").text("Previous Due");
     $("#previous_due_display").val("BDT 0.00");
-    $("#returnable_balance_div").hide();
     $("#returnable_balance_display").text("");
 
     $("#instant_customer_div").show();
@@ -1090,8 +1071,6 @@ function updatePreviousDueDisplay(){
         $("#previous_due_div").hide();
         $("#customer_balance_label").text("Previous Due");
         $("#previous_due_display").val("BDT 0.00");
-        $("#returnable_balance_div").hide();
-        $("#returnable_balance_display").text("");
         if(!paidAmountManuallyChanged){
             $("#paid_amount").val((parseFloat($("#grand_total").val()) || 0).toFixed(2));
         }
@@ -1103,7 +1082,6 @@ function updatePreviousDueDisplay(){
     let customerBalance = parseFloat(selectedOption.data("customer-balance")) || 0;
     let outstandingAmount = customerBalance < 0 ? Math.abs(customerBalance) : 0;
     let previousDue = parseFloat(selectedOption.data("customer-previous-due")) || 0;
-    let returnableSummary = $.trim(String(selectedOption.data("customer-returnable-summary") || ""));
 
     if(customerBalance < 0){
         $("#customer_balance_label").text("Outstanding Amount");
@@ -1117,14 +1095,6 @@ function updatePreviousDueDisplay(){
         $("#customer_balance_label").text("Previous Due");
         $("#previous_due_display").val("BDT 0.00");
         $("#previous_due_div").hide();
-    }
-
-    if(returnableSummary !== ""){
-        $("#returnable_balance_display").text(returnableSummary);
-        $("#returnable_balance_div").show();
-    }else{
-        $("#returnable_balance_display").text("");
-        $("#returnable_balance_div").hide();
     }
 
     if(!paidAmountManuallyChanged){

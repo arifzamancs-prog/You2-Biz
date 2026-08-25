@@ -16,7 +16,7 @@ function ensure_default_product_categories($conn, $user_id)
     }
 
     $categories = [
-        ['General (Non Stock)', 'non_stock'],
+        ['General (Non Stock/Service)', 'non_stock'],
         ['Stock Product', 'stock_product'],
     ];
 
@@ -74,8 +74,15 @@ function ensure_product_category_type_column($conn)
     mysqli_query(
         $conn,
         "UPDATE product_categories
-         SET category_name='General (Non Stock)'
+         SET category_name='General (Non Stock/Service)'
          WHERE category_name='General'"
+    );
+
+    mysqli_query(
+        $conn,
+        "UPDATE product_categories
+         SET category_name='General (Non Stock/Service)'
+         WHERE category_name='General (Non Stock)'"
     );
 
     mysqli_query(
@@ -88,7 +95,7 @@ function ensure_product_category_type_column($conn)
 
 function product_category_type_label($category_type)
 {
-    return $category_type === 'stock_product' ? 'Stock' : 'Non Stock';
+    return $category_type === 'stock_product' ? 'Stock' : 'Non Stock/Service';
 }
 
 function product_category_is_stock($conn, $category_id, $user_id)
@@ -181,7 +188,7 @@ function product_category_is_default($category_name)
 {
     return in_array(
         trim((string)$category_name),
-        ['General (Non Stock)', 'General', 'Stock Product'],
+        ['General (Non Stock/Service)', 'General (Non Stock)', 'General', 'Stock Product'],
         true
     );
 }

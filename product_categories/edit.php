@@ -157,7 +157,7 @@ require_once '../includes/sidebar.php';
                 <label>Category Type</label>
 
                 <select name="category_type" class="form-control" required>
-                    <option value="non_stock" <?= ($category['category_type'] ?? 'non_stock') === 'non_stock' ? 'selected' : ''; ?>>Non Stock</option>
+                    <option value="non_stock" <?= ($category['category_type'] ?? 'non_stock') === 'non_stock' ? 'selected' : ''; ?>>Non Stock/Service</option>
                     <option value="stock_product" <?= ($category['category_type'] ?? '') === 'stock_product' ? 'selected' : ''; ?>>Stock</option>
                 </select>
 

@@ -2,6 +2,11 @@
 
 require_once __DIR__ . '/customer_opening_due_helper.php';
 
+function returnable_product_system_enabled()
+{
+    return false;
+}
+
 function customer_previous_due_total($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
     /*
@@ -260,6 +265,10 @@ function customer_source_invoice_all_payment_total(
 
 function customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    if(!returnable_product_system_enabled()){
+        return [];
+    }
+
     if((int)$customer_id <= 0){
         return [];
     }
@@ -326,6 +335,10 @@ function customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclud
 
 function customer_returnable_balance_summary_text($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    if(!returnable_product_system_enabled()){
+        return '';
+    }
+
     $rows = customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclude_invoice_id);
 
     if(empty($rows)){

@@ -544,7 +544,7 @@ require_once '../includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    <?= $edit_manager ? 'Edit Assistant/Manager' : 'Create Assistant/Manager'; ?>
+                    <?= $edit_manager ? 'Edit Staff Management' : 'Create Staff Management'; ?>
                 </h3>
             </div>
 
@@ -624,7 +624,7 @@ require_once '../includes/sidebar.php';
                         type="submit"
                         class="btn btn-primary">
                         <i class="fas <?= $edit_manager ? 'fa-save' : 'fa-user-plus'; ?>"></i>
-                        <?= $edit_manager ? 'Update Assistant/Manager' : 'Create Assistant/Manager'; ?>
+                        <?= $edit_manager ? 'Update Staff Management' : 'Create Staff Management'; ?>
                     </button>
 
                     <?php if($edit_manager){ ?>
@@ -646,7 +646,7 @@ require_once '../includes/sidebar.php';
         <div class="card">
 
             <div class="card-header">
-                <h3 class="card-title">Assistants / Managers</h3>
+                <h3 class="card-title">Staff Management</h3>
             </div>
 
             <div class="card-body">

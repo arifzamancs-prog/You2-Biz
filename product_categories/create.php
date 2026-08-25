@@ -115,7 +115,7 @@ require_once '../includes/sidebar.php';
                 <label>Category Type</label>
 
                 <select name="category_type" class="form-control" required>
-                    <option value="non_stock">Non Stock</option>
+                    <option value="non_stock">Non Stock/Service</option>
                     <option value="stock_product">Stock</option>
                 </select>
 

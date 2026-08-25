@@ -28,9 +28,5 @@ function ensure_restaurant_tables_table($conn)
 
 function table_system_enabled($conn, $user_id)
 {
-    $stmt = mysqli_prepare($conn, "SELECT table_system_enabled FROM users WHERE id=? LIMIT 1");
-    mysqli_stmt_bind_param($stmt, 'i', $user_id);
-    mysqli_stmt_execute($stmt);
-    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-    return (int)($row['table_system_enabled'] ?? 1) === 1;
+    return false;
 }

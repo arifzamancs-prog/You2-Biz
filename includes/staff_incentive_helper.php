@@ -13,3 +13,8 @@ function ensure_staff_incentives_table($conn)
         INDEX idx_staff_incentives_staff (staff_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
+
+function incentive_system_enabled()
+{
+    return false;
+}

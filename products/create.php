@@ -26,7 +26,7 @@ $sql = "SELECT *
         WHERE user_id=?
         AND status='active'
         ORDER BY
-            CASE WHEN category_name='General (Non Stock)' THEN 0 ELSE 1 END,
+            CASE WHEN category_name IN('General (Non Stock)', 'General (Non Stock/Service)') THEN 0 ELSE 1 END,
             category_name ASC";
 
 $stmt = mysqli_prepare($conn,$sql);
@@ -248,7 +248,7 @@ require_once '../includes/sidebar.php';
                                 <?php
                                 $is_default_non_stock =
                                     !$default_category_selected &&
-                                    ($cat['category_name'] ?? '') === 'General (Non Stock)';
+                                    in_array(($cat['category_name'] ?? ''), ['General (Non Stock)', 'General (Non Stock/Service)'], true);
 
                                 if($is_default_non_stock){
                                     $default_category_selected = true;

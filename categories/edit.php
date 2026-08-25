@@ -2,8 +2,10 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_expense_support_tables($conn, $user_id);
 $id = (int)$_GET['id'];
 
 $sql = "SELECT *
@@ -29,9 +31,17 @@ if(!$category){
     die("Category Not Found");
 }
 
+if(expense_category_is_reserved($category['category_name']) || (int)($category['is_hidden'] ?? 0) === 1){
+    die("Reserved category cannot be edited.");
+}
+
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_name = trim($_POST['category_name']);
+
+    if(expense_category_is_reserved($category_name)){
+        die("Reserved category name cannot be used.");
+    }
 
     $sql = "UPDATE categories
             SET category_name=?

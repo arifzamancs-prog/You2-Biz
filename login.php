@@ -259,7 +259,11 @@ Login - You2 Biz
 
 <style>
     body.auth-page{
-        background:#eef2f7;
+        background:
+            radial-gradient(circle at 15% 20%, rgba(34,197,94,.18), transparent 30%),
+            radial-gradient(circle at 85% 18%, rgba(59,130,246,.18), transparent 34%),
+            radial-gradient(circle at 50% 100%, rgba(14,165,233,.14), transparent 38%),
+            linear-gradient(135deg, #edf4ff 0%, #e4edf8 46%, #d8e5f2 100%);
         min-height:100vh;
     }
 
@@ -272,132 +276,182 @@ Login - You2 Biz
     }
 
     .auth-card{
-        background:#fff;
-        border-radius:14px;
-        box-shadow:0 20px 60px rgba(15,23,42,.16);
+        background:rgba(255,255,255,.9);
+        border:1px solid rgba(255,255,255,.58);
+        border-radius:26px;
+        box-shadow:0 24px 80px rgba(15,23,42,.16);
+        backdrop-filter:blur(18px);
         display:grid;
-        grid-template-columns:1fr 1fr;
-        max-width:980px;
+        grid-template-columns:minmax(280px, .86fr) minmax(0, 1.14fr);
+        max-width:1020px;
         min-height:560px;
         overflow:hidden;
         width:100%;
     }
 
     .auth-panel{
-        background:#17202b;
+        background:
+            linear-gradient(150deg, rgba(8,15,31,.9) 0%, rgba(14,28,54,.82) 36%, rgba(22,101,52,.54) 100%);
+        border-right:1px solid rgba(255,255,255,.12);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
         color:#fff;
         display:flex;
         flex-direction:column;
-        justify-content:space-between;
-        padding:42px;
+        justify-content:center;
+        padding:32px 28px;
+        position:relative;
+        isolation:isolate;
+    }
+
+    .auth-panel::before{
+        background:
+            radial-gradient(circle at 14% 18%, rgba(59,130,246,.42), transparent 26%),
+            radial-gradient(circle at 78% 22%, rgba(255,255,255,.16), transparent 18%),
+            radial-gradient(circle at 82% 82%, rgba(34,197,94,.26), transparent 34%);
+        content:"";
+        inset:0;
+        opacity:.95;
+        position:absolute;
+        z-index:-1;
+    }
+
+    .auth-panel::after{
+        background:
+            linear-gradient(180deg, rgba(255,255,255,.16), transparent 22%, rgba(255,255,255,.05) 100%),
+            linear-gradient(115deg, transparent 0 56%, rgba(255,255,255,.08) 56% 62%, transparent 62% 100%);
+        content:"";
+        inset:1px;
+        border-radius:0;
+        position:absolute;
+        z-index:-1;
     }
 
     .auth-logo{
         align-items:center;
         display:flex;
-        gap:12px;
+        gap:16px;
         font-size:22px;
         font-weight:700;
+        margin-bottom:18px;
     }
 
     .auth-logo-mark{
         align-items:center;
-        background:#2563eb;
-        border-radius:10px;
+        background:rgba(255,255,255,.16);
+        border:1px solid rgba(255,255,255,.2);
+        border-radius:18px;
+        box-shadow:0 12px 30px rgba(15,23,42,.22);
         display:flex;
-        height:42px;
+        height:74px;
         justify-content:center;
-        width:42px;
+        width:74px;
     }
 
     .auth-logo-image{
-        border-radius:10px;
-        height:42px;
+        filter:drop-shadow(0 16px 28px rgba(8,15,31,.28)) saturate(1.08) contrast(1.06);
+        height:112px;
+        mix-blend-mode:multiply;
         object-fit:contain;
-        width:42px;
+        opacity:.96;
+        width:auto;
+        max-width:270px;
+    }
+
+    .auth-logo-title{
+        display:block;
+        filter:drop-shadow(0 8px 18px rgba(8,15,31,.2));
+        font-size:24px;
+        letter-spacing:.01em;
+    }
+
+    .auth-logo--image-only{
+        display:block;
+    }
+
+    .auth-logo--image-only .auth-logo-title{
+        display:none;
+    }
+
+    .auth-logo--image-only .auth-logo-image{
+        display:block;
+        margin-left:-10px;
+    }
+
+    .auth-logo--image-only::before{
+        background:radial-gradient(circle, rgba(255,255,255,.88) 0%, rgba(255,255,255,.44) 42%, transparent 72%);
+        border-radius:999px;
+        content:"";
+        height:180px;
+        left:16px;
+        position:absolute;
+        top:4px;
+        width:180px;
+        z-index:-1;
+    }
+
+    .auth-logo--image-only::after{
+        background:linear-gradient(135deg, rgba(59,130,246,.26), rgba(34,197,94,.14));
+        border:1px solid rgba(255,255,255,.18);
+        border-radius:24px;
+        content:"";
+        inset:-14px -18px -12px -18px;
+        position:absolute;
+        z-index:-2;
+    }
+
+    .auth-logo--image-only{
+        position:relative;
+        padding:14px 18px 10px;
+        width:max-content;
+    }
+
+    .auth-logo--image-only .auth-logo-image,
+    .auth-logo--image-only .auth-logo-mark{
+        position:relative;
+        z-index:1;
     }
 
     .auth-brand-icon{
-        border-radius:10px;
-        height:24px;
+        border-radius:14px;
+        height:42px;
         object-fit:contain;
-        width:24px;
+        opacity:.88;
+        width:42px;
     }
 
     .auth-panel h1{
-        font-size:34px;
+        font-size:29px;
         font-weight:700;
+        letter-spacing:-.02em;
         line-height:1.18;
-        margin:36px 0 14px;
+        margin:18px 0 0;
+        max-width:380px;
     }
 
     .auth-panel p{
-        color:rgba(255,255,255,.72);
-        font-size:15px;
-        line-height:1.7;
+        color:rgba(255,255,255,.74);
+        font-size:14px;
+        line-height:1.55;
         margin:0;
+        max-width:260px;
     }
 
     .auth-points{
         display:grid;
-        gap:12px;
-        margin-top:34px;
+        gap:10px;
+        margin-top:22px;
     }
 
     .auth-point{
         align-items:center;
-        color:rgba(255,255,255,.82);
+        color:rgba(255,255,255,.84);
         display:flex;
         gap:10px;
-        font-size:14px;
+        font-size:13px;
     }
 
     .auth-point i{
-        color:#60a5fa;
-    }
-
-    .auth-support{
-        align-items:center;
-        background:rgba(255,255,255,.08);
-        border:1px solid rgba(255,255,255,.1);
-        border-radius:10px;
-        color:rgba(255,255,255,.9);
-        display:flex;
-        gap:10px;
-        margin-top:24px;
-        padding:12px 14px;
-    }
-
-    .auth-support i{
-        color:#60a5fa;
-    }
-
-    .auth-support span{
-        display:block;
-        font-size:12px;
-        letter-spacing:.04em;
-        text-transform:uppercase;
-    }
-
-    .auth-support strong{
-        display:block;
-        font-size:15px;
-        font-weight:700;
-        margin-top:2px;
-    }
-
-    .auth-support a{
-        color:#fff;
-        display:inline-block;
-        font-size:15px;
-        font-weight:700;
-        margin-top:2px;
-        text-decoration:none;
-    }
-
-    .auth-support a:hover{
-        color:#bfdbfe;
-        text-decoration:underline;
+        color:#7dd3fc;
     }
 
     .auth-form{
@@ -483,34 +537,84 @@ Login - You2 Biz
 
         .auth-shell{
             align-items:flex-start;
-            padding:16px 16px 8px;
+            padding:10px 10px 6px;
         }
 
         .auth-card{
             background:linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
             border:1px solid rgba(37,99,235,.18);
-            border-radius:18px;
-            box-shadow:0 14px 34px rgba(37,99,235,.14);
+            border-radius:16px;
+            box-shadow:0 12px 28px rgba(37,99,235,.14);
             grid-template-columns:1fr;
-            min-height:calc(100vh - 24px);
+            min-height:auto;
             width:100%;
         }
 
         .auth-panel{
-            display:none;
+            display:flex;
+            justify-content:center;
+            min-height:188px;
+            padding:18px 16px 14px;
+        }
+
+        .auth-logo{
+            margin-bottom:12px;
+        }
+
+        .auth-logo--image-only{
+            padding:8px 10px 6px;
+        }
+
+        .auth-logo--image-only::before{
+            height:124px;
+            left:10px;
+            top:0;
+            width:124px;
+        }
+
+        .auth-logo--image-only::after{
+            border-radius:18px;
+            inset:-8px -10px -8px -10px;
+        }
+
+        .auth-logo--image-only .auth-logo-image{
+            height:76px;
+            margin-left:-4px;
+            max-width:180px;
+        }
+
+        .auth-logo-mark{
+            border-radius:14px;
+            height:56px;
+            width:56px;
+        }
+
+        .auth-brand-icon{
+            height:32px;
+            width:32px;
+        }
+
+        .auth-logo-title{
+            font-size:20px;
+        }
+
+        .auth-panel h1{
+            font-size:22px;
+            line-height:1.16;
+            margin-top:10px;
+            max-width:100%;
         }
 
         .auth-form{
             display:flex;
             flex-direction:column;
             justify-content:center;
-            min-height:calc(100vh - 24px);
-            padding:22px 18px 14px;
+            min-height:auto;
+            padding:18px 14px 12px;
         }
 
         .auth-mobile-hero{
-            display:block;
-            margin-bottom:20px;
+            display:none;
         }
 
         .auth-mobile-brand{
@@ -583,13 +687,13 @@ Login - You2 Biz
         }
 
         .auth-form h2{
-            font-size:24px;
+            font-size:22px;
         }
 
         .auth-subtitle{
             color:#475569;
-            font-size:14px;
-            margin-bottom:18px;
+            font-size:13px;
+            margin-bottom:14px;
         }
 
         .form-group label{
@@ -603,7 +707,7 @@ Login - You2 Biz
             background:rgba(255,255,255,.72);
             border-color:rgba(37,99,235,.16);
             color:#0f172a;
-            height:48px;
+            height:44px;
         }
 
         .auth-icon{
@@ -622,8 +726,8 @@ Login - You2 Biz
             background:#2563eb;
             border-color:#2563eb;
             border-radius:12px;
-            height:48px;
-            margin-top:4px;
+            height:44px;
+            margin-top:2px;
         }
 
         .text-center.mt-4{
@@ -645,50 +749,20 @@ Login - You2 Biz
 
         <div class="auth-panel">
             <div>
-                <div class="auth-logo">
                     <?php if($auth_has_custom_logo){ ?>
+                <div class="auth-logo auth-logo--image-only">
 <img src="<?= htmlspecialchars($auth_logo_url); ?>" alt="You2 Biz Logo" class="auth-logo-image">
+                </div>
                     <?php }else{ ?>
+                <div class="auth-logo">
                         <span class="auth-logo-mark">
 <img src="<?= htmlspecialchars($auth_brand_icon_url); ?>" alt="You2 Biz Icon" class="auth-brand-icon">
                         </span>
+<span class="auth-logo-title">You2 Biz</span>
+                </div>
                     <?php } ?>
-<span>You2 Biz</span>
-                </div>
 
-                <h1>Manage business money with clarity.</h1>
-                <p>
-                    Track wallets, invoices, purchases, dues, and approvals from one secure workspace.
-                </p>
-
-                <div class="auth-points">
-                    <div class="auth-point">
-                        <i class="fas fa-check-circle"></i>
-                        <span>Company and manager access</span>
-                    </div>
-                    <div class="auth-point">
-                        <i class="fas fa-check-circle"></i>
-                        <span>Wallet approval workflow</span>
-                    </div>
-                    <div class="auth-point">
-                        <i class="fas fa-check-circle"></i>
-                        <span>Sales, purchases, and reports</span>
-                    </div>
-                </div>
-
-                <div class="auth-support">
-                    <i class="fas fa-headset"></i>
-                    <div>
-                        <span>Customer service</span>
-                        <strong>+8801977592783</strong>
-                        <a
-                            href="https://www.you2technologies.com"
-                            target="_blank"
-                            rel="noopener noreferrer">
-                            www.you2technologies.com
-                        </a>
-                    </div>
-                </div>
+                <h1>Empower your business<br>with smarter financial control !</h1>
             </div>
         </div>
 

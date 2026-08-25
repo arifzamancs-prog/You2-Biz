@@ -4,74 +4,175 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
+require_once '../includes/staff_helper.php';
 
-$user_id = $_SESSION['user_id'];
+function ensure_customer_form_columns($conn)
+{
+    $customer_code_column = mysqli_query($conn, "SHOW COLUMNS FROM customers LIKE 'customer_code'");
+    if($customer_code_column && mysqli_num_rows($customer_code_column) === 0){
+        mysqli_query($conn, "ALTER TABLE customers ADD COLUMN customer_code VARCHAR(60) NULL AFTER user_id");
+    }
+
+    $ref_staff_column = mysqli_query($conn, "SHOW COLUMNS FROM customers LIKE 'ref_staff_id'");
+    if($ref_staff_column && mysqli_num_rows($ref_staff_column) === 0){
+        mysqli_query($conn, "ALTER TABLE customers ADD COLUMN ref_staff_id BIGINT UNSIGNED NULL AFTER customer_name");
+        mysqli_query($conn, "ALTER TABLE customers ADD INDEX idx_customers_ref_staff (ref_staff_id)");
+    }
+}
+
+$user_id = (int)$_SESSION['user_id'];
+ensure_staff_table($conn);
+ensure_customer_form_columns($conn);
 
 $message = '';
+$customer_code = trim($_POST['customer_code'] ?? '');
+$customer_name = trim($_POST['customer_name'] ?? '');
+$ref_staff_id = (int)($_POST['ref_staff_id'] ?? 0);
+$phone = trim($_POST['phone'] ?? '');
+$email = trim($_POST['email'] ?? '');
+$address = trim($_POST['address'] ?? '');
+$status = $_POST['status'] ?? 'active';
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
-    $customer_name = trim($_POST['customer_name']);
-    $phone         = trim($_POST['phone']);
-    $email         = trim($_POST['email']);
-    $address       = trim($_POST['address']);
-    $status        = $_POST['status'];
     $duplicate_message = '';
+
+    $customer_code = trim((string)$_POST['customer_code']);
+    $customer_name = trim((string)$_POST['customer_name']);
+    $ref_staff_id = (int)($_POST['ref_staff_id'] ?? 0);
+    $phone = trim((string)$_POST['phone']);
+    $email = trim((string)$_POST['email']);
+    $address = trim((string)$_POST['address']);
+    $status = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
 
     $customer_name = normalize_person_name($customer_name);
     $phone = normalize_phone_input($phone);
     $email = normalize_email_input($email);
 
-    if(($message = validate_person_name($customer_name, 'Customer name')) !== ''){
-    }elseif(($message = validate_phone_input($phone, 'Phone')) !== ''){
-    }elseif(($message = validate_email_input($email, 'Email')) !== ''){
-    }elseif(
-        contact_has_company_user_conflict($conn, 'phone', $phone, $user_id, $duplicate_message) ||
-        contact_has_company_user_conflict($conn, 'email', $email, $user_id, $duplicate_message) ||
-        contact_has_duplicate_in_table($conn, 'customers', 'Customer', 'phone', $phone, 0, $duplicate_message, $user_id) ||
-        contact_has_duplicate_in_table($conn, 'customers', 'Customer', 'email', $email, 0, $duplicate_message, $user_id)
+    if($customer_code === ''){
+        $message = 'Customer ID is required.';
+    } elseif(($message = validate_person_name($customer_name, 'Customer name')) !== ''){
+    } elseif(($message = validate_phone_input($phone, 'Phone')) !== ''){
+    } elseif(($message = validate_email_input($email, 'Email')) !== ''){
+    } elseif($ref_staff_id > 0) {
+        $staff_stmt = mysqli_prepare($conn, "SELECT id FROM staff WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($staff_stmt, "ii", $ref_staff_id, $user_id);
+        mysqli_stmt_execute($staff_stmt);
+        $staff_result = mysqli_stmt_get_result($staff_stmt);
+        if(!$staff_result || mysqli_num_rows($staff_result) === 0){
+            $message = 'Selected Ref. Name is not valid.';
+        }
+    }
+
+    if(
+        $message === '' &&
+        (
+            contact_has_company_user_conflict($conn, 'phone', $phone, $user_id, $duplicate_message) ||
+            contact_has_company_user_conflict($conn, 'email', $email, $user_id, $duplicate_message) ||
+            contact_has_duplicate_in_table($conn, 'customers', 'Customer', 'phone', $phone, 0, $duplicate_message, $user_id) ||
+            contact_has_duplicate_in_table($conn, 'customers', 'Customer', 'email', $email, 0, $duplicate_message, $user_id)
+        )
     ){
         $message = $duplicate_message;
-    }else{
-
-    $sql = "INSERT INTO customers
-            (
-                user_id,
-                customer_name,
-                phone,
-                email,
-                address,
-                status
-            )
-            VALUES
-            (
-                ?,?,?,?,?,?
-            )";
-
-    $stmt = mysqli_prepare($conn,$sql);
-
-    mysqli_stmt_bind_param(
-        $stmt,
-        "isssss",
-        $user_id,
-        $customer_name,
-        $phone,
-        $email,
-        $address,
-        $status
-    );
-
-    if(mysqli_stmt_execute($stmt)){
-
-        header("Location: index.php");
-        exit;
-
-    }else{
-
-        $message = "Failed To Save Customer";
     }
+
+    if($message === ''){
+        $code_stmt = mysqli_prepare(
+            $conn,
+            "SELECT id
+             FROM customers
+             WHERE user_id=?
+             AND customer_code=?
+             LIMIT 1"
+        );
+        mysqli_stmt_bind_param($code_stmt, "is", $user_id, $customer_code);
+        mysqli_stmt_execute($code_stmt);
+        $code_result = mysqli_stmt_get_result($code_stmt);
+
+        if($code_result && mysqli_num_rows($code_result) > 0){
+            $message = 'Customer ID already exists.';
+        }
+    }
+
+    if($message === ''){
+
+        $sql = "INSERT INTO customers
+                (
+                    user_id,
+                    customer_code,
+                    customer_name,
+                    ref_staff_id,
+                    phone,
+                    email,
+                    address,
+                    status
+                )
+                VALUES
+                (
+                    ?,?,?,?,?,?,?,?
+                )";
+
+        $stmt = mysqli_prepare($conn,$sql);
+
+        mysqli_stmt_bind_param(
+            $stmt,
+            "ississss",
+            $user_id,
+            $customer_code,
+            $customer_name,
+            $ref_staff_id,
+            $phone,
+            $email,
+            $address,
+            $status
+        );
+
+        if(mysqli_stmt_execute($stmt)){
+
+            header("Location: index.php");
+            exit;
+
+        }else{
+
+            $message = "Failed To Save Customer";
+        }
     }
 }
+
+$staff_options_stmt = mysqli_prepare(
+    $conn,
+    "SELECT id, name
+     FROM staff
+     WHERE user_id=?
+     AND status='active'
+     ORDER BY name ASC"
+);
+mysqli_stmt_bind_param($staff_options_stmt, "i", $user_id);
+mysqli_stmt_execute($staff_options_stmt);
+$staff_options = mysqli_stmt_get_result($staff_options_stmt);
+
+$customer_codes = [];
+$customer_codes_stmt = mysqli_prepare(
+    $conn,
+    "SELECT customer_code
+     FROM customers
+     WHERE user_id=?
+     AND customer_code IS NOT NULL
+     AND TRIM(customer_code) <> ''
+     ORDER BY id DESC"
+);
+mysqli_stmt_bind_param($customer_codes_stmt, "i", $user_id);
+mysqli_stmt_execute($customer_codes_stmt);
+$customer_codes_result = mysqli_stmt_get_result($customer_codes_stmt);
+
+while($customer_codes_result && $code_row = mysqli_fetch_assoc($customer_codes_result)){
+    $code = trim((string)($code_row['customer_code'] ?? ''));
+    if($code !== ''){
+        $customer_codes[] = $code;
+    }
+}
+
+$recent_customer_codes = array_slice($customer_codes, 0, 8);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -84,9 +185,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header">
 
         <h3 class="card-title">
-
             Add Customer
-
         </h3>
 
     </div>
@@ -96,14 +195,45 @@ require_once '../includes/sidebar.php';
         <?php if($message){ ?>
 
             <div class="alert alert-danger">
-
                 <?= htmlspecialchars($message); ?>
-
             </div>
 
         <?php } ?>
 
         <form method="post">
+
+            <div class="form-group">
+
+                <label>
+                    Customer ID
+                </label>
+
+                <input
+                    type="text"
+                    name="customer_code"
+                    id="customer_code"
+                    class="form-control"
+                    value="<?= htmlspecialchars($customer_code); ?>"
+                    required>
+
+                <?php if($_SERVER['REQUEST_METHOD'] === 'POST' && trim($customer_code) === ''){ ?>
+                    <small class="text-danger">Customer ID is required.</small>
+                <?php } ?>
+
+                <small class="text-muted d-block mt-2">
+                    Previous Customer IDs:
+                    <?= !empty($recent_customer_codes)
+                        ? htmlspecialchars(implode(', ', $recent_customer_codes))
+                        : 'No customer ID created yet.'; ?>
+                </small>
+
+                <small
+                    id="customer_code_status"
+                    class="d-block mt-1 text-muted">
+                    Type a new Customer ID to check availability.
+                </small>
+
+            </div>
 
             <div class="form-group">
 
@@ -117,7 +247,34 @@ require_once '../includes/sidebar.php';
                     class="form-control"
                     minlength="2"
                     pattern=".*[A-Za-z].*"
+                    value="<?= htmlspecialchars($customer_name); ?>"
                     required>
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Ref. Name
+                </label>
+
+                <select
+                    name="ref_staff_id"
+                    class="form-control">
+
+                    <option value="">
+                        Select General Staff
+                    </option>
+
+                    <?php while($staff = mysqli_fetch_assoc($staff_options)){ ?>
+                        <option
+                            value="<?= (int)$staff['id']; ?>"
+                            <?= $ref_staff_id === (int)$staff['id'] ? 'selected' : ''; ?>>
+                            <?= htmlspecialchars($staff['name']); ?>
+                        </option>
+                    <?php } ?>
+
+                </select>
 
             </div>
 
@@ -131,7 +288,8 @@ require_once '../includes/sidebar.php';
                     type="text"
                     name="phone"
                     class="form-control"
-                    inputmode="numeric">
+                    inputmode="numeric"
+                    value="<?= htmlspecialchars($phone); ?>">
 
             </div>
 
@@ -144,7 +302,8 @@ require_once '../includes/sidebar.php';
                 <input
                     type="email"
                     name="email"
-                    class="form-control">
+                    class="form-control"
+                    value="<?= htmlspecialchars($email); ?>">
 
             </div>
 
@@ -157,7 +316,7 @@ require_once '../includes/sidebar.php';
                 <textarea
                     name="address"
                     class="form-control"
-                    rows="3"></textarea>
+                    rows="3"><?= htmlspecialchars($address); ?></textarea>
 
             </div>
 
@@ -171,11 +330,11 @@ require_once '../includes/sidebar.php';
                     name="status"
                     class="form-control">
 
-                    <option value="active">
+                    <option value="active" <?= $status === 'active' ? 'selected' : ''; ?>>
                         Active
                     </option>
 
-                    <option value="inactive">
+                    <option value="inactive" <?= $status === 'inactive' ? 'selected' : ''; ?>>
                         Inactive
                     </option>
 
@@ -208,5 +367,44 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
+$page_script = '
+<script>
+$(function(){
+    const existingCustomerCodes = ' . json_encode(array_values(array_map('strtolower', $customer_codes))) . ';
+    const $customerCode = $("#customer_code");
+    const $customerCodeStatus = $("#customer_code_status");
+
+    function updateCustomerCodeStatus(){
+        const rawValue = $.trim(String($customerCode.val() || ""));
+        const normalizedValue = rawValue.toLowerCase();
+
+        if(rawValue === ""){
+            $customerCodeStatus
+                .text("Customer ID is required.")
+                .removeClass("text-success text-muted")
+                .addClass("text-danger");
+            return;
+        }
+
+        if(existingCustomerCodes.includes(normalizedValue)){
+            $customerCodeStatus
+                .text("This Customer ID already exists.")
+                .removeClass("text-success text-muted")
+                .addClass("text-danger");
+            return;
+        }
+
+        $customerCodeStatus
+            .text("Customer ID is available.")
+            .removeClass("text-danger text-muted")
+            .addClass("text-success");
+    }
+
+    $customerCode.on("input blur", updateCustomerCodeStatus);
+    updateCustomerCodeStatus();
+});
+</script>
+';
+
 require_once '../includes/footer.php';
 ?>

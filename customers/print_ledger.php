@@ -340,40 +340,6 @@ foreach($ledger as $row){
 
 $ledger = $running_ledger;
 
-/* Returnable Products */
-
-$returnable_sql = "SELECT
-                       i.invoice_date,
-                       p.product_name,
-                       SUM(CASE WHEN ii.quantity > 0 THEN ii.quantity ELSE 0 END) AS given_qty,
-                       SUM(CASE WHEN ii.quantity < 0 THEN ABS(ii.quantity) ELSE 0 END) AS returned_qty
-                   FROM invoice_items ii
-                   INNER JOIN invoices i
-                       ON i.id = ii.invoice_id
-                   LEFT JOIN products p
-                       ON p.id = ii.product_id
-                   WHERE i.customer_id=?
-                   AND i.user_id=?
-                   AND i.accounting_status='posted'
-                   AND ii.unit_price = 0
-                   GROUP BY i.invoice_date, ii.product_id, p.product_name
-                   HAVING given_qty > 0 OR returned_qty > 0
-                   ORDER BY i.invoice_date ASC, p.product_name ASC";
-
-$returnable_stmt = mysqli_prepare($conn, $returnable_sql);
-
-mysqli_stmt_bind_param(
-    $returnable_stmt,
-    "ii",
-    $customer_id,
-    $user_id
-);
-
-mysqli_stmt_execute($returnable_stmt);
-
-$returnable_products =
-    mysqli_stmt_get_result($returnable_stmt);
-
 $custom_printing = is_custom_printing($conn);
 $custom_size = current_printing_custom_size($conn);
 $custom_top_margin = current_printing_custom_top_margin($conn);
@@ -575,40 +541,6 @@ th{
         </tbody>
     </table>
 
-    <h3>Returnable Products</h3>
-
-    <table>
-        <thead>
-        <tr>
-            <th>Date</th>
-            <th>Product</th>
-            <th class="text-right">Given</th>
-            <th class="text-right">Return</th>
-            <th class="text-right">Left</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php if(mysqli_num_rows($returnable_products) === 0){ ?>
-            <tr>
-                <td colspan="5" class="text-center muted">No returnable products found.</td>
-            </tr>
-        <?php } ?>
-        <?php while($product = mysqli_fetch_assoc($returnable_products)){ ?>
-            <?php
-            $given_qty = (float)$product['given_qty'];
-            $returned_qty = (float)$product['returned_qty'];
-            $remaining_qty = $given_qty - $returned_qty;
-            ?>
-            <tr>
-                <td><?= htmlspecialchars(app_datetime($product['invoice_date'])); ?></td>
-                <td><?= htmlspecialchars($product['product_name'] ?? 'Product'); ?></td>
-                <td class="text-right"><?= number_format($given_qty,0); ?></td>
-                <td class="text-right"><?= number_format($returned_qty,0); ?></td>
-                <td class="text-right"><?= number_format($remaining_qty,0); ?></td>
-            </tr>
-        <?php } ?>
-        </tbody>
-    </table>
 </main>
 
 </body>
@@ -934,64 +866,6 @@ foreach($ledger as $row){
 <td class="text-right">
 <?php echo number_format($balance,2); ?>
 </td>
-
-</tr>
-
-<?php } ?>
-
-</tbody>
-
-</table>
-
-<h3>
-Returnable Products
-</h3>
-
-<table>
-
-<thead>
-
-<tr>
-
-<th>Date</th>
-<th>Product</th>
-<th>Given</th>
-<th>Returned</th>
-<th>Remaining</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-<?php if(mysqli_num_rows($returnable_products) === 0){ ?>
-
-<tr>
-
-<td colspan="5" class="text-center muted">
-No returnable products found.
-</td>
-
-</tr>
-
-<?php } ?>
-
-<?php while($product = mysqli_fetch_assoc($returnable_products)){ ?>
-
-<?php
-$given_qty = (float)$product['given_qty'];
-$returned_qty = (float)$product['returned_qty'];
-$remaining_qty = $given_qty - $returned_qty;
-?>
-
-<tr>
-
-<td><?= htmlspecialchars(app_datetime($product['invoice_date'])); ?></td>
-<td><?= htmlspecialchars($product['product_name'] ?? 'Product'); ?></td>
-<td class="text-right"><?= number_format($given_qty,0); ?></td>
-<td class="text-right"><?= number_format($returned_qty,0); ?></td>
-<td class="text-right"><?= number_format($remaining_qty,0); ?></td>
 
 </tr>
 

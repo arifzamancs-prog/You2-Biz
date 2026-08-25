@@ -417,40 +417,6 @@ foreach($ledger as $row){
 
 $ledger = array_reverse($running_ledger);
 
-/* Returnable Products */
-
-$returnable_sql = "SELECT
-                       i.invoice_date,
-                       p.product_name,
-                       SUM(CASE WHEN ii.quantity > 0 THEN ii.quantity ELSE 0 END) AS given_qty,
-                       SUM(CASE WHEN ii.quantity < 0 THEN ABS(ii.quantity) ELSE 0 END) AS returned_qty
-                   FROM invoice_items ii
-                   INNER JOIN invoices i
-                       ON i.id = ii.invoice_id
-                   LEFT JOIN products p
-                       ON p.id = ii.product_id
-                   WHERE i.customer_id=?
-                   AND i.user_id=?
-                   AND i.accounting_status='posted'
-                   AND ii.unit_price = 0
-                   GROUP BY i.invoice_date, ii.product_id, p.product_name
-                   HAVING given_qty > 0 OR returned_qty > 0
-                   ORDER BY i.invoice_date ASC, p.product_name ASC";
-
-$returnable_stmt = mysqli_prepare($conn, $returnable_sql);
-
-mysqli_stmt_bind_param(
-    $returnable_stmt,
-    "ii",
-    $customer_id,
-    $user_id
-);
-
-mysqli_stmt_execute($returnable_stmt);
-
-$returnable_products =
-    mysqli_stmt_get_result($returnable_stmt);
-
 ?>
 
 <section class="content-header">
@@ -746,58 +712,6 @@ Total
 
 </table>
 
-<hr>
-
-<h4>
-    Returnable Products
-</h4>
-
-<table
-id="returnableTable"
-class="table table-bordered table-striped">
-
-<thead>
-
-<tr>
-
-<th>Date</th>
-<th>Product</th>
-<th>Given</th>
-<th>Returned</th>
-<th>Remaining</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-<?php while($product = mysqli_fetch_assoc($returnable_products)){ ?>
-
-<?php
-$given_qty = (float)$product['given_qty'];
-$returned_qty = (float)$product['returned_qty'];
-$remaining_qty = $given_qty - $returned_qty;
-?>
-
-<tr>
-
-<td><?= htmlspecialchars(app_date($product['invoice_date'])); ?></td>
-<td><?= htmlspecialchars($product['product_name'] ?? 'Product'); ?></td>
-<td><?= number_format($given_qty,0); ?></td>
-<td><?= number_format($returned_qty,0); ?></td>
-<td>
-    <strong><?= number_format($remaining_qty,0); ?></strong>
-</td>
-
-</tr>
-
-<?php } ?>
-
-</tbody>
-
-</table>
-
 </div>
 
 </div>
@@ -807,19 +721,5 @@ $remaining_qty = $given_qty - $returned_qty;
 </section>
 
 <?php
-$page_script = '
-<script>
-$(function(){
-    if($("#returnableTable").length){
-        $("#returnableTable").DataTable({
-            responsive: false,
-            autoWidth: false,
-            order: [[0, "desc"]]
-        });
-    }
-});
-</script>
-';
-
 require_once '../includes/footer.php';
 ?>

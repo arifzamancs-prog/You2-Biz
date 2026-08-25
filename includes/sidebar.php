@@ -3,6 +3,7 @@
 require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/restaurant_table_helper.php';
+require_once __DIR__ . '/staff_incentive_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -444,16 +445,18 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ]
                     );
 
-                    sidebar_tree(
-                        'Incentive Management',
-                        'fas fa-percent',
-                        [
+                    if(incentive_system_enabled()){
+                        sidebar_tree(
+                            'Incentive Management',
+                            'fas fa-percent',
                             [
-                                'href' => app_path('incentive_management/index.php'),
-                                'label' => 'Staff Commission',
-                            ],
-                        ]
-                    );
+                                [
+                                    'href' => app_path('incentive_management/index.php'),
+                                    'label' => 'Staff Commission',
+                                ],
+                            ]
+                        );
+                    }
                 }
 
                 sidebar_tree(
@@ -486,6 +489,72 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         [
                             'href' => app_path('suppliers/supplier_payment_history.php'),
                             'label' => 'Payment History',
+                        ],
+                    ]
+                );
+
+                sidebar_tree(
+                    'Project & Package',
+                    'fas fa-project-diagram',
+                    [
+                        [
+                            'href' => app_path('project_package/projects.php'),
+                            'label' => 'Project List',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('project_package/packages.php'),
+                            'label' => 'Package List',
+                            'icon' => 'far fa-circle',
+                        ],
+                    ]
+                );
+
+                sidebar_tree(
+                    'Lead Management',
+                    'fas fa-filter',
+                    [
+                        [
+                            'href' => app_path('lead_management/index.php?filter=lead'),
+                            'label' => 'New Lead',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('lead_management/index.php?filter=successful'),
+                            'label' => 'Successful List',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('lead_management/index.php?filter=customer'),
+                            'label' => 'Convert to Customer List',
+                            'icon' => 'far fa-circle',
+                        ],
+                    ]
+                );
+
+                sidebar_tree(
+                    'Create Invoice',
+                    'fas fa-file-invoice',
+                    [
+                        [
+                            'href' => app_path('create_invoice/index.php?type=booking'),
+                            'label' => 'Booking',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('create_invoice/index.php?type=installment'),
+                            'label' => 'Installment',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('create_invoice/index.php?type=cancel_return'),
+                            'label' => 'Cancel/Return',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('create_invoice/index.php?type=profit_return'),
+                            'label' => 'Profit Return',
+                            'icon' => 'far fa-circle',
                         ],
                     ]
                 );
@@ -537,7 +606,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 <?php if($sidebar_can_see_admin){ ?>
                     <li class="nav-header">ADMIN</li>
 
-                    <?php sidebar_item(app_path('user_management/index.php'), 'User Management', 'fas fa-user-cog'); ?>
+                    <?php sidebar_item(app_path('user_management/index.php'), 'Staff Management', 'fas fa-user-cog'); ?>
                     <?php sidebar_item(app_path('user_management/product_management.php'), 'Product Management', 'fas fa-box-open'); ?>
                     <?php sidebar_item(app_path('user_management/invoice_charges.php'), 'Invoice Charges', 'fas fa-percentage'); ?>
                     <?php sidebar_item(app_path('user_management/printing_option.php'), 'Printing Option', 'fas fa-print'); ?>

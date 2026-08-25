@@ -2,12 +2,15 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_expense_support_tables($conn, $user_id);
 
 $sql = "SELECT *
         FROM categories
         WHERE user_id=?
+        AND COALESCE(is_hidden, 0)=0
         ORDER BY id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);

@@ -17,10 +17,9 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
     $reference = '';
     $note      = trim($_POST['note']);
     $created_by = $_SESSION['login_user_id'] ?? $_SESSION['user_id'];
-    $needs_approval = is_manager_user() || ((int)$created_by !== (int)$user_id);
-    $approval_status = $needs_approval ? 'pending' : 'approved';
-    $approved_by = $needs_approval ? null : $created_by;
-    $approved_at = $needs_approval ? null : date('Y-m-d H:i:s');
+    $approval_status = 'approved';
+    $approved_by = (int)$created_by;
+    $approved_at = date('Y-m-d H:i:s');
 
     $txn_no = generate_short_unique_txn_no($conn, 'TXN', 'money_ins');
 

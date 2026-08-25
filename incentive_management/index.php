@@ -6,6 +6,7 @@ require_once '../includes/staff_incentive_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 
 require_admin_user();
+if (!incentive_system_enabled()) { header('Location: ../dashboard.php'); exit; }
 ensure_staff_table($conn);
 ensure_staff_incentives_table($conn);
 $user_id = (int)$_SESSION['user_id'];

@@ -2,18 +2,24 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_expense_support_tables($conn, $user_id);
 
 $sql = "SELECT
             e.*,
             w.wallet_name,
-            c.category_name
+            c.category_name,
+            s.name AS staff_name,
+            s.staff_code
         FROM expenses e
         LEFT JOIN wallets w
         ON w.id = e.wallet_id
         LEFT JOIN categories c
         ON c.id = e.category_id
+        LEFT JOIN staff s
+        ON s.id = e.staff_id
         WHERE e.user_id=?
         ORDER BY e.id DESC";
 
@@ -69,6 +75,7 @@ require_once '../includes/sidebar.php';
                 <th>Date</th>
                 <th>Wallet</th>
                 <th>Category</th>
+                <th>For</th>
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Note</th>
@@ -95,6 +102,14 @@ require_once '../includes/sidebar.php';
 
                 <td>
                     <?= htmlspecialchars($row['category_name']); ?>
+                </td>
+
+                <td>
+                    <?=
+                        !empty($row['staff_name'])
+                            ? htmlspecialchars($row['staff_name']) . (!empty($row['staff_code']) ? ' (' . htmlspecialchars($row['staff_code']) . ')' : '')
+                            : '-';
+                    ?>
                 </td>
 
                 <td>
