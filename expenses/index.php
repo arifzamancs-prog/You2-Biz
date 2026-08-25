@@ -75,7 +75,7 @@ require_once '../includes/sidebar.php';
                 <th>Date</th>
                 <th>Wallet</th>
                 <th>Category</th>
-                <th>For</th>
+                <th>Receiver</th>
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Note</th>

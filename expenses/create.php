@@ -311,7 +311,7 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
 
-                <label>For</label>
+                <label>Receiver</label>
 
                 <select
                     name="staff_id"

@@ -175,7 +175,7 @@ require_once '../includes/sidebar.php';
             </div>
 
             <div class="form-group">
-                <label>For</label>
+                <label>Receiver</label>
                 <select name="staff_id" class="form-control">
                     <option value="">Select Staff</option>
                     <?php while($staff = mysqli_fetch_assoc($staffs)){ ?>
