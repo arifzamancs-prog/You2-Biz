@@ -136,6 +136,8 @@ $sidebar_role = is_super_admin_user()
         ? (is_agent_user() ? 'Assistant Access' : 'Manager Access')
         : 'Administrator');
 $current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$current_query = [];
+parse_str((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $current_query);
 $sidebar_is_super_admin = is_super_admin_user();
 $sidebar_is_agent_only = is_agent_user() && !$sidebar_is_super_admin;
 $sidebar_can_see_reports = $sidebar_is_super_admin || !is_agent_user();
@@ -152,9 +154,23 @@ if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
 
 function sidebar_is_active($href)
 {
-    global $current_path;
+    global $current_path, $current_query;
 
-    return $current_path === $href;
+    $href_path = parse_url($href, PHP_URL_PATH);
+    if($current_path !== $href_path){
+        return false;
+    }
+
+    $href_query = [];
+    parse_str((string)parse_url($href, PHP_URL_QUERY), $href_query);
+
+    foreach($href_query as $key => $value){
+        if(!array_key_exists($key, $current_query) || (string)$current_query[$key] !== (string)$value){
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function sidebar_group_active($items)
@@ -302,7 +318,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                 <?php sidebar_item(app_path('dashboard.php'), 'Dashboard', 'fas fa-home'); ?>
 
-                <?php sidebar_tree('Staff', 'fas fa-user-tie', [
+                <?php sidebar_tree('Staff Manage', 'fas fa-user-tie', [
                     ['href' => app_path('staff/index.php'), 'label' => 'Staff List'],
                     ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
                 ]); ?>
@@ -349,6 +365,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                 <?php if($sidebar_is_agent_only){ ?>
                     <?php
+                    if(sales_module_enabled()){
                     sidebar_tree(
                         'Sales',
                         'fas fa-file-invoice',
@@ -363,10 +380,12 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                             ],
                         ]
                     );
+                    }
                     ?>
                 <?php }else{ ?>
 
                 <?php
+                if(sales_module_enabled()){
                 sidebar_tree(
                     'Sales',
                     'fas fa-file-invoice',
@@ -392,6 +411,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     []
                     )
                 );
+                }
 
                 sidebar_tree(
                     'Wallets',
@@ -427,11 +447,13 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     ]])
                 );
 
-                sidebar_tree(
-                    'Products',
-                    'fas fa-boxes',
-                    $sidebar_product_items
-                );
+                if(products_module_enabled()){
+                    sidebar_tree(
+                        'Products',
+                        'fas fa-boxes',
+                        $sidebar_product_items
+                    );
+                }
 
                 if($sidebar_table_system_enabled){
                     sidebar_tree(
@@ -460,7 +482,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 }
 
                 sidebar_tree(
-                    'Reg. Customer',
+                    'Customer Manage',
                     'fas fa-users',
                     [
                         [
@@ -499,7 +521,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     [
                         [
                             'href' => app_path('project_package/projects.php'),
-                            'label' => 'Project List',
+                            'label' => 'Project',
                             'icon' => 'far fa-circle',
                         ],
                         [
@@ -521,7 +543,12 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ],
                         [
                             'href' => app_path('lead_management/index.php?filter=successful'),
-                            'label' => 'Successful List',
+                            'label' => 'Qualified List',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('lead_management/index.php?filter=not_qualified'),
+                            'label' => 'Not Qualified List',
                             'icon' => 'far fa-circle',
                         ],
                         [
@@ -533,27 +560,22 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 );
 
                 sidebar_tree(
-                    'Create Invoice',
+                    'Sales',
                     'fas fa-file-invoice',
                     [
                         [
-                            'href' => app_path('create_invoice/index.php?type=booking'),
-                            'label' => 'Booking',
+                            'href' => app_path('create_invoice/index.php'),
+                            'label' => 'Create Invoice',
                             'icon' => 'far fa-circle',
                         ],
                         [
-                            'href' => app_path('create_invoice/index.php?type=installment'),
-                            'label' => 'Installment',
+                            'href' => app_path('create_invoice/invoice_list.php'),
+                            'label' => 'Invoice List',
                             'icon' => 'far fa-circle',
                         ],
                         [
-                            'href' => app_path('create_invoice/index.php?type=cancel_return'),
-                            'label' => 'Cancel/Return',
-                            'icon' => 'far fa-circle',
-                        ],
-                        [
-                            'href' => app_path('create_invoice/index.php?type=profit_return'),
-                            'label' => 'Profit Return',
+                            'href' => app_path('create_invoice/manage_invoice_types.php'),
+                            'label' => 'Manage Invoice Type',
                             'icon' => 'far fa-circle',
                         ],
                     ]
@@ -606,8 +628,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 <?php if($sidebar_can_see_admin){ ?>
                     <li class="nav-header">ADMIN</li>
 
-                    <?php sidebar_item(app_path('user_management/index.php'), 'Staff Management', 'fas fa-user-cog'); ?>
-                    <?php sidebar_item(app_path('user_management/product_management.php'), 'Product Management', 'fas fa-box-open'); ?>
+                    <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
                     <?php sidebar_item(app_path('user_management/invoice_charges.php'), 'Invoice Charges', 'fas fa-percentage'); ?>
                     <?php sidebar_item(app_path('user_management/printing_option.php'), 'Printing Option', 'fas fa-print'); ?>
                     <?php
@@ -673,6 +694,33 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
     </div>
 
 </aside>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const navigation = document.querySelector('.nav-sidebar');
+    if (!navigation) return;
+
+    const operationsHeader = Array.from(navigation.children).find(function (item) {
+        return item.classList.contains('nav-header') && item.textContent.trim() === 'OPERATIONS';
+    });
+    if (!operationsHeader) return;
+
+    const orderedLabels = ['Sales', 'Wallets', 'Project & Package', 'Customer Manage', 'Lead Management', 'Suppliers'];
+    let previousItem = operationsHeader;
+
+    orderedLabels.forEach(function (label) {
+        const item = Array.from(navigation.children).find(function (candidate) {
+            const link = candidate.querySelector(':scope > .nav-link > p');
+            return link && link.textContent.trim() === label;
+        });
+
+        if (item) {
+            previousItem.insertAdjacentElement('afterend', item);
+            previousItem = item;
+        }
+    });
+});
+</script>
 
 <div class="content-wrapper">
 

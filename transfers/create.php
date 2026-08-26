@@ -49,7 +49,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
     $to_wallet_id   = (int)$_POST['to_wallet_id'];
     $txn_date       = date('Y-m-d');
     $amount         = (float)$_POST['amount'];
-    $note           = trim($_POST['note']);
+    $note           = trim($_POST['note'] ?? '') ?: 'General';
     $created_by = $_SESSION['login_user_id'] ?? $_SESSION['user_id'];
     $needs_approval = is_manager_user() || ((int)$created_by !== (int)$user_id);
     $approval_status = $needs_approval ? 'pending' : 'approved';

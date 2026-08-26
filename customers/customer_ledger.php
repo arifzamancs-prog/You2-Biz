@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
+require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -11,6 +12,7 @@ require_once '../includes/sidebar.php';
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
+ensure_booking_invoice_table($conn);
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -263,6 +265,54 @@ while(
 
     ];
 
+}
+
+/* Confirmed Invoice Wallet Transactions */
+
+$wallet_transaction_sql = "SELECT
+        t.id,
+        t.txn_no,
+        t.txn_date,
+        t.transaction_type,
+        t.amount,
+        t.note,
+        bi.invoice_no,
+        w.wallet_name
+    FROM transactions t
+    INNER JOIN booking_invoices bi
+        ON bi.id=t.reference_id
+        AND bi.user_id=t.user_id
+    LEFT JOIN wallets w
+        ON w.id=t.wallet_id
+        AND w.user_id=t.user_id
+    WHERE bi.customer_id=?
+    AND bi.user_id=?
+    AND bi.status='confirmed'
+    AND t.transaction_type IN ('invoice_income', 'invoice_expense')
+    ORDER BY t.txn_date, t.id";
+
+$wallet_transaction_stmt = mysqli_prepare($conn, $wallet_transaction_sql);
+mysqli_stmt_bind_param($wallet_transaction_stmt, 'ii', $customer_id, $user_id);
+mysqli_stmt_execute($wallet_transaction_stmt);
+$wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
+
+while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
+    $is_refund = $row['transaction_type'] === 'invoice_expense';
+    $reference = trim((string)$row['invoice_no']);
+    if(($row['wallet_name'] ?? '') !== ''){
+        $reference .= ' • ' . $row['wallet_name'];
+    }
+
+    $ledger[] = [
+        'trx_date' => $row['txn_date'],
+        'type' => $is_refund ? 'Wallet Refund' : 'Wallet Received',
+        'reference' => $reference,
+        'invoice_no' => '',
+        'sort_order' => $is_refund ? 3 : 2,
+        'reference_id' => (int)$row['id'],
+        'debit' => $is_refund ? (float)$row['amount'] : 0,
+        'credit' => $is_refund ? 0 : (float)$row['amount'],
+    ];
 }
 
 /* Merge Invoice + Same Invoice Payment */

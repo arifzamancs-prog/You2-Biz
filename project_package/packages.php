@@ -69,21 +69,6 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
 
     <div class="card-body">
 
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <div class="d-flex">
-                    <select class="form-control mr-2" disabled>
-                        <option>All Projects</option>
-                        <?php foreach($projects as $project){ ?>
-                            <option><?= htmlspecialchars($project['project_name']); ?></option>
-                        <?php } ?>
-                    </select>
-                    <button type="button" class="btn btn-primary mr-2 disabled">Filter</button>
-                    <button type="button" class="btn btn-secondary disabled">Reset</button>
-                </div>
-            </div>
-        </div>
-
         <table
             id="example1"
             class="table table-bordered table-striped">
@@ -111,6 +96,7 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                     </tr>
                 <?php else: ?>
                     <?php foreach($packages as $package): ?>
+                        <?php $used = package_has_transactions($conn, $package['id'], $user_id); ?>
                         <tr>
                             <td><?= htmlspecialchars($package['project_name'] ?? '-'); ?></td>
                             <td><?= htmlspecialchars($package['package_name']); ?></td>
@@ -124,8 +110,12 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                             </td>
                             <?php if(manager_can_modify()){ ?>
                                 <td>
-                                    <button type="button" class="btn btn-info btn-sm disabled">Edit</button>
-                                    <button type="button" class="btn btn-danger btn-sm disabled">Delete</button>
+                                    <a href="package_edit.php?id=<?= (int)$package['id']; ?>" class="btn btn-info btn-sm" title="Edit"><i class="fas fa-edit"></i></a>
+                                    <?php if(!$used){ ?>
+                                        <a href="package_delete.php?id=<?= (int)$package['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this package?');"><i class="fas fa-trash"></i></a>
+                                    <?php }else{ ?>
+                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This package has transactions and cannot be deleted"><i class="fas fa-trash"></i></button>
+                                    <?php } ?>
                                 </td>
                             <?php } ?>
                         </tr>

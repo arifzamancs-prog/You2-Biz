@@ -1,6 +1,18 @@
 <?php
 
 const APP_BASE_URL_OVERRIDE = '';
+const SALES_MODULE_ENABLED = false;
+const PRODUCTS_MODULE_ENABLED = false;
+
+function sales_module_enabled()
+{
+    return SALES_MODULE_ENABLED;
+}
+
+function products_module_enabled()
+{
+    return PRODUCTS_MODULE_ENABLED;
+}
 
 function app_root_path()
 {

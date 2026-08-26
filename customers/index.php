@@ -2,13 +2,21 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/customer_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
-$sql = "SELECT *
-        FROM customers
-        WHERE user_id=?
-        ORDER BY id DESC";
+$ref_staff_column = mysqli_query($conn, "SHOW COLUMNS FROM customers LIKE 'ref_staff_id'");
+if($ref_staff_column && mysqli_num_rows($ref_staff_column) === 0){
+    mysqli_query($conn, "ALTER TABLE customers ADD COLUMN ref_staff_id BIGINT UNSIGNED NULL AFTER customer_name");
+    mysqli_query($conn, "ALTER TABLE customers ADD INDEX idx_customers_ref_staff (ref_staff_id)");
+}
+
+$sql = "SELECT c.*, s.name AS ref_staff_name
+        FROM customers c
+        LEFT JOIN staff s ON s.id=c.ref_staff_id AND s.user_id=c.user_id
+        WHERE c.user_id=?
+        ORDER BY c.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);
 
@@ -67,6 +75,7 @@ require_once '../includes/sidebar.php';
             <tr>
 
                 <th>Customer Name</th>
+                <th>Ref</th>
                 <th>Phone</th>
                 <th>Address</th>
                 <th>Email</th>
@@ -79,12 +88,16 @@ require_once '../includes/sidebar.php';
 
             <tbody>
 
-            <?php while($row = mysqli_fetch_assoc($result)){ ?>
+            <?php while($row = mysqli_fetch_assoc($result)){ $used = customer_has_transactions($conn, $row['id'], $user_id); ?>
 
             <tr>
 
                 <td>
                     <?= htmlspecialchars($row['customer_name']); ?>
+                </td>
+
+                <td>
+                    <?= htmlspecialchars($row['ref_staff_name'] ?: '-'); ?>
                 </td>
 
                 <td>
@@ -143,15 +156,27 @@ require_once '../includes/sidebar.php';
 
                     </a>
 
-                    <a
-                        href="delete.php?id=<?= $row['id']; ?>"
-                        class="btn btn-danger btn-sm"
-                        onclick="return confirm('Delete this customer?')"
-                        title="Delete">
+                    <?php if(!$used){ ?>
+                        <a
+                            href="delete.php?id=<?= $row['id']; ?>"
+                            class="btn btn-danger btn-sm"
+                            onclick="return confirm('Delete this customer?')"
+                            title="Delete">
 
-                        <i class="fas fa-trash"></i>
+                            <i class="fas fa-trash"></i>
 
-                    </a>
+                        </a>
+                    <?php }else{ ?>
+                        <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            disabled
+                            title="This customer has transactions and cannot be deleted">
+
+                            <i class="fas fa-trash"></i>
+
+                        </button>
+                    <?php } ?>
 
                     <?php } ?>
 

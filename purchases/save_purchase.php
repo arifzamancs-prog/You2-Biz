@@ -117,7 +117,6 @@ function purchase_prepare_items($conn, $user_id)
     $product_ids = $_POST['product_id'] ?? [];
     $qtys = $_POST['qty'] ?? [];
     $prices = $_POST['cost_price'] ?? [];
-    $sale_prices = $_POST['sale_price'] ?? [];
     $totals = $_POST['line_total'] ?? [];
     $new_category_ids = $_POST['new_product_category_id'] ?? [];
     $new_product_names = $_POST['new_product_name'] ?? [];
@@ -144,7 +143,9 @@ function purchase_prepare_items($conn, $user_id)
         $product_choice = trim((string)$product_choice);
         $qty = (int)($qtys[$key] ?? 0);
         $price = (float)($prices[$key] ?? 0);
-        $sale_price = (float)($sale_prices[$key] ?? 0);
+        // Sale price is not part of the supplier purchase form. For a newly
+        // created product, retain the entered purchase price as its initial value.
+        $sale_price = $price;
         $total = (float)($totals[$key] ?? 0);
 
         if($product_choice === '' && trim((string)($new_product_names[$key] ?? '')) === ''){
@@ -157,10 +158,6 @@ function purchase_prepare_items($conn, $user_id)
 
         if($price < 0){
             throw new Exception("Purchase price cannot be negative.");
-        }
-
-        if($sale_price < 0){
-            throw new Exception("Sale price cannot be negative.");
         }
 
         if($product_choice === '__new__'){

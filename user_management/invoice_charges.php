@@ -13,6 +13,69 @@ ensure_default_invoice_charges($conn, $user_id);
 $message = '';
 $message_type = '';
 
+if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajax_action'){
+    header('Content-Type: application/json');
+    $charge_id = (int)($_POST['charge_id'] ?? 0);
+    $ajax_action = $_POST['charge_action'] ?? '';
+
+    $charge_stmt = mysqli_prepare($conn, "SELECT * FROM invoice_charge_types WHERE id=? AND user_id=? LIMIT 1");
+    mysqli_stmt_bind_param($charge_stmt, 'ii', $charge_id, $user_id);
+    mysqli_stmt_execute($charge_stmt);
+    $charge = mysqli_fetch_assoc(mysqli_stmt_get_result($charge_stmt));
+
+    if(!$charge){
+        http_response_code(404);
+        echo json_encode(['success' => false, 'message' => 'Charge not found.']);
+        exit;
+    }
+
+    if($ajax_action === 'edit'){
+        echo json_encode(['success' => true, 'charge' => $charge]);
+        exit;
+    }
+
+    if($ajax_action === 'delete'){
+        $used_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS total FROM invoice_charges WHERE charge_type_id=?");
+        mysqli_stmt_bind_param($used_stmt, 'i', $charge_id);
+        mysqli_stmt_execute($used_stmt);
+        $used = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($used_stmt))['total'] ?? 0);
+        if($used > 0){
+            http_response_code(422);
+            echo json_encode(['success' => false, 'message' => 'This charge is already used.']);
+            exit;
+        }
+        $stmt = mysqli_prepare($conn, "DELETE FROM invoice_charge_types WHERE id=? AND user_id=?");
+        mysqli_stmt_bind_param($stmt, 'ii', $charge_id, $user_id);
+        mysqli_stmt_execute($stmt);
+        echo json_encode(['success' => true, 'deleted' => true]);
+        exit;
+    }
+
+    if(in_array($ajax_action, ['show', 'hide'], true)){
+        $value = $ajax_action === 'show' ? 1 : 0;
+        $stmt = mysqli_prepare($conn, "UPDATE invoice_charge_types SET show_on_invoice=? WHERE id=? AND user_id=?");
+        mysqli_stmt_bind_param($stmt, 'iii', $value, $charge_id, $user_id);
+        mysqli_stmt_execute($stmt);
+    }elseif(in_array($ajax_action, ['active', 'inactive'], true)){
+        $value = $ajax_action;
+        $stmt = mysqli_prepare($conn, "UPDATE invoice_charge_types SET status=? WHERE id=? AND user_id=?");
+        mysqli_stmt_bind_param($stmt, 'sii', $value, $charge_id, $user_id);
+        mysqli_stmt_execute($stmt);
+    }else{
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'Invalid action.']);
+        exit;
+    }
+
+    $updated_stmt = mysqli_prepare($conn, "SELECT * FROM invoice_charge_types WHERE id=? AND user_id=? LIMIT 1");
+    mysqli_stmt_bind_param($updated_stmt, 'ii', $charge_id, $user_id);
+    mysqli_stmt_execute($updated_stmt);
+    $updated_charge = mysqli_fetch_assoc(mysqli_stmt_get_result($updated_stmt));
+
+    echo json_encode(['success' => true, 'action' => $ajax_action, 'charge' => $updated_charge]);
+    exit;
+}
+
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $charge_id = (int)($_POST['charge_id'] ?? 0);
     $charge_name = trim($_POST['charge_name'] ?? '');
@@ -139,6 +202,29 @@ if(isset($_GET['id'], $_GET['action'])){
         mysqli_stmt_execute($stmt);
     }
 
+    if($action === 'delete'){
+        $used_stmt = mysqli_prepare(
+            $conn,
+            "SELECT COUNT(*) AS total
+             FROM invoice_charges
+             WHERE charge_type_id=?"
+        );
+        mysqli_stmt_bind_param($used_stmt, 'i', $charge_id);
+        mysqli_stmt_execute($used_stmt);
+        $used_row = mysqli_fetch_assoc(mysqli_stmt_get_result($used_stmt));
+
+        if((int)($used_row['total'] ?? 0) === 0){
+            $delete_stmt = mysqli_prepare(
+                $conn,
+                "DELETE FROM invoice_charge_types
+                 WHERE id=?
+                 AND user_id=?"
+            );
+            mysqli_stmt_bind_param($delete_stmt, 'ii', $charge_id, $user_id);
+            mysqli_stmt_execute($delete_stmt);
+        }
+    }
+
     header("Location: invoice_charges.php");
     exit;
 }
@@ -189,7 +275,7 @@ require_once '../includes/sidebar.php';
     <div class="col-lg-4">
         <div class="card">
             <div class="card-header">
-                <h3 class="card-title">
+                <h3 class="card-title" id="invoice-charge-form-title">
                     <?= $edit_charge ? 'Edit Invoice Charge' : 'Add Invoice Charge'; ?>
                 </h3>
             </div>
@@ -201,8 +287,9 @@ require_once '../includes/sidebar.php';
                     </div>
                 <?php } ?>
 
-                <form method="post">
+                <form method="post" id="invoice-charge-form">
                     <input
+                        id="charge_id"
                         type="hidden"
                         name="charge_id"
                         value="<?= (int)($edit_charge['id'] ?? 0); ?>">
@@ -210,6 +297,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Charge Name</label>
                         <input
+                            id="charge_name"
                             type="text"
                             name="charge_name"
                             class="form-control"
@@ -220,7 +308,7 @@ require_once '../includes/sidebar.php';
 
                     <div class="form-group">
                         <label>Effect</label>
-                        <select name="charge_type" class="form-control">
+                        <select id="charge_type" name="charge_type" class="form-control">
                             <option
                                 value="add"
                                 <?= (($edit_charge['charge_type'] ?? 'add') === 'add') ? 'selected' : ''; ?>>
@@ -236,7 +324,7 @@ require_once '../includes/sidebar.php';
 
                     <div class="form-group">
                         <label>Value Type</label>
-                        <select name="charge_value_type" class="form-control">
+                        <select id="charge_value_type" name="charge_value_type" class="form-control">
                             <option
                                 value="fixed"
                                 <?= (($edit_charge['charge_value_type'] ?? 'fixed') === 'fixed') ? 'selected' : ''; ?>>
@@ -250,16 +338,14 @@ require_once '../includes/sidebar.php';
                         </select>
                     </div>
 
-                    <button type="submit" class="btn btn-primary">
+                    <button type="submit" class="btn btn-primary" id="invoice-charge-submit">
                         <i class="fas fa-save"></i>
                         <?= $edit_charge ? 'Update Charge' : 'Add Charge'; ?>
                     </button>
 
-                    <?php if($edit_charge){ ?>
-                        <a href="invoice_charges.php" class="btn btn-secondary">
-                            Cancel
-                        </a>
-                    <?php } ?>
+                    <a href="invoice_charges.php" class="btn btn-secondary <?= $edit_charge ? '' : 'd-none'; ?>" id="invoice-charge-cancel">
+                        Cancel
+                    </a>
                 </form>
             </div>
         </div>
@@ -286,7 +372,7 @@ require_once '../includes/sidebar.php';
                     </thead>
                     <tbody>
                     <?php while($charge = mysqli_fetch_assoc($charges)){ ?>
-                        <tr>
+                        <tr data-charge-id="<?= (int)$charge['id']; ?>">
                             <td><?= htmlspecialchars($charge['charge_name']); ?></td>
                             <td>
                                 <?= $charge['charge_type'] === 'less' ? 'Less (-)' : 'Add (+)'; ?>
@@ -296,38 +382,42 @@ require_once '../includes/sidebar.php';
                             </td>
                             <td>
                                 <?php if((int)($charge['show_on_invoice'] ?? 0) === 1){ ?>
-                                    <span class="badge badge-success">Shown</span>
+                                    <span class="badge badge-success invoice-visibility-badge">Shown</span>
                                 <?php }else{ ?>
-                                    <span class="badge badge-secondary">Hidden</span>
+                                    <span class="badge badge-secondary invoice-visibility-badge">Hidden</span>
                                 <?php } ?>
                             </td>
                             <td>
                                 <?php if($charge['status'] === 'active'){ ?>
-                                    <span class="badge badge-success">Active</span>
+                                    <span class="badge badge-success invoice-status-badge">Active</span>
                                 <?php }else{ ?>
-                                    <span class="badge badge-danger">Inactive</span>
+                                    <span class="badge badge-danger invoice-status-badge">Inactive</span>
                                 <?php } ?>
                             </td>
                             <td>
                                 <?= (int)($charge['used_count'] ?? 0); ?>
                             </td>
                             <td>
-                                <a
-                                    href="invoice_charges.php?edit=<?= (int)$charge['id']; ?>"
-                                    class="btn btn-sm btn-info">
-                                    Edit
-                                </a>
+                                <button type="button" class="btn btn-sm btn-info invoice-charge-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="edit" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </button>
 
                                 <?php if((int)($charge['show_on_invoice'] ?? 0) === 1){ ?>
-                                    <a href="invoice_charges.php?id=<?= (int)$charge['id']; ?>&action=hide" class="btn btn-sm btn-warning">Hide</a>
+                                    <button type="button" class="btn btn-sm btn-warning invoice-charge-action invoice-visibility-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="hide" title="Hide"><i class="fas fa-eye-slash"></i></button>
                                 <?php }else{ ?>
-                                    <a href="invoice_charges.php?id=<?= (int)$charge['id']; ?>&action=show" class="btn btn-sm btn-success">Show</a>
+                                    <button type="button" class="btn btn-sm btn-success invoice-charge-action invoice-visibility-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="show" title="Show"><i class="fas fa-eye"></i></button>
                                 <?php } ?>
 
                                 <?php if($charge['status'] === 'active'){ ?>
-                                    <a href="invoice_charges.php?id=<?= (int)$charge['id']; ?>&action=inactive" class="btn btn-sm btn-danger">Inactive</a>
+                                    <button type="button" class="btn btn-sm btn-danger invoice-charge-action invoice-status-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="inactive" title="Make Inactive"><i class="fas fa-toggle-off"></i></button>
                                 <?php }else{ ?>
-                                    <a href="invoice_charges.php?id=<?= (int)$charge['id']; ?>&action=active" class="btn btn-sm btn-info">Active</a>
+                                    <button type="button" class="btn btn-sm btn-info invoice-charge-action invoice-status-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="active" title="Make Active"><i class="fas fa-toggle-on"></i></button>
+                                <?php } ?>
+
+                                <?php if((int)($charge['used_count'] ?? 0) === 0){ ?>
+                                    <button type="button" class="btn btn-sm btn-danger invoice-charge-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="delete" title="Delete"><i class="fas fa-trash"></i></button>
+                                <?php }else{ ?>
+                                    <button class="btn btn-sm btn-secondary" disabled title="This charge is already used"><i class="fas fa-trash"></i></button>
                                 <?php } ?>
 
                             </td>
@@ -339,6 +429,92 @@ require_once '../includes/sidebar.php';
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('click', async function(event) {
+    const button = event.target.closest('.invoice-charge-action');
+    if (!button || button.disabled) {
+        return;
+    }
+
+    const action = button.dataset.chargeAction;
+    const chargeId = button.dataset.chargeId;
+
+    if (action === 'delete' && !window.confirm('Delete this invoice charge?')) {
+        return;
+    }
+
+    button.disabled = true;
+
+    try {
+        const response = await fetch('invoice_charges.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+            body: new URLSearchParams({
+                action: 'ajax_action',
+                charge_id: chargeId,
+                charge_action: action
+            })
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.message || 'Action could not be completed.');
+        }
+
+        const row = button.closest('tr');
+
+        if (action === 'edit') {
+            const charge = data.charge;
+            document.getElementById('charge_id').value = charge.id;
+            document.getElementById('charge_name').value = charge.charge_name;
+            document.getElementById('charge_type').value = charge.charge_type;
+            document.getElementById('charge_value_type').value = charge.charge_value_type || 'fixed';
+            document.getElementById('invoice-charge-form-title').textContent = 'Edit Invoice Charge';
+            document.getElementById('invoice-charge-submit').innerHTML = '<i class="fas fa-save"></i> Update Charge';
+            document.getElementById('invoice-charge-cancel').classList.remove('d-none');
+            document.getElementById('charge_name').focus();
+            return;
+        }
+
+        if (action === 'delete') {
+            if (window.jQuery && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable('#example1')) {
+                jQuery('#example1').DataTable().row(row).remove().draw(false);
+            } else {
+                row.remove();
+            }
+            return;
+        }
+
+        const charge = data.charge;
+        if (action === 'show' || action === 'hide') {
+            const shown = Number(charge.show_on_invoice) === 1;
+            const badge = row.querySelector('.invoice-visibility-badge');
+            badge.textContent = shown ? 'Shown' : 'Hidden';
+            badge.className = 'badge invoice-visibility-badge ' + (shown ? 'badge-success' : 'badge-secondary');
+            button.dataset.chargeAction = shown ? 'hide' : 'show';
+            button.title = shown ? 'Hide' : 'Show';
+            button.className = 'btn btn-sm invoice-charge-action invoice-visibility-action ' + (shown ? 'btn-warning' : 'btn-success');
+            button.innerHTML = shown ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+        }
+
+        if (action === 'active' || action === 'inactive') {
+            const active = charge.status === 'active';
+            const badge = row.querySelector('.invoice-status-badge');
+            badge.textContent = active ? 'Active' : 'Inactive';
+            badge.className = 'badge invoice-status-badge ' + (active ? 'badge-success' : 'badge-danger');
+            button.dataset.chargeAction = active ? 'inactive' : 'active';
+            button.title = active ? 'Make Inactive' : 'Make Active';
+            button.className = 'btn btn-sm invoice-charge-action invoice-status-action ' + (active ? 'btn-danger' : 'btn-info');
+            button.innerHTML = active ? '<i class="fas fa-toggle-off"></i>' : '<i class="fas fa-toggle-on"></i>';
+        }
+    } catch (error) {
+        window.alert(error.message || 'Action could not be completed.');
+    } finally {
+        button.disabled = false;
+    }
+});
+</script>
 
 <?php
 require_once '../includes/footer.php';

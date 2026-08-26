@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/supplier_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -98,6 +99,7 @@ while(
 $row =
 mysqli_fetch_assoc($result)
 ){
+    $used = supplier_has_transactions($conn, $row['id'], $user_id);
 ?>
 
 <tr>
@@ -174,6 +176,7 @@ title="Edit Supplier">
 
 </a>
 
+<?php if(!$used){ ?>
 <a
 href="delete.php?id=<?= (int)$row['id']; ?>"
 class="btn btn-danger btn-sm"
@@ -183,6 +186,11 @@ onclick="return confirm('Delete this supplier?');">
 <i class="fas fa-trash"></i>
 
 </a>
+<?php }else{ ?>
+<button type="button" class="btn btn-secondary btn-sm" disabled title="This supplier has transactions and cannot be deleted">
+<i class="fas fa-trash"></i>
+</button>
+<?php } ?>
 
 </td>
 <?php } ?>

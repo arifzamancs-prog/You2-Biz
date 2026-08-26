@@ -27,7 +27,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $wallet_id = (int)($_POST['wallet_id'] ?? 0);
     $txn_date = $_POST['txn_date'] ?? date('Y-m-d');
     $amount = (float)($_POST['amount'] ?? 0);
-    $note = trim($_POST['note'] ?? '');
+    $note = trim($_POST['note'] ?? '') ?: 'General';
 
     mysqli_begin_transaction($conn);
 

@@ -56,7 +56,6 @@ while($result && $row = mysqli_fetch_assoc($result)){
             <thead>
                 <tr>
                     <th>Project Name</th>
-                    <th>Project Code</th>
                     <th>Description</th>
                     <th>Status</th>
                     <?php if(manager_can_modify()){ ?>
@@ -68,15 +67,15 @@ while($result && $row = mysqli_fetch_assoc($result)){
             <tbody>
                 <?php if(empty($projects)): ?>
                     <tr>
-                        <td colspan="<?= manager_can_modify() ? '5' : '4'; ?>" class="text-center text-muted">
+                        <td colspan="<?= manager_can_modify() ? '4' : '3'; ?>" class="text-center text-muted">
                             No project found yet.
                         </td>
                     </tr>
                 <?php else: ?>
                     <?php foreach($projects as $project): ?>
+                        <?php $used = project_has_transactions($conn, $project['id'], $user_id); ?>
                         <tr>
                             <td><?= htmlspecialchars($project['project_name']); ?></td>
-                            <td><?= htmlspecialchars($project['project_code']); ?></td>
                             <td><?= htmlspecialchars($project['description'] ?: '-'); ?></td>
                             <td>
                                 <span class="badge badge-<?= ($project['status'] ?? 'active') === 'active' ? 'success' : 'danger'; ?>">
@@ -85,8 +84,12 @@ while($result && $row = mysqli_fetch_assoc($result)){
                             </td>
                             <?php if(manager_can_modify()){ ?>
                                 <td>
-                                    <button type="button" class="btn btn-info btn-sm disabled">Edit</button>
-                                    <button type="button" class="btn btn-danger btn-sm disabled">Delete</button>
+                                    <a href="project_edit.php?id=<?= (int)$project['id']; ?>" class="btn btn-info btn-sm" title="Edit"><i class="fas fa-edit"></i></a>
+                                    <?php if(!$used){ ?>
+                                        <a href="project_delete.php?id=<?= (int)$project['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this project?');"><i class="fas fa-trash"></i></a>
+                                    <?php }else{ ?>
+                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This project is in use and cannot be deleted"><i class="fas fa-trash"></i></button>
+                                    <?php } ?>
                                 </td>
                             <?php } ?>
                         </tr>

@@ -10,13 +10,14 @@ ensure_project_package_tables($conn);
 $user_id = (int)$_SESSION['user_id'];
 $message = '';
 $project_name = trim($_POST['project_name'] ?? '');
-$project_code = trim($_POST['project_code'] ?? '');
+$project_code = '';
 $description = trim($_POST['description'] ?? '');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    if($project_name === '' || $project_code === ''){
-        $message = 'Project Name and Project Code are required.';
+    if($project_name === ''){
+        $message = 'Project Name is required.';
     } else {
+        $project_code = 'PRJ-' . date('ymdHis') . '-' . random_int(100, 999);
         $check_stmt = mysqli_prepare(
             $conn,
             "SELECT id
@@ -70,11 +71,6 @@ require_once '../includes/sidebar.php';
             <div class="form-group">
                 <label>Project Name</label>
                 <input type="text" name="project_name" class="form-control" value="<?= htmlspecialchars($project_name); ?>" required>
-            </div>
-
-            <div class="form-group">
-                <label>Project Code</label>
-                <input type="text" name="project_code" class="form-control" value="<?= htmlspecialchars($project_code); ?>" required>
             </div>
 
             <div class="form-group">

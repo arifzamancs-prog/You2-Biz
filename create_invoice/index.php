@@ -9,10 +9,13 @@ require_once '../includes/booking_invoice_helper.php';
 require_admin_user();
 
 $user_id = (int)$_SESSION['user_id'];
-$type = normalize_booking_invoice_type($_GET['type'] ?? 'booking');
 
 ensure_project_package_tables($conn);
 ensure_booking_invoice_table($conn);
+ensure_booking_invoice_type_table($conn, $user_id);
+
+$invoice_types = booking_invoice_types($conn, $user_id);
+$type = normalize_booking_invoice_type($_GET['type'] ?? 'booking', $invoice_types);
 
 $message = '';
 $customer_id = (int)($_POST['customer_id'] ?? 0);
@@ -24,7 +27,8 @@ $amount = trim($_POST['amount'] ?? '');
 $notes = trim($_POST['notes'] ?? '');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    $type = normalize_booking_invoice_type($_POST['invoice_type'] ?? $type);
+    $save_action = $_POST['save_action'] ?? 'save';
+    $type = normalize_booking_invoice_type($_POST['invoice_type'] ?? $type, $invoice_types);
 
     $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
     $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
@@ -59,11 +63,21 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
         if(mysqli_stmt_execute($insert_stmt)){
             $saved_id = (int)mysqli_insert_id($conn);
-            header('Location: print.php?id=' . $saved_id);
-            exit;
+            if($save_action === 'save_print'){
+                try {
+                    confirm_booking_invoice($conn, $saved_id, $user_id);
+                    header('Location: print.php?id=' . $saved_id);
+                    exit;
+                } catch(Throwable $error) {
+                    $message = 'Invoice saved as Pending. It could not be confirmed: ' . $error->getMessage();
+                }
+            }else{
+                header('Location: index.php?type=' . urlencode($type) . '&saved=pending');
+                exit;
+            }
+        }else{
+            $message = 'Failed to save invoice.';
         }
-
-        $message = 'Failed to save invoice.';
     }
 }
 
@@ -119,6 +133,7 @@ $recent_stmt = mysqli_prepare(
             bi.invoice_no,
             bi.invoice_date,
             bi.amount,
+            bi.status,
             c.customer_name,
             p.project_name,
             pk.package_name
@@ -147,7 +162,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header">
         <h3 class="card-title">
             <i class="fas fa-file-alt mr-2"></i>
-            <?= htmlspecialchars(booking_invoice_page_title($type)); ?>
+            <?= htmlspecialchars(booking_invoice_page_title($type, $invoice_types)); ?>
         </h3>
     </div>
 
@@ -155,10 +170,15 @@ require_once '../includes/sidebar.php';
         <?php if($message){ ?>
             <div class="alert alert-danger"><?= htmlspecialchars($message); ?></div>
         <?php } ?>
+        <?php if(isset($_GET['saved'])){ ?>
+            <div class="alert alert-success">
+                <?= ($_GET['saved'] ?? '') === 'confirmed'
+                    ? 'Invoice saved and confirmed. Wallet balance has been updated and the print page opened in a new tab.'
+                    : 'Invoice saved as Pending. Wallet balance will not change until it is confirmed.'; ?>
+            </div>
+        <?php } ?>
 
-        <form method="post">
-            <input type="hidden" name="invoice_type" value="<?= htmlspecialchars($type); ?>">
-
+        <form method="post" id="create-invoice-form">
             <div class="row">
                 <div class="col-md-6">
                     <div class="form-group">
@@ -237,7 +257,13 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-4">
                     <div class="form-group">
                         <label>Invoice Type</label>
-                        <input type="text" class="form-control" value="<?= htmlspecialchars(booking_invoice_type_label($type)); ?>" readonly>
+                        <select name="invoice_type" class="form-control" required>
+                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
+                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
+                                    <?= htmlspecialchars($type_name); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
                     </div>
                 </div>
 
@@ -249,7 +275,11 @@ require_once '../includes/sidebar.php';
                 </div>
             </div>
 
-            <button type="submit" class="btn btn-primary">
+            <button type="submit" name="save_action" value="save" class="btn btn-secondary">
+                <i class="fas fa-save"></i>
+                Save Invoice
+            </button>
+            <button type="submit" name="save_action" value="save_print" class="btn btn-primary">
                 <i class="fas fa-save"></i>
                 Save & Print Invoice
             </button>
@@ -259,7 +289,7 @@ require_once '../includes/sidebar.php';
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title"><?= htmlspecialchars(booking_invoice_recent_title($type)); ?></h3>
+            <h3 class="card-title"><?= htmlspecialchars(booking_invoice_recent_title($type, $invoice_types)); ?></h3>
     </div>
 
     <div class="card-body">
@@ -272,13 +302,14 @@ require_once '../includes/sidebar.php';
                     <th>Project</th>
                     <th>Package</th>
                     <th>Amount</th>
+                    <th>Status</th>
                     <th width="90">Print</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if(empty($recent_invoices)){ ?>
                     <tr>
-                        <td colspan="7" class="text-center text-muted">No data available in table</td>
+                        <td colspan="8" class="text-center text-muted">No data available in table</td>
                     </tr>
                 <?php } else { ?>
                     <?php foreach($recent_invoices as $invoice){ ?>
@@ -289,8 +320,9 @@ require_once '../includes/sidebar.php';
                             <td><?= htmlspecialchars($invoice['project_name'] ?: '-'); ?></td>
                             <td><?= htmlspecialchars($invoice['package_name'] ?: '-'); ?></td>
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
+                            <td><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($invoice['status'] ?? 'pending')); ?></span></td>
                             <td>
-                                <a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm">
+                                <a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" target="_blank" rel="noopener">
                                     <i class="fas fa-print"></i>
                                     Print
                                 </a>
@@ -341,6 +373,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     projectSelect.addEventListener('change', filterPackages);
     packageSelect.addEventListener('change', syncPackagePrice);
+
+    document.getElementById('create-invoice-form').addEventListener('submit', function (event) {
+        if (event.submitter && event.submitter.value === 'save_print') {
+            this.target = '_blank';
+            const invoiceType = document.querySelector('[name="invoice_type"]').value || 'booking';
+            window.setTimeout(function () {
+                window.location.href = window.location.pathname + '?type=' + encodeURIComponent(invoiceType) + '&saved=confirmed';
+            }, 450);
+        } else {
+            this.target = '';
+        }
+    });
 
     filterPackages();
 });

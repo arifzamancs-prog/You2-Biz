@@ -30,6 +30,23 @@ if (!in_array($_SESSION['user_role'], ['admin', 'super_admin', 'manager'], true)
     $_SESSION['user_role'] = 'admin';
 }
 
+function block_disabled_modules()
+{
+    $request_path = strtolower((string) parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH));
+
+    if (!sales_module_enabled() && preg_match('#(?:^|/)sales(?:/|$)#', $request_path)) {
+        header("Location: " . app_path('dashboard.php?error=Sales module is disabled'));
+        exit;
+    }
+
+    if (!products_module_enabled() && preg_match('#(?:^|/)(?:products|product_categories)(?:/|$)#', $request_path)) {
+        header("Location: " . app_path('dashboard.php?error=Products module is disabled'));
+        exit;
+    }
+}
+
+block_disabled_modules();
+
 function is_admin_user()
 {
     return in_array(
@@ -57,6 +74,15 @@ function manager_access_type()
 function is_agent_user()
 {
     return is_manager_user() && manager_access_type() === 'agent';
+}
+
+function manager_has_permission($permission)
+{
+    if(!is_manager_user() || empty($_SESSION['permissions_configured'])){
+        return true;
+    }
+
+    return in_array($permission, $_SESSION['access_permissions'] ?? [], true);
 }
 
 function role_power_includes($role)
@@ -123,6 +149,36 @@ function block_manager_restricted_actions()
     $file = basename($path);
 
     if (is_agent_user()) {
+        $permissions = $_SESSION['access_permissions'] ?? [];
+        if(!empty($_SESSION['permissions_configured'])){
+            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'logout.php'];
+            $permission_paths = [
+                'staff' => ['staff/'],
+                'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
+                'customers' => ['customers/'],
+                'suppliers' => ['suppliers/'],
+                'leads' => ['lead_management/'],
+            ];
+
+            if(!in_array($path, $always_allowed_paths, true)){
+                $allowed = false;
+                foreach($permission_paths as $permission => $paths){
+                    foreach($paths as $allowed_path){
+                        if(str_starts_with($path, $allowed_path) && in_array($permission, $permissions, true)){
+                            $allowed = true;
+                        }
+                    }
+                }
+
+                if(!$allowed){
+                    header("Location: " . app_path('dashboard.php?error=Permission denied'));
+                    exit;
+                }
+            }
+
+            return;
+        }
+
         $agent_allowed_paths = [
             'dashboard.php',
             'sales/create_invoice.php',

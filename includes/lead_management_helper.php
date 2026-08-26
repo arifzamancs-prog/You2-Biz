@@ -12,20 +12,33 @@ function ensure_lead_management_table($conn)
             email VARCHAR(150) NULL,
             note TEXT NULL,
             followup_date DATE NULL,
-            status ENUM('lead','successful','customer') NOT NULL DEFAULT 'lead',
+            status ENUM('lead','successful','customer','not_qualified') NOT NULL DEFAULT 'lead',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             INDEX idx_leads_user_status (user_id, status),
             INDEX idx_leads_followup (followup_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+
+    $status_column = mysqli_query(
+        $conn,
+        "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA=DATABASE()
+         AND TABLE_NAME='leads'
+         AND COLUMN_NAME='status'"
+    );
+    $status_info = $status_column ? mysqli_fetch_assoc($status_column) : null;
+    if($status_info && stripos((string)$status_info['COLUMN_TYPE'], "'not_qualified'") === false){
+        mysqli_query($conn, "ALTER TABLE leads MODIFY status ENUM('lead','successful','customer','not_qualified') NOT NULL DEFAULT 'lead'");
+    }
 }
 
 function lead_management_filters()
 {
     return [
         'lead' => 'New Lead',
-        'successful' => 'Successful List',
+        'successful' => 'Qualified List',
+        'not_qualified' => 'Not Qualified List',
         'customer' => 'Convert to Customer List',
     ];
 }

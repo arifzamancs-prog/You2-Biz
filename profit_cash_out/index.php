@@ -15,7 +15,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $wallet_id = (int)($_POST['wallet_id'] ?? 0);
     $amount = (float)($_POST['amount'] ?? 0);
     $txn_date = trim($_POST['txn_date'] ?? date('Y-m-d'));
-    $note = trim($_POST['note'] ?? '');
+    $note = trim($_POST['note'] ?? '') ?: 'General';
     $admin_password = (string)($_POST['admin_password'] ?? '');
     $created_by = (int)($_SESSION['login_user_id'] ?? $user_id);
 

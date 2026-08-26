@@ -16,10 +16,11 @@ $note = trim($_POST['note'] ?? '');
 $followup_date = trim($_POST['followup_date'] ?? '');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    if($name === '' || $phone === ''){
-        $message = 'Name and Phone are required.';
+    if($name === '' || $phone === '' || $followup_date === ''){
+        $message = 'Name, Phone and Followup Date are required.';
     } else {
-        $date_value = $followup_date !== '' ? $followup_date : null;
+        $note = $note ?: 'General';
+        $date_value = $followup_date;
 
         $stmt = mysqli_prepare(
             $conn,
@@ -77,7 +78,7 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
                 <label>Followup Date</label>
-                <input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>">
+                <input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" required>
             </div>
 
             <button type="submit" class="btn btn-primary">

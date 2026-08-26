@@ -23,11 +23,14 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $address = trim($_POST['address'] ?? '');
     $designation = staff_submitted_designation();
 
-    if($designation !== ''){
+    if($name === ''){
+        $message = 'Staff name is required.';
+        $message_type = 'danger';
+    }elseif($designation === ''){
+        $message = 'Please select or enter a designation.';
+        $message_type = 'danger';
+    }else{
         create_staff_designation($conn, $user_id, $designation);
-    }
-
-    if($name !== ''){
         $stmt = mysqli_prepare($conn, "INSERT INTO staff(user_id,name,email,phone,address,designation) VALUES(?,?,?,?,?,?)");
         mysqli_stmt_bind_param($stmt, 'isssss', $user_id, $name, $email, $phone, $address, $designation);
         mysqli_stmt_execute($stmt);
@@ -51,6 +54,7 @@ require_once '../includes/sidebar.php';
 <div class="card">
     <div class="card-header"><h3 class="card-title">Create Staff</h3></div>
     <div class="card-body">
+        <?php if($message !== ''){ ?><div class="alert alert-<?= htmlspecialchars($message_type); ?>"><?= htmlspecialchars($message); ?></div><?php } ?>
         <form method="post">
             <div class="form-group"><label>Name</label><input class="form-control" name="name" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" placeholder="staff@example.com"></div>
@@ -58,7 +62,7 @@ require_once '../includes/sidebar.php';
             <div class="form-group"><label>Address</label><textarea class="form-control" name="address" rows="2"></textarea></div>
             <div class="form-group">
                 <label>Designation</label>
-                <select class="form-control" name="designation" id="designation">
+                <select class="form-control" name="designation" id="designation" required>
                     <option value="">Select Designation</option>
                     <?php foreach($designations as $item){ ?>
                         <option value="<?= htmlspecialchars($item) ?>"><?= htmlspecialchars($item) ?></option>
@@ -110,7 +114,9 @@ require_once '../includes/sidebar.php';
 
 <script>
 document.getElementById('designation').addEventListener('change', function () {
-    document.getElementById('new_designation').style.display = this.value === '__new__' ? 'block' : 'none';
+    const newDesignation = document.getElementById('new_designation');
+    newDesignation.style.display = this.value === '__new__' ? 'block' : 'none';
+    newDesignation.required = this.value === '__new__';
 });
 </script>
 <?php require_once '../includes/footer.php'; ?>

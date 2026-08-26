@@ -31,6 +31,7 @@ while($project_result && $project = mysqli_fetch_assoc($project_result)){
 }
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
+    if($description === '') $description = 'General';
     $price_value = is_numeric($price) ? (float)$price : -1;
 
     if($project_id <= 0 || $package_name === '' || $price_value < 0){

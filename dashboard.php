@@ -371,16 +371,11 @@ require_once 'includes/sidebar.php';
 
     <div class="col-md-4 text-md-right mt-3 mt-md-0">
 
-        <a href="sales/create_invoice.php" class="btn btn-primary btn-sm agent-dashboard-clickable">
-            <i class="fas fa-file-invoice"></i>
-            Create Invoice
-        </a>
-
-        <?php if(!$dashboard_is_agent){ ?>
-        <a href="purchases/create.php" class="btn btn-success btn-sm">
-            <i class="fas fa-shopping-basket"></i>
-            New Purchase
-        </a>
+        <?php if(sales_module_enabled()){ ?>
+            <a href="sales/create_invoice.php" class="btn btn-primary agent-dashboard-clickable">
+                <i class="fas fa-file-invoice"></i>
+                Create Invoice
+            </a>
         <?php } ?>
 
     </div>
@@ -501,19 +496,23 @@ require_once 'includes/sidebar.php';
                     <a href="customers/index.php" class="dashboard-split-link">
                         Customers
                     </a>
+                    <?php if(products_module_enabled()){ ?>
                     /
                     <a href="products/index.php" class="dashboard-split-link">
                         Products
                     </a>
+                    <?php } ?>
                 </span>
                 <span class="info-box-number">
                     <a href="customers/index.php" class="dashboard-split-link">
                         <?= (int)$total_customers; ?>
                     </a>
+                    <?php if(products_module_enabled()){ ?>
                     /
                     <a href="products/index.php" class="dashboard-split-link">
                         <?= (int)$total_products; ?>
                     </a>
+                    <?php } ?>
                 </span>
             </div>
         </div>

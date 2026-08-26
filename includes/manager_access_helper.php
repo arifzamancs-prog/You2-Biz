@@ -14,6 +14,7 @@ function ensure_manager_access_columns($conn)
         'manager_type' => "ALTER TABLE users ADD COLUMN manager_type VARCHAR(20) NOT NULL DEFAULT 'manager'",
         'max_managers' => "ALTER TABLE users ADD COLUMN max_managers INT NOT NULL DEFAULT 2",
         'staff_id' => "ALTER TABLE users ADD COLUMN staff_id BIGINT UNSIGNED NULL",
+        'access_permissions' => "ALTER TABLE users ADD COLUMN access_permissions TEXT NULL",
     ];
 
     foreach($columns as $column => $sql){
@@ -28,6 +29,23 @@ function ensure_manager_access_columns($conn)
     if($index && mysqli_num_rows($index) === 0){
         mysqli_query($conn, "ALTER TABLE users ADD INDEX idx_users_staff_id (staff_id)");
     }
+}
+
+function available_manager_permissions()
+{
+    return [
+        'staff' => 'Staff',
+        'wallets' => 'Wallet',
+        'customers' => 'Customer',
+        'suppliers' => 'Supplier',
+        'leads' => 'Lead Management',
+    ];
+}
+
+function normalize_manager_permissions($permissions)
+{
+    $permissions = is_array($permissions) ? $permissions : [];
+    return array_values(array_intersect(array_keys(available_manager_permissions()), $permissions));
 }
 
 function normalize_manager_type($manager_type)

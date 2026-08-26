@@ -15,7 +15,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
     $txn_date  = date('Y-m-d');
     $amount    = (float)$_POST['amount'];
     $reference = '';
-    $note      = trim($_POST['note']);
+    $note      = trim($_POST['note'] ?? '') ?: 'General';
     $created_by = $_SESSION['login_user_id'] ?? $_SESSION['user_id'];
     $approval_status = 'approved';
     $approved_by = (int)$created_by;

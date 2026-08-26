@@ -165,7 +165,8 @@ if(isset($_GET['edit'])){
                         name,
                         username,
                          manager_type,
-                         staff_id
+                         staff_id,
+                         access_permissions
                  FROM users
                  WHERE id=?
                  AND owner_id=?
@@ -184,7 +185,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
     $manager_id = (int)($_POST['manager_id'] ?? 0);
     $staff_id = (int)($_POST['staff_id'] ?? 0);
     $name = '';
-    $manager_type = normalize_manager_type($_POST['manager_type'] ?? 'manager');
+    $manager_type = 'agent';
+    $access_permissions = normalize_manager_permissions($_POST['access_permissions'] ?? []);
+    $access_permissions_json = json_encode($access_permissions);
     $username_base = normalize_agent_username_base($_POST['username'] ?? '');
     $username = build_agent_login_username($username_base, $user_id);
     $password = $_POST['password'] ?? '';
@@ -296,7 +299,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                                        username=?,
                                        password=?,
                                         manager_type=?,
-                                        staff_id=?
+                                       staff_id=?,
+                                       access_permissions=?
                                    WHERE id=?
                                    AND owner_id=?
                                    AND role='manager'";
@@ -304,12 +308,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                     $update_stmt = mysqli_prepare($conn, $update_sql);
                     mysqli_stmt_bind_param(
                         $update_stmt,
-                        "ssssiii",
+                        "ssssisii",
                         $name,
                         $username,
                         $hash,
                         $manager_type,
                         $staff_id,
+                        $access_permissions_json,
                         $manager_id,
                         $user_id
                     );
@@ -318,7 +323,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                                    SET name=?,
                                        username=?,
                                         manager_type=?,
-                                        staff_id=?
+                                       staff_id=?,
+                                       access_permissions=?
                                    WHERE id=?
                                    AND owner_id=?
                                    AND role='manager'";
@@ -326,11 +332,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                     $update_stmt = mysqli_prepare($conn, $update_sql);
                     mysqli_stmt_bind_param(
                         $update_stmt,
-                        "sssiii",
+                        "sssisii",
                         $name,
                         $username,
                         $manager_type,
                         $staff_id,
+                        $access_permissions_json,
                         $manager_id,
                         $user_id
                     );
@@ -360,6 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                                manager_type,
                                 owner_id,
                                 staff_id,
+                                access_permissions,
                                status
                            )
                            VALUES
@@ -374,6 +382,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                                 ?,
                                  ?,
                                  ?,
+                                 ?,
                                'active'
                            )";
 
@@ -383,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
             if($insert_stmt){
                 mysqli_stmt_bind_param(
                     $insert_stmt,
-                    "sssssssii",
+                    "sssssssiis",
                     $name,
                     $username,
                     $address,
@@ -393,6 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
                     $manager_type,
                     $user_id,
                     $staff_id
+                    ,$access_permissions_json
                 );
 
                 try {
@@ -515,6 +525,9 @@ while($managers_result && $row = mysqli_fetch_assoc($managers_result)){
 }
 
 $selected_staff_id = (int)($edit_manager['staff_id'] ?? 0);
+$selected_access_permissions = normalize_manager_permissions(
+    json_decode($edit_manager['access_permissions'] ?? '[]', true)
+);
 $editing_manager_id = (int)($edit_manager['id'] ?? 0);
 $staff_options_sql = "SELECT s.id,s.name,s.designation
                       FROM staff s
@@ -544,7 +557,7 @@ require_once '../includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    <?= $edit_manager ? 'Edit Staff Management' : 'Create Staff Management'; ?>
+                    <?= $edit_manager ? 'Edit Access Management' : 'Create Access Management'; ?>
                 </h3>
             </div>
 
@@ -574,22 +587,17 @@ require_once '../includes/sidebar.php';
                     </div>
 
                     <div class="form-group">
-                        <label>Access Type</label>
-                        <select
-                            name="manager_type"
-                            class="form-control"
-                            required>
-                            <option
-                                value="agent"
-                                <?= (($edit_manager['manager_type'] ?? 'agent') === 'agent') ? 'selected' : ''; ?>>
-                                Assistant
-                            </option>
-                            <option
-                                value="manager"
-                                <?= (($edit_manager['manager_type'] ?? '') === 'manager') ? 'selected' : ''; ?>>
-                                Manager
-                            </option>
-                        </select>
+                        <label>Access Permissions</label>
+                        <div class="row">
+                            <?php foreach(available_manager_permissions() as $permission_key => $permission_label){ ?>
+                                <div class="col-md-6 mb-2">
+                                    <div class="custom-control custom-checkbox">
+                                        <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>
+                                        <label class="custom-control-label" for="permission_<?= htmlspecialchars($permission_key); ?>"><?= htmlspecialchars($permission_label); ?></label>
+                                    </div>
+                                </div>
+                            <?php } ?>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -624,7 +632,7 @@ require_once '../includes/sidebar.php';
                         type="submit"
                         class="btn btn-primary">
                         <i class="fas <?= $edit_manager ? 'fa-save' : 'fa-user-plus'; ?>"></i>
-                        <?= $edit_manager ? 'Update Staff Management' : 'Create Staff Management'; ?>
+                        <?= $edit_manager ? 'Update Access Management' : 'Create Access Management'; ?>
                     </button>
 
                     <?php if($edit_manager){ ?>
@@ -646,7 +654,7 @@ require_once '../includes/sidebar.php';
         <div class="card">
 
             <div class="card-header">
-                <h3 class="card-title">Staff Management</h3>
+                <h3 class="card-title">Access Management</h3>
             </div>
 
             <div class="card-body">

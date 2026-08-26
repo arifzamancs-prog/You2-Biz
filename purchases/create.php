@@ -123,12 +123,10 @@ require_once '../includes/sidebar.php';
 <table class="table table-bordered" id="purchaseTable">
 <thead>
 <tr>
-<th width="30%">Product</th>
-<th width="12%">Stock</th>
-<th width="14%">Purchase Price</th>
-<th width="14%">Sale Price</th>
-<th width="12%">Qty</th>
-<th width="16%">Total</th>
+<th width="42%">Product</th>
+<th width="18%">Price</th>
+<th width="14%">Qty</th>
+<th width="18%">Total</th>
 <th width="10%">Action</th>
 </tr>
 </thead>
@@ -150,13 +148,7 @@ require_once '../includes/sidebar.php';
     </div>
 </td>
 <td>
-    <input type="text" class="form-control stock" readonly>
-</td>
-<td>
     <input type="number" step="0.01" name="cost_price[]" class="form-control cost_price" required>
-</td>
-<td>
-    <input type="number" step="0.01" name="sale_price[]" class="form-control sale_price" value="0" required>
 </td>
 <td>
     <input type="number" step="1" min="1" name="qty[]" class="form-control qty" value="1" required>
@@ -292,10 +284,7 @@ $(function(){
             newBox.show();
             categoryInput.prop("required", true);
             nameInput.prop("required", true);
-            row.find(".stock").val("0");
             row.find(".cost_price").val("0");
-            row.find(".sale_price").val("0");
-            row.find(".sale_price").prop("required", true);
             calculateRow(row);
             return;
         }
@@ -305,9 +294,7 @@ $(function(){
         nameInput.prop("required", false).val("");
 
         if(id === ""){
-            row.find(".stock").val("");
             row.find(".cost_price").val("");
-            row.find(".sale_price").val("0");
             row.find(".line_total").val("");
             calculateGrandTotal();
             return;
@@ -319,9 +306,7 @@ $(function(){
             data: {product_id: id},
             dataType: "json",
             success: function(res){
-                row.find(".stock").val(res.stock);
                 row.find(".cost_price").val(res.cost_price);
-                row.find(".sale_price").val(res.sale_price);
                 calculateRow(row);
             },
             error: function(xhr){
@@ -352,9 +337,7 @@ $(function(){
         row.find(".new-product-box").hide();
         row.find(".new-product-category").prop("required", false).val("");
         row.find(".new-product-name").prop("required", false).val("");
-        row.find(".stock").val("");
         row.find(".cost_price").val("");
-        row.find(".sale_price").val("0");
         row.find(".qty").val(1);
         row.find(".line_total").val("");
 
