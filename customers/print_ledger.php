@@ -5,10 +5,12 @@ require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
+require_once '../includes/booking_invoice_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
+ensure_booking_invoice_table($conn);
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -119,6 +121,7 @@ while($row=mysqli_fetch_assoc($result)){
         'type'      => 'Invoice',
         'reference' => $row['invoice_no'],
         'invoice_no' => $row['invoice_no'],
+        'wallet_name' => '',
         'sort_order' => 1,
         'reference_id' => $row['id'],
         'debit'     => $row['total_amount'],
@@ -163,6 +166,7 @@ while($row=mysqli_fetch_assoc($result)){
         'type'      => 'Payment',
         'reference' => $row['note'],
         'invoice_no' => $payment_invoice_no,
+        'wallet_name' => '',
         'sort_order' => 2,
         'reference_id' => $row['id'],
         'debit'     => 0,
@@ -204,6 +208,7 @@ while($row=mysqli_fetch_assoc($result)){
         'type'      => 'Previous Due',
         'reference' => $row['due_no'],
         'invoice_no' => '',
+        'wallet_name' => '',
         'sort_order' => 0,
         'reference_id' => $row['id'],
         'debit'     => $row['amount'],
@@ -211,6 +216,50 @@ while($row=mysqli_fetch_assoc($result)){
 
     ];
 
+}
+
+/* Confirmed Invoice Wallet Transactions */
+
+$wallet_transaction_sql = "SELECT
+        t.id,
+        t.txn_no,
+        t.txn_date,
+        t.transaction_type,
+        t.amount,
+        bi.invoice_no,
+        w.wallet_name
+    FROM transactions t
+    INNER JOIN booking_invoices bi
+        ON bi.id=t.reference_id
+        AND bi.user_id=t.user_id
+    LEFT JOIN wallets w
+        ON w.id=t.wallet_id
+        AND w.user_id=t.user_id
+    WHERE bi.customer_id=?
+    AND bi.user_id=?
+    AND bi.status='confirmed'
+    AND t.transaction_type IN ('invoice_income', 'invoice_expense')
+    ORDER BY t.txn_date, t.id";
+
+$wallet_transaction_stmt = mysqli_prepare($conn, $wallet_transaction_sql);
+mysqli_stmt_bind_param($wallet_transaction_stmt, 'ii', $customer_id, $user_id);
+mysqli_stmt_execute($wallet_transaction_stmt);
+$wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
+
+while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
+    $is_refund = $row['transaction_type'] === 'invoice_expense';
+
+    $ledger[] = [
+        'trx_date' => $row['txn_date'],
+        'type' => $is_refund ? 'Wallet Refund' : 'Wallet Received',
+        'reference' => trim((string)$row['invoice_no']),
+        'invoice_no' => trim((string)$row['invoice_no']),
+        'wallet_name' => (string)($row['wallet_name'] ?? ''),
+        'sort_order' => $is_refund ? 3 : 2,
+        'reference_id' => (int)$row['id'],
+        'debit' => $is_refund ? (float)$row['amount'] : 0,
+        'credit' => $is_refund ? 0 : (float)$row['amount'],
+    ];
 }
 
 /* Merge Invoice + Same Invoice Payment */
@@ -312,33 +361,13 @@ usort($ledger,function($a,$b){
 
 });
 
-$total_sales = 0;
 $total_paid  = 0;
 
 foreach($ledger as $entry){
 
-    $total_sales += $entry['debit'];
     $total_paid  += $entry['credit'];
 
 }
-
-$current_due = $total_sales - $total_paid;
-$current_due_label = $current_due < 0 ? 'Outstanding Amount' : 'Current Due';
-$current_due_display = $current_due < 0 ? abs($current_due) : $current_due;
-
-$running_ledger = [];
-$balance = 0;
-
-foreach($ledger as $row){
-
-    $balance += (float)$row['debit'];
-    $balance -= (float)$row['credit'];
-
-    $row['running_balance'] = $balance;
-    $running_ledger[] = $row;
-}
-
-$ledger = $running_ledger;
 
 $custom_printing = is_custom_printing($conn);
 $custom_size = current_printing_custom_size($conn);
@@ -502,16 +531,8 @@ th{
 
     <table class="summary">
         <tr>
-            <td>Total Sales</td>
-            <td class="text-right"><?= number_format($total_sales,2); ?></td>
-        </tr>
-        <tr>
             <td>Total Paid</td>
             <td class="text-right"><?= number_format($total_paid,2); ?></td>
-        </tr>
-        <tr class="grand">
-            <td><?= htmlspecialchars($current_due_label); ?></td>
-            <td class="text-right"><?= number_format($current_due_display,2); ?></td>
         </tr>
     </table>
 
@@ -519,9 +540,9 @@ th{
         <thead>
         <tr>
             <th>Date</th>
+            <th>Invoice No.</th>
             <th>Type</th>
-            <th class="text-right">Debit</th>
-            <th class="text-right">Credit</th>
+            <th class="text-right">Amount</th>
         </tr>
         </thead>
         <tbody>
@@ -533,9 +554,9 @@ th{
         <?php foreach($ledger as $row){ ?>
             <tr>
                 <td><?= htmlspecialchars(app_datetime($row['trx_date'])); ?></td>
-                <td><?= htmlspecialchars($row['type']); ?><br><span class="muted"><?= htmlspecialchars($row['reference']); ?></span></td>
-                <td class="text-right"><?= number_format($row['debit'],2); ?></td>
-                <td class="text-right"><?= number_format($row['credit'],2); ?></td>
+                <td><?= htmlspecialchars($row['invoice_no'] !== '' ? $row['invoice_no'] : $row['reference']); ?></td>
+                <td><?= htmlspecialchars(($row['wallet_name'] ?? '') !== '' ? $row['wallet_name'] : '-'); ?></td>
+                <td class="text-right"><?= number_format((float)$row['debit'] > 0 ? $row['debit'] : $row['credit'],2); ?></td>
             </tr>
         <?php } ?>
         </tbody>
@@ -571,9 +592,9 @@ Customer Ledger
 *{ box-sizing:border-box; }
 
 body{
-    background:#f1f5f9;
+    background:#eef2f7;
     color:#172033;
-    font-family:Arial, sans-serif;
+    font-family:"Segoe UI", Arial, sans-serif;
     font-size:12px;
     line-height:1.4;
     margin:0;
@@ -581,27 +602,113 @@ body{
 
 .ledger-page{
     background:#fff;
-    box-shadow:0 3px 14px rgba(15,23,42,.12);
-    margin:18px auto;
+    border-top:5px solid #1463c3;
+    box-shadow:0 8px 28px rgba(15,23,42,.12);
+    margin:24px auto;
     max-width:210mm;
-    padding:12mm;
+    min-height:270mm;
+    padding:14mm;
 }
 
-.text-center > h2{
+.document-header{
+    align-items:flex-start;
+    border-bottom:1px solid #dbe5f1;
+    display:flex;
+    justify-content:space-between;
+    padding-bottom:16px;
+}
+
+.company-name{
     color:#102a43;
-    font-size:23px;
-    letter-spacing:.2px;
+    font-size:24px;
+    font-weight:700;
+    letter-spacing:.1px;
+    margin:0 0 4px;
 }
 
-.text-center > h3{
-    border-bottom:2px solid #1d4ed8;
-    color:#1e3a5f;
-    font-size:14px;
-    letter-spacing:.08em;
-    margin:14px auto 0;
-    padding-bottom:7px;
+.company-meta{
+    color:#64748b;
+    font-size:11px;
+    line-height:1.7;
+}
+
+.document-title{
+    color:#1463c3;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.12em;
+    margin:5px 0 0;
+    text-align:right;
     text-transform:uppercase;
-    width:min(100% - 24mm, 186mm);
+}
+
+.document-date{
+    color:#64748b;
+    font-size:10px;
+    margin-top:5px;
+    text-align:right;
+}
+
+.customer-summary{
+    display:grid;
+    gap:12px;
+    grid-template-columns:2fr 1fr;
+    margin:18px 0;
+}
+
+.customer-card,
+.total-card{
+    border:1px solid #dbe5f1;
+    border-radius:7px;
+    overflow:hidden;
+}
+
+.customer-card{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+}
+
+.customer-item{
+    padding:11px 13px;
+}
+
+.customer-item + .customer-item{
+    border-left:1px solid #dbe5f1;
+}
+
+.meta-label{
+    color:#64748b;
+    display:block;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.06em;
+    margin-bottom:3px;
+    text-transform:uppercase;
+}
+
+.meta-value{
+    color:#102a43;
+    font-size:13px;
+    font-weight:600;
+}
+
+.total-card{
+    background:#f0f7ff;
+    border-color:#bdd7f5;
+    padding:11px 13px;
+    text-align:right;
+}
+
+.total-card .meta-value{
+    color:#1463c3;
+    font-size:20px;
+}
+
+.table-title{
+    color:#102a43;
+    font-size:13px;
+    font-weight:700;
+    margin:24px 0 8px;
 }
 
 table{
@@ -612,15 +719,22 @@ table{
 
 table th,
 table td{
-    border:1px solid #cbd5e1;
-    padding:7px 8px;
+    border-bottom:1px solid #e2e8f0;
+    padding:9px 10px;
 }
 
 table th{
-    background:#eaf1fb;
-    color:#1e3a5f;
+    background:#102a43;
+    border:0;
+    color:#fff;
+    font-size:10px;
     font-weight:700;
+    letter-spacing:.04em;
+    text-transform:uppercase;
 }
+
+.ledger-table tbody tr:nth-child(even){ background:#f8fafc; }
+.ledger-table td:last-child{ color:#102a43; font-weight:700; }
 
 h3{
     color:#1e3a5f;
@@ -649,11 +763,20 @@ h3{
 .no-print button{
     background:#1d4ed8;
     border:0;
-    border-radius:5px;
+    border-radius:6px;
     color:#fff;
     cursor:pointer;
     font-size:13px;
     padding:8px 16px;
+}
+
+.document-footer{
+    border-top:1px solid #dbe5f1;
+    color:#94a3b8;
+    font-size:10px;
+    margin-top:26px;
+    padding-top:9px;
+    text-align:center;
 }
 
 @media print{
@@ -665,6 +788,7 @@ h3{
     }
 
     .ledger-page{
+        border-top:0;
         box-shadow:none;
         margin:0;
         max-width:none;
@@ -692,123 +816,54 @@ h3{
 
 </div>
 
-<div class="text-center">
-
-    <h2>
-        <?php echo htmlspecialchars($account_name); ?>
-    </h2>
-
-    <?php if(!empty($account['address']) && $account['address'] != 'None'){ ?>
-
-    <div class="muted">
-        <?php echo htmlspecialchars($account['address']); ?>
-    </div>
-
-    <?php } ?>
-
-    <div class="muted">
-
-        <?php if(!empty($account['phone'])){ ?>
-            Phone: <?php echo htmlspecialchars($account['phone']); ?>
-        <?php } ?>
-
-        <?php if(!empty($account['email'])){ ?>
-            <?= !empty($account['phone']) ? ' | ' : ''; ?>
-            Email: <?php echo htmlspecialchars($account['email']); ?>
-        <?php } ?>
-
-    </div>
-
-    <h3>
-        Customer Ledger Statement
-    </h3>
-
-</div>
-
 <main class="ledger-page">
 
-<hr>
+<header class="document-header">
+    <div>
+        <h1 class="company-name"><?php echo htmlspecialchars($account_name); ?></h1>
+        <?php if(!empty($account['address']) && $account['address'] != 'None'){ ?>
+            <div class="company-meta"><?php echo htmlspecialchars($account['address']); ?></div>
+        <?php } ?>
+        <div class="company-meta">
+            <?php if(!empty($account['phone'])){ ?>Phone: <?php echo htmlspecialchars($account['phone']); ?><?php } ?>
+            <?php if(!empty($account['email'])){ ?><?= !empty($account['phone']) ? ' &nbsp;|&nbsp; ' : ''; ?>Email: <?php echo htmlspecialchars($account['email']); ?><?php } ?>
+        </div>
+    </div>
+    <div>
+        <div class="document-title">Customer Ledger Statement</div>
+        <div class="document-date">Generated: <?php echo date('d-m-Y'); ?></div>
+    </div>
+</header>
 
-<table>
+<section class="customer-summary">
+    <div class="customer-card">
+        <div class="customer-item">
+            <span class="meta-label">Customer</span>
+            <span class="meta-value"><?php echo htmlspecialchars($customer['customer_name']); ?></span>
+        </div>
+        <div class="customer-item">
+            <span class="meta-label">Phone</span>
+            <span class="meta-value"><?php echo htmlspecialchars($customer['phone']); ?></span>
+        </div>
+    </div>
+    <div class="total-card">
+        <span class="meta-label">Total Paid</span>
+        <span class="meta-value">BDT <?php echo number_format($total_paid,2); ?></span>
+    </div>
+</section>
 
-<tr>
+<div class="table-title">Transaction History</div>
 
-<th width="20%">
-Customer
-</th>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $customer['customer_name']
-);
-?>
-
-</td>
-
-<th width="15%">
-Phone
-</th>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $customer['phone']
-);
-?>
-
-</td>
-
-</tr>
-
-</table>
-
-<br>
-
-<table>
-
-<tr>
-
-<th>Total Sales</th>
-<th>Total Paid</th>
-<th>Current Due</th>
-
-</tr>
-
-<tr>
-
-<td class="text-right">
-<?php echo number_format($total_sales,2); ?>
-</td>
-
-<td class="text-right">
-<?php echo number_format($total_paid,2); ?>
-</td>
-
-<td class="text-right">
-<?php echo number_format($current_due_display,2); ?>
-</td>
-
-</tr>
-
-</table>
-
-<br>
-
-<table>
+<table class="ledger-table">
 
 <thead>
 
 <tr>
 
 <th>Date</th>
+<th>Invoice No.</th>
 <th>Type</th>
-<th>Reference</th>
-<th>Debit</th>
-<th>Credit</th>
-<th>Balance</th>
+<th>Amount</th>
 
 </tr>
 
@@ -818,14 +873,11 @@ echo htmlspecialchars(
 
 <?php
 
-$balance = 0;
-
 if(empty($ledger)){
 ?>
 
 <tr>
-
-<td colspan="6" class="text-right">
+<td colspan="4" class="text-right">
 No ledger entries found.
 </td>
 
@@ -836,9 +888,6 @@ No ledger entries found.
 
 foreach($ledger as $row){
 
-    $balance += $row['debit'];
-    $balance -= $row['credit'];
-
 ?>
 
 <tr>
@@ -848,23 +897,15 @@ foreach($ledger as $row){
 </td>
 
 <td>
-<?php echo htmlspecialchars($row['type']); ?>
+<?php echo htmlspecialchars($row['invoice_no'] !== '' ? $row['invoice_no'] : $row['reference']); ?>
 </td>
 
 <td>
-<?php echo htmlspecialchars($row['reference']); ?>
+<?php echo htmlspecialchars(($row['wallet_name'] ?? '') !== '' ? $row['wallet_name'] : '-'); ?>
 </td>
 
 <td class="text-right">
-<?php echo number_format($row['debit'],2); ?>
-</td>
-
-<td class="text-right">
-<?php echo number_format($row['credit'],2); ?>
-</td>
-
-<td class="text-right">
-<?php echo number_format($balance,2); ?>
+<?php echo number_format((float)$row['debit'] > 0 ? $row['debit'] : $row['credit'],2); ?>
 </td>
 
 </tr>
@@ -874,6 +915,8 @@ foreach($ledger as $row){
 </tbody>
 
 </table>
+
+<div class="document-footer">This is a system-generated customer ledger statement.</div>
 
 </main>
 

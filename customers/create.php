@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
 require_once '../includes/staff_helper.php';
+require_once '../includes/lead_management_helper.php';
 
 function ensure_customer_form_columns($conn)
 {
@@ -18,18 +19,59 @@ function ensure_customer_form_columns($conn)
         mysqli_query($conn, "ALTER TABLE customers ADD COLUMN ref_staff_id BIGINT UNSIGNED NULL AFTER customer_name");
         mysqli_query($conn, "ALTER TABLE customers ADD INDEX idx_customers_ref_staff (ref_staff_id)");
     }
+
+    $lead_id_column = mysqli_query($conn, "SHOW COLUMNS FROM customers LIKE 'lead_id'");
+    if($lead_id_column && mysqli_num_rows($lead_id_column) === 0){
+        mysqli_query($conn, "ALTER TABLE customers ADD COLUMN lead_id BIGINT UNSIGNED NULL AFTER ref_staff_id");
+        mysqli_query($conn, "ALTER TABLE customers ADD UNIQUE KEY uniq_customers_lead_id (lead_id)");
+    }
+
+    $lead_ref_column = mysqli_query($conn, "SHOW COLUMNS FROM customers LIKE 'lead_ref_name'");
+    if($lead_ref_column && mysqli_num_rows($lead_ref_column) === 0){
+        mysqli_query($conn, "ALTER TABLE customers ADD COLUMN lead_ref_name VARCHAR(150) NULL AFTER lead_id");
+    }
 }
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_staff_table($conn);
 ensure_customer_form_columns($conn);
+ensure_lead_management_table($conn);
 
 $message = '';
+$lead_id = (int)($_POST['lead_id'] ?? $_GET['lead_id'] ?? 0);
+$pending_lead = null;
+$lead_ref_name = '';
+
+if($lead_id > 0){
+    $lead_stmt = mysqli_prepare(
+        $conn,
+        "SELECT id, name, phone, email, note, created_by_name
+         FROM leads
+         WHERE id=?
+         AND user_id=?
+         AND (
+            status IN ('lead','successful','not_qualified')
+            OR (status='customer' AND (converted_customer_id IS NULL OR converted_customer_id=0))
+         )
+         LIMIT 1"
+    );
+    mysqli_stmt_bind_param($lead_stmt, 'ii', $lead_id, $user_id);
+    mysqli_stmt_execute($lead_stmt);
+    $pending_lead = mysqli_fetch_assoc(mysqli_stmt_get_result($lead_stmt));
+
+    if(!$pending_lead){
+        $lead_id = 0;
+        $message = 'This pending lead is not available for conversion.';
+    } else {
+        $lead_ref_name = trim((string)($pending_lead['created_by_name'] ?? ''));
+    }
+}
+
 $customer_code = trim($_POST['customer_code'] ?? '');
-$customer_name = trim($_POST['customer_name'] ?? '');
+$customer_name = trim($_POST['customer_name'] ?? ($pending_lead['name'] ?? ''));
 $ref_staff_id = (int)($_POST['ref_staff_id'] ?? 0);
-$phone = trim($_POST['phone'] ?? '');
-$email = trim($_POST['email'] ?? '');
+$phone = trim($_POST['phone'] ?? ($pending_lead['phone'] ?? ''));
+$email = trim($_POST['email'] ?? ($pending_lead['email'] ?? ''));
 $address = trim($_POST['address'] ?? '');
 $status = $_POST['status'] ?? 'active';
 
@@ -54,7 +96,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     } elseif(($message = validate_person_name($customer_name, 'Customer name')) !== ''){
     } elseif(($message = validate_phone_input($phone, 'Phone')) !== ''){
     } elseif(($message = validate_email_input($email, 'Email')) !== ''){
-    } elseif($ref_staff_id > 0) {
+    } elseif($lead_id === 0 && $ref_staff_id > 0) {
         $staff_stmt = mysqli_prepare($conn, "SELECT id FROM staff WHERE id=? AND user_id=? AND status='active' LIMIT 1");
         mysqli_stmt_bind_param($staff_stmt, "ii", $ref_staff_id, $user_id);
         mysqli_stmt_execute($staff_stmt);
@@ -102,6 +144,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     customer_code,
                     customer_name,
                     ref_staff_id,
+                    lead_id,
+                    lead_ref_name,
                     phone,
                     email,
                     address,
@@ -109,18 +153,20 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                 )
                 VALUES
                 (
-                    ?,?,?,?,?,?,?,?
+                    ?,?,?,?,NULLIF(?,0),?,?,?,?,?
                 )";
 
         $stmt = mysqli_prepare($conn,$sql);
 
         mysqli_stmt_bind_param(
             $stmt,
-            "ississss",
+            "issiisssss",
             $user_id,
             $customer_code,
             $customer_name,
             $ref_staff_id,
+            $lead_id,
+            $lead_ref_name,
             $phone,
             $email,
             $address,
@@ -128,6 +174,30 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         );
 
         if(mysqli_stmt_execute($stmt)){
+
+            $customer_id = (int)mysqli_insert_id($conn);
+
+            if($lead_id > 0){
+                $convert_stmt = mysqli_prepare(
+                $conn,
+                "UPDATE leads
+                     SET name=?, phone=?, email=?, status='customer', converted_customer_id=?
+                     WHERE id=?
+                     AND user_id=?
+                     AND (converted_customer_id IS NULL OR converted_customer_id=0)"
+                );
+                mysqli_stmt_bind_param(
+                    $convert_stmt,
+                    'sssiii',
+                    $customer_name,
+                    $phone,
+                    $email,
+                    $customer_id,
+                    $lead_id,
+                    $user_id
+                );
+                mysqli_stmt_execute($convert_stmt);
+            }
 
             header("Location: index.php");
             exit;
@@ -172,7 +242,7 @@ while($customer_codes_result && $code_row = mysqli_fetch_assoc($customer_codes_r
     }
 }
 
-$recent_customer_codes = array_slice($customer_codes, 0, 8);
+$last_customer_code = $customer_codes[0] ?? '';
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -185,7 +255,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header">
 
         <h3 class="card-title">
-            Add Customer
+            <?= $lead_id > 0 ? 'Convert Pending Lead to Customer' : 'Add Customer'; ?>
         </h3>
 
     </div>
@@ -201,6 +271,10 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <form method="post">
+
+            <?php if($lead_id > 0){ ?>
+                <input type="hidden" name="lead_id" value="<?= (int)$lead_id; ?>">
+            <?php } ?>
 
             <div class="form-group">
 
@@ -221,9 +295,9 @@ require_once '../includes/sidebar.php';
                 <?php } ?>
 
                 <small class="text-muted d-block mt-2">
-                    Previous Customer IDs:
-                    <?= !empty($recent_customer_codes)
-                        ? htmlspecialchars(implode(', ', $recent_customer_codes))
+                    Last Customer ID:
+                    <?= $last_customer_code !== ''
+                        ? htmlspecialchars($last_customer_code)
                         : 'No customer ID created yet.'; ?>
                 </small>
 
@@ -258,6 +332,15 @@ require_once '../includes/sidebar.php';
                     Ref. Name
                 </label>
 
+                <?php if($lead_id > 0){ ?>
+                    <input type="hidden" name="ref_staff_id" value="0">
+                    <input
+                        type="text"
+                        class="form-control"
+                        value="<?= htmlspecialchars($lead_ref_name ?: 'General'); ?>"
+                        readonly>
+                    <small class="text-muted">Fixed from the staff member who created this lead.</small>
+                <?php } else { ?>
                 <select
                     name="ref_staff_id"
                     class="form-control">
@@ -275,6 +358,7 @@ require_once '../includes/sidebar.php';
                     <?php } ?>
 
                 </select>
+                <?php } ?>
 
             </div>
 

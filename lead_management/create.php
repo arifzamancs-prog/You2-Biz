@@ -8,6 +8,12 @@ require_admin_user();
 ensure_lead_management_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+$creator_name = '';
+$creator_stmt = mysqli_prepare($conn, "SELECT name FROM users WHERE id=? LIMIT 1");
+mysqli_stmt_bind_param($creator_stmt, 'i', $user_id);
+mysqli_stmt_execute($creator_stmt);
+$creator = mysqli_fetch_assoc(mysqli_stmt_get_result($creator_stmt));
+$creator_name = trim((string)($creator['name'] ?? ''));
 $message = '';
 $name = trim($_POST['name'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
@@ -25,11 +31,11 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $stmt = mysqli_prepare(
             $conn,
             "INSERT INTO leads
-             (user_id, name, phone, email, note, followup_date, status)
+             (user_id, name, phone, email, note, followup_date, status, created_by_name)
              VALUES
-             (?, ?, ?, ?, ?, ?, 'lead')"
+             (?, ?, ?, ?, ?, ?, 'lead', ?)"
         );
-        mysqli_stmt_bind_param($stmt, 'isssss', $user_id, $name, $phone, $email, $note, $date_value);
+        mysqli_stmt_bind_param($stmt, 'issssss', $user_id, $name, $phone, $email, $note, $date_value, $creator_name);
 
         if(mysqli_stmt_execute($stmt)){
             header('Location: index.php?filter=lead');

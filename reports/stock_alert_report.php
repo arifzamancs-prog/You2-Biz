@@ -2,6 +2,10 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+
+header('Location: ' . app_path('dashboard.php?error=Stock%20Alert%20report%20is%20disabled'));
+exit;
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';

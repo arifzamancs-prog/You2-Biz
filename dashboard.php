@@ -6,6 +6,7 @@ require_once 'includes/wallet_helper.php';
 require_once 'includes/invoice_posting_helper.php';
 require_once 'includes/customer_opening_due_helper.php';
 require_once 'includes/customer_due_allocation_helper.php';
+require_once 'includes/booking_invoice_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $user_name = $_SESSION['login_name'] ?? $_SESSION['user_name'] ?? 'User';
@@ -14,6 +15,8 @@ $dashboard_is_agent = is_agent_user();
 ensure_default_cash_wallet($conn, $user_id);
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
+ensure_booking_invoice_table($conn);
+ensure_booking_invoice_type_table($conn, $user_id);
 
 function dashboard_value($conn, $sql, $types = '', $params = [])
 {
@@ -63,11 +66,15 @@ $total_wallet_balance = dashboard_value(
 
 $total_sales = dashboard_value(
     $conn,
-    "SELECT COALESCE(SUM(total_amount),0)
-     FROM invoices
-     WHERE user_id=?
-     AND accounting_status='posted'
-     AND invoice_date = CURDATE()",
+    "SELECT COALESCE(SUM(bi.amount),0)
+     FROM booking_invoices bi
+     LEFT JOIN booking_invoice_types bit
+        ON bit.user_id=bi.user_id
+        AND bit.type_key=bi.invoice_type
+     WHERE bi.user_id=?
+     AND bi.status='confirmed'
+     AND COALESCE(bit.behavior,'income')='income'
+     AND bi.invoice_date = CURDATE()",
     "i",
     [$user_id]
 );
@@ -180,16 +187,16 @@ $today_expense = dashboard_value(
 $recent_invoices = dashboard_rows(
     $conn,
     "SELECT
-        id,
-        invoice_no,
-        invoice_date,
-        customer_name,
-        total_amount,
-        due_amount,
-        payment_status
-     FROM invoices
-     WHERE user_id=?
-     ORDER BY id DESC
+        bi.id,
+        bi.invoice_no,
+        bi.invoice_date,
+        bi.amount,
+        bi.status,
+        c.customer_name
+     FROM booking_invoices bi
+     LEFT JOIN customers c ON c.id=bi.customer_id
+     WHERE bi.user_id=?
+     ORDER BY bi.invoice_date DESC, bi.id DESC
      LIMIT 6",
     "i",
     [$user_id]
@@ -254,13 +261,13 @@ $recent_transactions = dashboard_rows(
 
 $month_labels = [];
 $month_sales_map = [];
-$month_purchase_map = [];
+$month_expense_map = [];
 
 for($i = 5; $i >= 0; $i--){
     $key = date('Y-m', strtotime("-{$i} months"));
     $month_labels[$key] = date('M Y', strtotime($key . '-01'));
     $month_sales_map[$key] = 0;
-    $month_purchase_map[$key] = 0;
+    $month_expense_map[$key] = 0;
 }
 
 $start_month = array_key_first($month_labels) . '-01';
@@ -268,13 +275,17 @@ $start_month = array_key_first($month_labels) . '-01';
 $sales_rows = dashboard_rows(
     $conn,
     "SELECT
-        DATE_FORMAT(invoice_date,'%Y-%m') AS month_key,
-        COALESCE(SUM(total_amount),0) AS total
-     FROM invoices
-     WHERE user_id=?
-     AND accounting_status='posted'
-     AND invoice_date >= ?
-     GROUP BY DATE_FORMAT(invoice_date,'%Y-%m')",
+        DATE_FORMAT(bi.invoice_date,'%Y-%m') AS month_key,
+        COALESCE(SUM(bi.amount),0) AS total
+     FROM booking_invoices bi
+     LEFT JOIN booking_invoice_types bit
+        ON bit.user_id=bi.user_id
+        AND bit.type_key=bi.invoice_type
+     WHERE bi.user_id=?
+     AND bi.status='confirmed'
+     AND COALESCE(bit.behavior,'income')='income'
+     AND bi.invoice_date >= ?
+     GROUP BY DATE_FORMAT(bi.invoice_date,'%Y-%m')",
     "is",
     [$user_id, $start_month]
 );
@@ -285,22 +296,23 @@ foreach($sales_rows as $row){
     }
 }
 
-$purchase_rows = dashboard_rows(
+$expense_rows = dashboard_rows(
     $conn,
     "SELECT
-        DATE_FORMAT(purchase_date,'%Y-%m') AS month_key,
-        COALESCE(SUM(total_amount),0) AS total
-     FROM purchases
+        DATE_FORMAT(txn_date,'%Y-%m') AS month_key,
+        COALESCE(SUM(amount),0) AS total
+     FROM expenses
      WHERE user_id=?
-     AND purchase_date >= ?
-     GROUP BY DATE_FORMAT(purchase_date,'%Y-%m')",
+     AND approval_status='approved'
+     AND txn_date >= ?
+     GROUP BY DATE_FORMAT(txn_date,'%Y-%m')",
     "is",
     [$user_id, $start_month]
 );
 
-foreach($purchase_rows as $row){
-    if(isset($month_purchase_map[$row['month_key']])){
-        $month_purchase_map[$row['month_key']] = (float)$row['total'];
+foreach($expense_rows as $row){
+    if(isset($month_expense_map[$row['month_key']])){
+        $month_expense_map[$row['month_key']] = (float)$row['total'];
     }
 }
 
@@ -399,7 +411,7 @@ require_once 'includes/sidebar.php';
     </div>
 
     <div class="col-lg-3 col-6">
-        <a href="sales/invoice_list.php" class="dashboard-card-link agent-dashboard-clickable">
+        <a href="create_invoice/invoice_list.php" class="dashboard-card-link agent-dashboard-clickable">
         <div class="small-box bg-success">
             <div class="inner">
                 <h3>BDT <?= number_format($total_sales,2); ?></h3>
@@ -407,6 +419,20 @@ require_once 'includes/sidebar.php';
             </div>
             <div class="icon">
                 <i class="fas fa-chart-line"></i>
+            </div>
+        </div>
+        </a>
+    </div>
+
+    <div class="col-lg-3 col-6">
+        <a href="expenses/index.php" class="dashboard-card-link">
+        <div class="small-box bg-danger">
+            <div class="inner">
+                <h3>BDT <?= number_format($today_expense,2); ?></h3>
+                <p>Today's Expense</p>
+            </div>
+            <div class="icon">
+                <i class="fas fa-receipt"></i>
             </div>
         </div>
         </a>
@@ -426,98 +452,6 @@ require_once 'includes/sidebar.php';
         </a>
     </div>
 
-    <div class="col-lg-3 col-6">
-        <a href="reports/customer_due_report.php" class="dashboard-card-link">
-        <div class="small-box bg-danger">
-            <div class="inner">
-                <h3>BDT <?= number_format($customer_due,2); ?></h3>
-                <p>Customer Due</p>
-            </div>
-            <div class="icon">
-                <i class="fas fa-hand-holding-usd"></i>
-            </div>
-        </div>
-        </a>
-    </div>
-
-</div>
-
-<div class="row">
-
-    <div class="col-lg-3 col-6">
-        <a href="expenses/index.php" class="dashboard-card-link">
-        <div class="info-box">
-            <span class="info-box-icon bg-primary">
-                <i class="fas fa-coins"></i>
-            </span>
-            <div class="info-box-content">
-                <span class="info-box-text">Today's Expense</span>
-                <span class="info-box-number">BDT <?= number_format($today_expense,2); ?></span>
-            </div>
-        </div>
-        </a>
-    </div>
-
-    <div class="col-lg-3 col-6">
-        <a href="suppliers/supplier_payment.php" class="dashboard-card-link">
-        <div class="info-box">
-            <span class="info-box-icon bg-danger">
-                <i class="fas fa-truck-loading"></i>
-            </span>
-            <div class="info-box-content">
-                <span class="info-box-text">Supplier Due</span>
-                <span class="info-box-number">BDT <?= number_format($supplier_due,2); ?></span>
-            </div>
-        </div>
-        </a>
-    </div>
-
-    <div class="col-lg-3 col-6">
-        <a href="reports/stock_alert_report.php" class="dashboard-card-link">
-        <div class="info-box">
-            <span class="info-box-icon bg-warning">
-                <i class="fas fa-exclamation-triangle"></i>
-            </span>
-            <div class="info-box-content">
-                <span class="info-box-text">Low Stock</span>
-                <span class="info-box-number"><?= (int)$low_stock; ?> Products</span>
-            </div>
-        </div>
-        </a>
-    </div>
-
-    <div class="col-lg-3 col-6">
-        <div class="info-box">
-            <span class="info-box-icon bg-success">
-                <i class="fas fa-users"></i>
-            </span>
-            <div class="info-box-content">
-                <span class="info-box-text">
-                    <a href="customers/index.php" class="dashboard-split-link">
-                        Customers
-                    </a>
-                    <?php if(products_module_enabled()){ ?>
-                    /
-                    <a href="products/index.php" class="dashboard-split-link">
-                        Products
-                    </a>
-                    <?php } ?>
-                </span>
-                <span class="info-box-number">
-                    <a href="customers/index.php" class="dashboard-split-link">
-                        <?= (int)$total_customers; ?>
-                    </a>
-                    <?php if(products_module_enabled()){ ?>
-                    /
-                    <a href="products/index.php" class="dashboard-split-link">
-                        <?= (int)$total_products; ?>
-                    </a>
-                    <?php } ?>
-                </span>
-            </div>
-        </div>
-    </div>
-
 </div>
 
 <div class="row">
@@ -528,13 +462,13 @@ require_once 'includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    Sales vs Purchases
+                    Sales vs Expenses
                 </h3>
             </div>
 
             <div class="card-body">
                 <div style="height:320px;">
-                    <canvas id="salesPurchaseChart"></canvas>
+                    <canvas id="salesExpenseChart"></canvas>
                 </div>
             </div>
 
@@ -571,7 +505,7 @@ require_once 'includes/sidebar.php';
 
 <div class="row">
 
-    <div class="col-lg-7">
+    <div class="col-lg-12">
 
         <div class="card">
 
@@ -580,7 +514,7 @@ require_once 'includes/sidebar.php';
                     Recent Invoices
                 </h3>
                 <div class="card-tools">
-                    <a href="sales/invoice_list.php" class="btn btn-tool">
+                    <a href="create_invoice/invoice_list.php" class="btn btn-tool">
                         <i class="fas fa-arrow-right"></i>
                     </a>
                 </div>
@@ -608,78 +542,18 @@ require_once 'includes/sidebar.php';
                     <?php foreach($recent_invoices as $invoice){ ?>
                     <tr>
                         <td>
-                            <a href="sales/view_invoice.php?id=<?= (int)$invoice['id']; ?>">
+                            <a href="create_invoice/print.php?id=<?= (int)$invoice['id']; ?>" target="_blank" rel="noopener">
                                 <?= htmlspecialchars($invoice['invoice_no']); ?>
                             </a>
                         </td>
                         <td><?= htmlspecialchars(app_date($invoice['invoice_date'])); ?></td>
                         <td><?= htmlspecialchars($invoice['customer_name']); ?></td>
-                        <td>BDT <?= number_format($invoice['total_amount'],2); ?></td>
+                        <td>BDT <?= number_format($invoice['amount'],2); ?></td>
                         <td>
-                            <?php if($invoice['payment_status'] == 'paid'){ ?>
-                                <span class="badge badge-success">Paid</span>
-                            <?php }elseif($invoice['payment_status'] == 'partial'){ ?>
-                                <span class="badge badge-warning">Partial</span>
-                            <?php }else{ ?>
-                                <span class="badge badge-danger">Due</span>
-                            <?php } ?>
-                        </td>
-                    </tr>
-                    <?php } ?>
-                    </tbody>
-                </table>
-            </div>
-
-        </div>
-
-    </div>
-
-    <div class="col-lg-5">
-
-        <div class="card">
-
-            <div class="card-header">
-                <h3 class="card-title">
-                    Top Due Customers
-                </h3>
-                <div class="card-tools">
-                    <a href="reports/customer_due_report.php" class="btn btn-tool">
-                        <i class="fas fa-arrow-right"></i>
-                    </a>
-                </div>
-            </div>
-
-            <div class="card-body p-0">
-                <table class="table table-striped table-sm mb-0">
-                    <thead>
-                    <tr>
-                        <th>Customer</th>
-                        <th>Phone</th>
-                        <th>Due</th>
-                        <th></th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php if(empty($top_due_customers)){ ?>
-                    <tr>
-                        <td colspan="4" class="text-center text-muted py-3">
-                            No customer due found.
-                        </td>
-                    </tr>
-                    <?php } ?>
-                    <?php foreach($top_due_customers as $customer){ ?>
-                    <tr>
-                        <td><?= htmlspecialchars($customer['customer_name']); ?></td>
-                        <td><?= htmlspecialchars($customer['phone']); ?></td>
-                        <td>
-                            <strong>BDT <?= number_format($customer['total_due'],2); ?></strong>
-                        </td>
-                        <td class="text-right">
-                            <a
-                                href="customers/customer_ledger.php?id=<?= (int)$customer['id']; ?>"
-                                class="btn btn-info btn-xs">
-                                Ledger
-                            </a>
+                            <?php $is_confirmed = ($invoice['status'] ?? 'pending') === 'confirmed'; ?>
+                            <span class="badge badge-<?= $is_confirmed ? 'success' : 'warning'; ?>">
+                                <?= $is_confirmed ? 'Confirmed' : 'Pending'; ?>
+                            </span>
                         </td>
                     </tr>
                     <?php } ?>
@@ -695,62 +569,7 @@ require_once 'includes/sidebar.php';
 
 <div class="row">
 
-    <div class="col-lg-6">
-
-        <div class="card">
-
-            <div class="card-header">
-                <h3 class="card-title">
-                    Low Stock Watch
-                </h3>
-                <div class="card-tools">
-                    <a href="reports/stock_alert_report.php" class="btn btn-tool">
-                        <i class="fas fa-arrow-right"></i>
-                    </a>
-                </div>
-            </div>
-
-            <div class="card-body p-0">
-                <table class="table table-striped table-sm mb-0">
-                    <thead>
-                    <tr>
-                        <th>Product</th>
-                        <th>Stock</th>
-                        <th>Minimum</th>
-                        <th>Status</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php if(empty($low_stock_products)){ ?>
-                    <tr>
-                        <td colspan="4" class="text-center text-muted py-3">
-                            Stock levels look healthy.
-                        </td>
-                    </tr>
-                    <?php } ?>
-                    <?php foreach($low_stock_products as $product){ ?>
-                    <tr>
-                        <td><?= htmlspecialchars($product['product_name']); ?></td>
-                        <td><?= number_format($product['current_stock'],0); ?></td>
-                        <td><?= number_format($product['minimum_stock'],0); ?></td>
-                        <td>
-                            <?php if((float)$product['current_stock'] <= 0){ ?>
-                                <span class="badge badge-danger">Out</span>
-                            <?php }else{ ?>
-                                <span class="badge badge-warning">Low</span>
-                            <?php } ?>
-                        </td>
-                    </tr>
-                    <?php } ?>
-                    </tbody>
-                </table>
-            </div>
-
-        </div>
-
-    </div>
-
-    <div class="col-lg-6">
+    <div class="col-lg-12">
 
         <div class="card">
 
@@ -842,8 +661,7 @@ require_once 'includes/sidebar.php';
                         </td>
                         <td><?= htmlspecialchars($wallet_text); ?></td>
                         <td>
-                            <strong class="<?= $transaction['transaction_type'] == 'transfer' ? 'text-info' : ($is_income ? 'text-success' : 'text-danger'); ?>">
-                                <?= $transaction['transaction_type'] == 'transfer' ? '' : ($is_income ? '+' : '-'); ?>
+                            <strong class="text-dark">
                                 BDT <?= number_format($transaction['amount'],2); ?>
                             </strong>
                         </td>
@@ -866,11 +684,11 @@ require_once 'includes/sidebar.php';
 $page_script = '
 <script>
 $(function(){
-    const salesPurchaseCanvas = document.getElementById("salesPurchaseChart");
+    const salesExpenseCanvas = document.getElementById("salesExpenseChart");
     const walletCanvas = document.getElementById("walletChart");
 
-    if(salesPurchaseCanvas){
-        new Chart(salesPurchaseCanvas, {
+    if(salesExpenseCanvas){
+        new Chart(salesExpenseCanvas, {
             type: "bar",
             data: {
                 labels: ' . json_encode(array_values($month_labels)) . ',
@@ -881,9 +699,9 @@ $(function(){
                         backgroundColor: "#28a745"
                     },
                     {
-                        label: "Purchases",
-                        data: ' . json_encode(array_values($month_purchase_map)) . ',
-                        backgroundColor: "#ffc107"
+                        label: "Expenses",
+                        data: ' . json_encode(array_values($month_expense_map)) . ',
+                        backgroundColor: "#dc3545"
                     }
                 ]
             },

@@ -132,6 +132,12 @@ require_once '../includes/sidebar.php';
 
                     <?php if(manager_can_modify()){ ?>
                 <td>
+                    <?php $is_supplier_payment_expense = in_array(($row['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true); ?>
+                    <?php if($is_supplier_payment_expense){ ?>
+                        <button type="button" class="btn btn-secondary btn-sm" disabled title="Managed from the supplier payment flow.">
+                            <i class="fas fa-lock"></i>
+                        </button>
+                    <?php }else{ ?>
                         <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm">
                             Edit
                         </a>
@@ -140,6 +146,7 @@ require_once '../includes/sidebar.php';
                            onclick="return confirm('Delete this expense entry?')">
                             Delete
                         </a>
+                    <?php } ?>
                 </td>
                     <?php } ?>
 

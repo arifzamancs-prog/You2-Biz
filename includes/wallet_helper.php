@@ -4,10 +4,20 @@ function ensure_default_cash_wallet($conn, $user_id)
 {
     $user_id = (int)$user_id;
 
+    /* Rename legacy system wallets without changing their transaction links. */
+    $rename_sql = "UPDATE wallets
+                   SET wallet_name='Cash'
+                   WHERE user_id=?
+                   AND wallet_name='Cash Box'
+                   AND is_system=1";
+    $rename_stmt = mysqli_prepare($conn, $rename_sql);
+    mysqli_stmt_bind_param($rename_stmt, "i", $user_id);
+    mysqli_stmt_execute($rename_stmt);
+
     $sql = "SELECT id, is_system, status
             FROM wallets
             WHERE user_id=?
-            AND wallet_name='Cash Box'
+            AND wallet_name='Cash'
             ORDER BY is_system DESC, id ASC
             LIMIT 1";
 
@@ -46,7 +56,7 @@ function ensure_default_cash_wallet($conn, $user_id)
                    VALUES
                    (
                        ?,
-                       'Cash Box',
+                       'Cash',
                        'System Default Cash Wallet',
                        0,
                        'active',

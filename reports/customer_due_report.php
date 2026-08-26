@@ -2,6 +2,10 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+
+header('Location: ' . app_path('dashboard.php?error=Customer%20Due%20report%20is%20disabled'));
+exit;
+
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';

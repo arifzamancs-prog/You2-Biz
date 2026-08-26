@@ -209,22 +209,7 @@ function confirm_booking_invoice($conn, $invoice_id, $user_id)
             return $invoice;
         }
 
-        $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
-        $amount = (float)$invoice['amount'];
-        if($behavior === 'expense'){
-            debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
-        }else{
-            credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
-        }
-
-        $transaction_type = $behavior === 'expense' ? 'invoice_expense' : 'invoice_income';
-        $txn_no = generate_short_unique_txn_no($conn, 'INV', 'transactions', 'txn_no');
-        $note = 'Invoice ' . $invoice['invoice_no'] . ' confirmed';
-        record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, (int)$invoice['id'], $amount, $note, $invoice['invoice_date']);
-
-        $update_stmt = mysqli_prepare($conn, "UPDATE booking_invoices SET status='confirmed', wallet_effect_applied=1, confirmed_at=NOW() WHERE id=? AND user_id=?");
-        mysqli_stmt_bind_param($update_stmt, 'ii', $invoice_id, $user_id);
-        mysqli_stmt_execute($update_stmt);
+        booking_invoice_apply_wallet_effect($conn, $invoice, $user_id);
         mysqli_commit($conn);
         $invoice['status'] = 'confirmed';
         $invoice['wallet_effect_applied'] = 1;
@@ -232,6 +217,69 @@ function confirm_booking_invoice($conn, $invoice_id, $user_id)
     } catch(Throwable $error) {
         mysqli_rollback($conn);
         throw $error;
+    }
+}
+
+function booking_invoice_apply_wallet_effect($conn, $invoice, $user_id)
+{
+    require_once __DIR__ . '/wallet_helper.php';
+    require_once __DIR__ . '/transaction_helper.php';
+
+    $invoice_id = (int)$invoice['id'];
+    $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
+    $amount = (float)$invoice['amount'];
+
+    if($amount <= 0){
+        throw new Exception('Invoice amount must be greater than zero.');
+    }
+
+    if($behavior === 'expense'){
+        debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+    }else{
+        credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+    }
+
+    $transaction_type = $behavior === 'expense' ? 'invoice_expense' : 'invoice_income';
+    $txn_no = generate_short_unique_txn_no($conn, 'INV', 'transactions', 'txn_no');
+    $note = 'Invoice ' . $invoice['invoice_no'] . ' confirmed';
+    record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, $invoice_id, $amount, $note, $invoice['invoice_date']);
+
+    $update_stmt = mysqli_prepare($conn, "UPDATE booking_invoices SET status='confirmed', wallet_effect_applied=1, confirmed_at=NOW() WHERE id=? AND user_id=?");
+    mysqli_stmt_bind_param($update_stmt, 'ii', $invoice_id, $user_id);
+    if(!mysqli_stmt_execute($update_stmt)){
+        throw new Exception(mysqli_stmt_error($update_stmt));
+    }
+}
+
+function booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id)
+{
+    require_once __DIR__ . '/wallet_helper.php';
+
+    if(($invoice['status'] ?? 'pending') !== 'confirmed' && empty($invoice['wallet_effect_applied'])){
+        return;
+    }
+
+    $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
+    $amount = (float)$invoice['amount'];
+
+    // Reverse exactly the posting made on confirmation.
+    if($behavior === 'expense'){
+        credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+    }else{
+        debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+    }
+
+    $transaction_stmt = mysqli_prepare(
+        $conn,
+        "DELETE FROM transactions
+         WHERE user_id=?
+         AND reference_id=?
+         AND transaction_type IN ('invoice_income', 'invoice_expense')"
+    );
+    $invoice_id = (int)$invoice['id'];
+    mysqli_stmt_bind_param($transaction_stmt, 'ii', $user_id, $invoice_id);
+    if(!mysqli_stmt_execute($transaction_stmt)){
+        throw new Exception(mysqli_stmt_error($transaction_stmt));
     }
 }
 

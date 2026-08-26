@@ -28,14 +28,17 @@ $products = mysqli_query(
      ORDER BY product_name"
 );
 
-$categories = mysqli_query(
+// Keep the products created/used through purchasing visible on this screen so
+// their current default cost can be maintained without opening Product Management.
+$managed_products = mysqli_query(
     $conn,
-    "SELECT id, category_name
-     FROM product_categories
-     WHERE user_id='$user_id'
-     AND status='active'
-     AND category_type='stock_product'
-     ORDER BY category_name"
+    "SELECT p.id, p.product_name, p.purchase_price
+     FROM products p
+     INNER JOIN product_categories c ON c.id=p.category_id
+     WHERE p.user_id='$user_id'
+     AND p.status='active'
+     AND c.category_type='stock_product'
+     ORDER BY p.product_name"
 );
 
 $wallets = active_wallets_result($conn, $user_id);
@@ -53,11 +56,6 @@ while($supplier = mysqli_fetch_assoc($suppliers)){
 $product_options_html = '';
 while($product = mysqli_fetch_assoc($products)){
     $product_options_html .= '<option value="' . (int)$product['id'] . '">' . htmlspecialchars($product['product_name']) . '</option>';
-}
-
-$category_options_html = '';
-while($category = mysqli_fetch_assoc($categories)){
-    $category_options_html .= '<option value="' . (int)$category['id'] . '">' . htmlspecialchars($category['category_name']) . '</option>';
 }
 
 require_once '../includes/header.php';
@@ -140,10 +138,6 @@ require_once '../includes/sidebar.php';
     </select>
 
     <div class="new-product-box mt-2" style="display:none;">
-        <select name="new_product_category_id[]" class="form-control mb-2 new-product-category">
-            <option value="">Select Category</option>
-            <?= $category_options_html; ?>
-        </select>
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
     </div>
 </td>
@@ -227,6 +221,62 @@ require_once '../includes/sidebar.php';
 </div>
 </section>
 
+<section class="content">
+<div class="container-fluid">
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Created Products</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+        <table class="table table-bordered table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th width="220">Cost / Price</th>
+                    <th width="150">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php if($managed_products && mysqli_num_rows($managed_products) > 0){ ?>
+                <?php while($managed_product = mysqli_fetch_assoc($managed_products)){ ?>
+                    <?php $managed_product_used = product_has_transactions($conn, (int)$managed_product['id'], $user_id); ?>
+                    <tr>
+                        <td><?= htmlspecialchars($managed_product['product_name']); ?></td>
+                        <td>
+                            <form method="post" action="update_product_cost.php" class="form-inline">
+                                <input type="hidden" name="product_id" value="<?= (int)$managed_product['id']; ?>">
+                                <div class="input-group input-group-sm">
+                                    <div class="input-group-prepend"><span class="input-group-text">BDT</span></div>
+                                    <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" value="<?= number_format((float)$managed_product['purchase_price'], 2, '.', ''); ?>" required>
+                                    <div class="input-group-append">
+                                        <button type="submit" class="btn btn-primary" title="Save Cost" aria-label="Save Cost"><i class="fas fa-save"></i></button>
+                                    </div>
+                                </div>
+                            </form>
+                        </td>
+                        <td>
+                            <?php if(!$managed_product_used){ ?>
+                                <a href="../products/edit.php?id=<?= (int)$managed_product['id']; ?>" class="btn btn-warning btn-sm" title="Edit Product" aria-label="Edit Product"><i class="fas fa-edit"></i></a>
+                                <a href="delete_product.php?id=<?= (int)$managed_product['id']; ?>" class="btn btn-danger btn-sm" title="Delete Product" aria-label="Delete Product" onclick="return confirm('Delete this product?');"><i class="fas fa-trash"></i></a>
+                            <?php }else{ ?>
+                                <button type="button" class="btn btn-danger btn-sm" disabled title="This product is already used and cannot be deleted." aria-label="Delete unavailable"><i class="fas fa-trash"></i></button>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php } ?>
+            <?php }else{ ?>
+                <tr><td colspan="3" class="text-center text-muted">No products created yet.</td></tr>
+            <?php } ?>
+            </tbody>
+        </table>
+        </div>
+        <small class="text-muted d-block mt-2">Used products keep their name and other details locked; only the cost/price can be updated.</small>
+    </div>
+</div>
+</div>
+</section>
+
 <?php
 
 $page_script = <<<SCRIPT
@@ -277,12 +327,10 @@ $(function(){
         let row = $(this).closest("tr");
         let id = $(this).val();
         let newBox = row.find(".new-product-box");
-        let categoryInput = row.find(".new-product-category");
         let nameInput = row.find(".new-product-name");
 
         if(id === "__new__"){
             newBox.show();
-            categoryInput.prop("required", true);
             nameInput.prop("required", true);
             row.find(".cost_price").val("0");
             calculateRow(row);
@@ -290,7 +338,6 @@ $(function(){
         }
 
         newBox.hide();
-        categoryInput.prop("required", false).val("");
         nameInput.prop("required", false).val("");
 
         if(id === ""){
@@ -335,7 +382,6 @@ $(function(){
         row.find("option").removeAttr("data-select2-id");
 
         row.find(".new-product-box").hide();
-        row.find(".new-product-category").prop("required", false).val("");
         row.find(".new-product-name").prop("required", false).val("");
         row.find(".cost_price").val("");
         row.find(".qty").val(1);

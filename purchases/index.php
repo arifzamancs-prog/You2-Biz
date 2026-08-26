@@ -12,7 +12,8 @@ $sql = "SELECT
 
             p.*,
             s.supplier_name,
-            COALESCE(SUM(pi.quantity), 0) AS total_quantity
+            COALESCE(SUM(pi.quantity), 0) AS total_quantity,
+            GROUP_CONCAT(DISTINCT pr.product_name ORDER BY pr.product_name SEPARATOR ', ') AS product_names
 
         FROM purchases p
 
@@ -21,6 +22,9 @@ $sql = "SELECT
 
         LEFT JOIN purchase_items pi
         ON pi.purchase_id = p.id
+
+        LEFT JOIN products pr
+        ON pr.id = pi.product_id
 
         WHERE p.user_id=?
 
@@ -102,10 +106,10 @@ class="table table-bordered table-striped">
 <th>Purchase No</th>
 <th>Date</th>
 <th>Supplier</th>
+<th>Product</th>
 <th>Qty</th>
 <th>Total</th>
 <th>Paid</th>
-<th>Due</th>
 <th>Status</th>
 <th width="130">Action</th>
 
@@ -139,6 +143,10 @@ $row['supplier_name']
 </td>
 
 <td>
+<?= htmlspecialchars($row['product_names'] ?: '—'); ?>
+</td>
+
+<td>
 <?= number_format(
 $row['total_quantity'],
 0
@@ -155,13 +163,6 @@ $row['total_amount'],
 <td>
 <?= number_format(
 $row['paid_amount'],
-2
-); ?>
-</td>
-
-<td>
-<?= number_format(
-$row['due_amount'],
 2
 ); ?>
 </td>
@@ -206,27 +207,27 @@ Due
 
     <a
         href="view.php?id=<?= $row['id']; ?>"
-        class="btn btn-info btn-sm">
-
-        View
-
+        class="btn btn-info btn-sm"
+        title="View Purchase"
+        aria-label="View Purchase">
+        <i class="fas fa-eye"></i>
     </a>
 
     <?php if(manager_can_modify()){ ?>
 
     <a href="edit.php?id=<?= $row['id']; ?>"
-    class="btn btn-warning btn-sm">
-
-        Edit
-
+    class="btn btn-warning btn-sm"
+    title="Edit Purchase"
+    aria-label="Edit Purchase">
+        <i class="fas fa-edit"></i>
     </a>
 
     <a href="delete.php?id=<?= $row['id']; ?>"
     class="btn btn-danger btn-sm"
+    title="Delete Purchase"
+    aria-label="Delete Purchase"
     onclick="return confirm('Delete this Purchase?');">
-
-        Delete
-
+        <i class="fas fa-trash"></i>
     </a>
 
     <?php } ?>

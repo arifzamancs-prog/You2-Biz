@@ -66,6 +66,13 @@ $result =
 $purchase =
     mysqli_fetch_assoc($result);
 
+mysqli_free_result($result);
+mysqli_stmt_close($stmt);
+
+if(!$purchase){
+    throw new Exception("Purchase not found.");
+}
+
 $paid_amount =
     (float)$purchase['paid_amount'];
 
@@ -97,12 +104,19 @@ $payment_wallet_id =
 
     mysqli_stmt_execute($stmt);
 
+    // Read the rows first, then release this statement before the FIFO helper
+    // runs additional queries on the same MySQL connection.
+    $items_result = mysqli_stmt_get_result($stmt);
+    $items = [];
+    while($item = mysqli_fetch_assoc($items_result)){
+        $items[] = $item;
+    }
+    mysqli_free_result($items_result);
+    mysqli_stmt_close($stmt);
+
     if(!fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
         throw new Exception("FIFO batches could not be removed.");
     }
-
-    $items =
-        mysqli_stmt_get_result($stmt);
 
     /*
     ------------------------------------
@@ -110,10 +124,7 @@ $payment_wallet_id =
     ------------------------------------
     */
 
-    while(
-        $row =
-        mysqli_fetch_assoc($items)
-    ){
+    foreach($items as $row){
 
         $sql = "UPDATE products
 

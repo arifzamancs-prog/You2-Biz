@@ -1,7 +1,20 @@
 <?php
 
+/*
+ * Stock/FIFO tracking is currently disabled for this installation.
+ * The functions remain as harmless compatibility wrappers because older
+ * purchase and invoice pages call them.
+ */
+function fifo_inventory_is_enabled()
+{
+    return false;
+}
+
 function ensure_fifo_inventory_tables($conn)
 {
+    if(!fifo_inventory_is_enabled()){
+        return;
+    }
     static $checked = false;
 
     if($checked){
@@ -101,6 +114,9 @@ function ensure_fifo_inventory_tables($conn)
 
 function fifo_inventory_create_batch($conn, $user_id, $product_id, $quantity, $unit_cost, $source_type, $source_id, $source_no, $batch_date)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $quantity = (float)$quantity;
@@ -155,6 +171,9 @@ function fifo_inventory_create_batch($conn, $user_id, $product_id, $quantity, $u
 
 function fifo_inventory_get_available_stock($conn, $user_id, $product_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return 0;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $sql = "SELECT COALESCE(SUM(remaining_quantity), 0) AS available_stock
@@ -178,6 +197,9 @@ function fifo_inventory_get_available_stock($conn, $user_id, $product_id)
 
 function fifo_inventory_allocate_sale($conn, $user_id, $invoice_item_id, $product_id, $quantity)
 {
+    if(!fifo_inventory_is_enabled()){
+        return ['success' => true, 'cost_amount' => 0];
+    }
     ensure_fifo_inventory_tables($conn);
 
     $quantity = (float)$quantity;
@@ -319,6 +341,9 @@ function fifo_inventory_allocate_sale($conn, $user_id, $invoice_item_id, $produc
 
 function fifo_inventory_add_return_batch($conn, $user_id, $invoice_item_id, $product_id, $quantity, $unit_cost, $source_no, $batch_date)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $quantity = abs((float)$quantity);
@@ -357,6 +382,9 @@ function fifo_inventory_add_return_batch($conn, $user_id, $invoice_item_id, $pro
 
 function fifo_inventory_restore_invoice_item($conn, $invoice_item_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $invoice_item_id = (int)$invoice_item_id;
@@ -398,6 +426,9 @@ function fifo_inventory_restore_invoice_item($conn, $invoice_item_id)
 
 function fifo_inventory_purchase_is_editable($conn, $purchase_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $purchase_id = (int)$purchase_id;
@@ -423,6 +454,9 @@ function fifo_inventory_purchase_is_editable($conn, $purchase_id)
 
 function fifo_inventory_remove_purchase_batches($conn, $purchase_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $purchase_id = (int)$purchase_id;
@@ -437,6 +471,9 @@ function fifo_inventory_remove_purchase_batches($conn, $purchase_id)
 
 function fifo_inventory_remove_product_opening_batches($conn, $product_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $product_id = (int)$product_id;
@@ -451,6 +488,9 @@ function fifo_inventory_remove_product_opening_batches($conn, $product_id)
 
 function fifo_inventory_product_opening_is_editable($conn, $user_id, $product_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $user_id = (int)$user_id;
@@ -481,6 +521,9 @@ function fifo_inventory_product_opening_is_editable($conn, $user_id, $product_id
 
 function fifo_inventory_product_is_editable_before_sale($conn, $user_id, $product_id)
 {
+    if(!fifo_inventory_is_enabled()){
+        return true;
+    }
     ensure_fifo_inventory_tables($conn);
 
     $user_id = (int)$user_id;

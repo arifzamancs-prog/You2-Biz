@@ -37,11 +37,13 @@ $result = mysqli_stmt_get_result($stmt);
 
 $chart_labels = [];
 $chart_values = [];
+$total_expense_amount = 0;
 
 while($row = mysqli_fetch_assoc($result)){
 
     $chart_labels[] = $row['category_name'];
     $chart_values[] = $row['total_amount'];
+    $total_expense_amount += (float)$row['total_amount'];
 }
 
 mysqli_data_seek($result,0);
@@ -52,6 +54,12 @@ require_once '../includes/sidebar.php';
 
 ?>
 
+<div class="report-print-heading d-none">
+    <div class="print-brand">YOU2 <span>TECHNOLOGIES</span></div>
+    <div class="print-document-title">Expense Report</div>
+    <div class="print-report-meta"><span>Report period: <?= date('F Y', mktime(0, 0, 0, $month, 1)); ?></span><span>Generated: <?= date('d M Y, h:i A'); ?></span></div>
+</div>
+
 <div class="card">
 
 <div class="card-header">
@@ -60,20 +68,20 @@ require_once '../includes/sidebar.php';
 
         <i class="fas fa-chart-pie mr-2"></i>
 
-        Expense By Category Report
+        Expense Report
 
     </h3>
 
     <div class="card-tools">
 
         <a
-            href="pdf/category_expense_pdf.php?month=<?= $month; ?>&year=<?= $year; ?>"
-            target="_blank"
-            class="btn btn-danger btn-sm">
+            href="#"
+            onclick="window.print(); return false;"
+            class="btn btn-primary btn-sm">
 
-            <i class="fas fa-file-pdf"></i>
+            <i class="fas fa-print"></i>
 
-            Export PDF
+            Print
 
         </a>
 
@@ -153,6 +161,18 @@ require_once '../includes/sidebar.php';
 
 </div>
 
+<div class="row">
+    <div class="col-md-4">
+        <div class="small-box bg-danger">
+            <div class="inner">
+                <h3>BDT <?= number_format($total_expense_amount, 2); ?></h3>
+                <p>Total Amount</p>
+            </div>
+            <div class="icon"><i class="fas fa-receipt"></i></div>
+        </div>
+    </div>
+</div>
+
 <div class="card">
 
     <div class="card-header">
@@ -225,6 +245,13 @@ require_once '../includes/sidebar.php';
 
             </tbody>
 
+            <tfoot>
+                <tr>
+                    <th>Total Amount</th>
+                    <th>BDT <?= number_format($total_expense_amount, 2); ?></th>
+                </tr>
+            </tfoot>
+
         </table>
 
     </div>
@@ -263,6 +290,32 @@ new Chart(ctx,{
 });
 
 </script>
+
+<style>
+@page{size:A4 landscape;margin:10mm}
+@media print{
+    html,body{background:#fff!important;color:#14213d!important;font-size:11px!important}
+    .main-header,.main-sidebar,.main-footer,.card:first-child,.btn,.dataTables_filter,.dataTables_length,.dataTables_paginate,.dataTables_info{display:none!important}
+    .content-wrapper,.content,.container-fluid{margin:0!important;padding:0!important;width:100%!important;min-height:0!important}
+    .report-print-heading{display:block!important;border-bottom:2px solid #1677e8!important;padding:0 0 10px!important;margin:0 0 12px!important;text-align:center!important}
+    .report-print-heading h2{font-size:20px!important;letter-spacing:1px!important;margin:0 0 3px!important;color:#0b2e59!important}
+    .report-print-heading .print-subtitle{font-size:13px!important;font-weight:700!important;letter-spacing:1.5px!important;color:#1677e8!important;margin-bottom:3px!important}
+    .report-print-heading strong{font-size:11px!important;color:#5d6b82!important}
+    .row{display:flex!important;flex-wrap:wrap!important;margin:0 -4px!important}
+    .row>.col-md-4,.row>.col-md-6{padding:0 4px!important}
+    .row>.col-md-4{flex:0 0 33.333%!important;max-width:33.333%!important}
+    .row>.col-md-6{flex:0 0 50%!important;max-width:50%!important}
+    .card{box-shadow:none!important;border:1px solid #d9e2ef!important;border-radius:0!important;margin-bottom:10px!important;break-inside:avoid!important}
+    .card-header{background:#f3f7fc!important;border-bottom:1px solid #d9e2ef!important;padding:7px 10px!important;font-weight:700!important}
+    .card-body{padding:9px!important}
+    .small-box{background:#fff!important;border:1px solid #d9e2ef!important;box-shadow:none!important;min-height:auto!important;color:#14213d!important}
+    .small-box h3,.small-box p{color:#14213d!important}.small-box .icon{display:none!important}
+    canvas{max-height:220px!important}
+    table{width:100%!important;font-size:10px!important;border-collapse:collapse!important}
+    th{background:#eaf2fb!important;color:#12375d!important}
+    th,td{padding:5px!important;border:1px solid #d9e2ef!important}
+}
+</style>
 
 ';
 

@@ -67,7 +67,7 @@ if(manager_can_modify() && isset($_GET['set_status'], $_GET['id'])){
     mysqli_stmt_bind_param($update_stmt, 'sii', $set_status, $id, $user_id);
     mysqli_stmt_execute($update_stmt);
 
-    header('Location: index.php?filter=' . urlencode($filter));
+    header('Location: index.php?filter=' . urlencode($set_status === 'customer' ? 'customer' : $filter));
     exit;
 }
 
@@ -90,11 +90,15 @@ if(manager_can_modify() && isset($_GET['delete'])){
 $leads = [];
 $stmt = mysqli_prepare(
     $conn,
-    "SELECT *
-     FROM leads
-     WHERE user_id=?
-     AND status=?
-     ORDER BY COALESCE(followup_date, DATE(created_at)) ASC, id DESC"
+    "SELECT l.*, c.customer_name AS converted_customer_name, c.customer_code AS converted_customer_code,
+            c.phone AS converted_customer_phone
+     FROM leads l
+     LEFT JOIN customers c
+        ON c.id=l.converted_customer_id
+        AND c.user_id=l.user_id
+     WHERE l.user_id=?
+     AND l.status=?
+     ORDER BY COALESCE(l.followup_date, DATE(l.created_at)) ASC, l.id DESC"
 );
 mysqli_stmt_bind_param($stmt, 'is', $user_id, $filter);
 mysqli_stmt_execute($stmt);
@@ -157,8 +161,20 @@ require_once '../includes/sidebar.php';
                     <?php foreach($leads as $lead){ ?>
                         <tr>
                             <td><?= htmlspecialchars(lead_code_from_id((int)$lead['id'])); ?></td>
-                            <td><?= htmlspecialchars($lead['name']); ?></td>
-                            <td><?= htmlspecialchars($lead['phone']); ?></td>
+                            <td>
+                                <?php if($filter === 'customer' && !empty($lead['converted_customer_name'])){ ?>
+                                    <?= htmlspecialchars($lead['converted_customer_name']); ?>(CID-<?= htmlspecialchars($lead['converted_customer_code'] ?: '-'); ?>)
+                                <?php } else { ?>
+                                    <?= htmlspecialchars($lead['name']); ?>
+                                <?php } ?>
+                            </td>
+                            <td>
+                                <?= htmlspecialchars(
+                                    $filter === 'customer' && !empty($lead['converted_customer_phone'])
+                                        ? $lead['converted_customer_phone']
+                                        : $lead['phone']
+                                ); ?>
+                            </td>
                             <td>
                                 <span class="lead-edit-value"><?= htmlspecialchars($lead['followup_date'] ? date('d-m-Y', strtotime($lead['followup_date'])) : '-'); ?></span>
                                 <?php if(manager_can_modify()){ ?>
@@ -173,6 +189,11 @@ require_once '../includes/sidebar.php';
                             </td>
                             <td>
                                 <?php if(manager_can_modify()){ ?>
+                                    <?php if($filter === 'customer' && (int)($lead['converted_customer_id'] ?? 0) > 0){ ?>
+                                        <strong class="text-success">Converted to Customer</strong>
+                                    <?php } elseif($filter === 'customer'){ ?>
+                                        <strong class="text-warning">Waiting for Customer</strong>
+                                    <?php } else { ?>
                                     <?php if($filter === 'lead'){ ?>
                                         <a href="edit.php?id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Edit Lead">
                                             <i class="fas fa-edit"></i>
@@ -201,8 +222,10 @@ require_once '../includes/sidebar.php';
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=not_qualified&id=<?= (int)$lead['id']; ?>" class="btn btn-danger btn-sm" title="Not Qualified">
                                             <i class="fas fa-times"></i>
                                         </a>
-                                    <?php }elseif($lead['status'] !== 'customer'){ ?>
-                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=customer&id=<?= (int)$lead['id']; ?>" class="btn btn-info btn-sm" title="Convert to Customer">
+                                    <?php } ?>
+
+                                    <?php if(in_array($filter, ['lead', 'successful', 'not_qualified'], true) && $lead['status'] !== 'customer'){ ?>
+                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=customer&id=<?= (int)$lead['id']; ?>" class="btn btn-info btn-sm" title="Move to Successful List">
                                             <i class="fas fa-exchange-alt"></i>
                                         </a>
                                     <?php } ?>
@@ -214,6 +237,7 @@ require_once '../includes/sidebar.php';
                                         onclick="return confirm('Delete this lead?')">
                                         <i class="fas fa-trash"></i>
                                     </a>
+                                    <?php } ?>
                                 <?php } else { ?>
                                     <span class="text-muted">No action</span>
                                 <?php } ?>

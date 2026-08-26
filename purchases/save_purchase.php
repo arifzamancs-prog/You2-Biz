@@ -9,12 +9,14 @@ require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
 require_once '../includes/product_expiry_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
 ensure_fifo_inventory_tables($conn);
 ensure_product_management_columns($conn);
 ensure_product_category_type_column($conn);
+ensure_expense_support_tables($conn, $user_id);
 
 if($_SERVER['REQUEST_METHOD'] != 'POST'){
     header("Location:index.php");
@@ -118,7 +120,6 @@ function purchase_prepare_items($conn, $user_id)
     $qtys = $_POST['qty'] ?? [];
     $prices = $_POST['cost_price'] ?? [];
     $totals = $_POST['line_total'] ?? [];
-    $new_category_ids = $_POST['new_product_category_id'] ?? [];
     $new_product_names = $_POST['new_product_name'] ?? [];
 
     $items = [];
@@ -138,6 +139,24 @@ function purchase_prepare_items($conn, $user_id)
     $limit_info = mysqli_fetch_assoc(mysqli_stmt_get_result($limit_stmt));
     $existing_product_count = (int)($limit_info['product_count'] ?? 0);
     $max_products = (int)($limit_info['max_products'] ?? 0);
+
+    // Products added from purchasing always belong to the default stock category.
+    ensure_default_product_categories($conn, $user_id);
+    $stock_category_stmt = mysqli_prepare(
+        $conn,
+        "SELECT id FROM product_categories
+         WHERE user_id=? AND status='active' AND category_type='stock_product'
+         ORDER BY CASE WHEN category_name='Stock Product' THEN 0 ELSE 1 END, id ASC
+         LIMIT 1"
+    );
+    mysqli_stmt_bind_param($stock_category_stmt, 'i', $user_id);
+    mysqli_stmt_execute($stock_category_stmt);
+    $stock_category = mysqli_fetch_assoc(mysqli_stmt_get_result($stock_category_stmt));
+    $stock_category_id = (int)($stock_category['id'] ?? 0);
+
+    if($stock_category_id <= 0){
+        throw new Exception('Stock Product category is not available.');
+    }
 
     foreach($product_ids as $key => $product_choice){
         $product_choice = trim((string)$product_choice);
@@ -161,34 +180,11 @@ function purchase_prepare_items($conn, $user_id)
         }
 
         if($product_choice === '__new__'){
-            $category_id = (int)($new_category_ids[$key] ?? 0);
+            $category_id = $stock_category_id;
             $product_name = trim((string)($new_product_names[$key] ?? ''));
-
-            if($category_id <= 0){
-                throw new Exception("Please select a category for new product.");
-            }
 
             if(($error = validate_person_name($product_name, 'Product name')) !== ''){
                 throw new Exception($error);
-            }
-
-            $category_stmt = mysqli_prepare(
-                $conn,
-                "SELECT id
-                 FROM product_categories
-                 WHERE id=?
-                 AND user_id=?
-                 AND status='active'
-                 AND category_type='stock_product'
-                 LIMIT 1"
-            );
-
-            mysqli_stmt_bind_param($category_stmt, "ii", $category_id, $user_id);
-            mysqli_stmt_execute($category_stmt);
-            $category_result = mysqli_stmt_get_result($category_stmt);
-
-            if(!$category_result || mysqli_num_rows($category_result) === 0){
-                throw new Exception("Selected category not found.");
             }
 
             if($max_products > 0 && ($existing_product_count + $new_product_count) >= $max_products){
@@ -473,6 +469,17 @@ try{
             $paid_amount,
             'Purchase - ' . $purchase_no,
             $purchase_date
+        );
+
+        record_supplier_payment_expense(
+            $conn,
+            $user_id,
+            $payment_wallet_id,
+            $paid_amount,
+            $purchase_date,
+            'Supplier Payment - ' . $purchase_no,
+            'purchase_payment',
+            $purchase_id
         );
     }
 

@@ -86,7 +86,8 @@ Supplier Due Payment
 
 <form
 method="post"
-action="supplier_payment_save.php">
+action="supplier_payment_save.php"
+id="supplier-payment-form">
 
 <input
 type="hidden"
@@ -251,6 +252,14 @@ Back
 $page_script = '
 <script>
 $(function(){
+    $("#supplier-payment-form").on("submit", function(){
+        var voucherWindow = window.open("", "supplierPaymentVoucher");
+        if(voucherWindow){
+            this.target = "supplierPaymentVoucher";
+            window.setTimeout(function(){ window.location.href = "supplier_payment.php"; }, 400);
+        }
+    });
+
     function updatePaymentWalletBalance(){
         var selected = $("#payment_wallet_id option:selected");
         var walletId = selected.val();

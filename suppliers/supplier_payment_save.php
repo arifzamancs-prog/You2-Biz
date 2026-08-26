@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -21,6 +22,8 @@ $amount = (float)$_POST['amount'];
 $payment_wallet_id = (int)$_POST['payment_wallet_id'];
 
 $notes = trim($_POST['notes']);
+
+ensure_expense_support_tables($conn, $user_id);
 
 mysqli_begin_transaction($conn);
 
@@ -255,9 +258,20 @@ $supplier_payment_id = mysqli_insert_id($conn);
         date('Y-m-d')
     );
 
+    record_supplier_payment_expense(
+        $conn,
+        $user_id,
+        $payment_wallet_id,
+        $amount,
+        date('Y-m-d'),
+        'Supplier Due Payment - ' . $purchase['purchase_no'],
+        'supplier_payment',
+        $supplier_payment_id
+    );
+
     mysqli_commit($conn);
 
-    header("Location:supplier_payment.php?success=1");
+    header("Location:print_payment_voucher.php?id=" . $supplier_payment_id);
 
     exit;
 

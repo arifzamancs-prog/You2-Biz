@@ -487,7 +487,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     [
                         [
                             'href' => app_path('customers/index.php'),
-                            'label' => 'Customer List',
+                            'label' => 'Create Customer',
                         ],
                     ]
                 );
@@ -553,7 +553,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ],
                         [
                             'href' => app_path('lead_management/index.php?filter=customer'),
-                            'label' => 'Convert to Customer List',
+                            'label' => 'Successful List',
                             'icon' => 'far fa-circle',
                         ],
                     ]
@@ -594,33 +594,10 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                 <?php
                 $sidebar_report_items = [
-                        [
-                            'href' => app_path('reports/stock_alert_report.php'),
-                            'label' => 'Stock Alert',
-                            'icon' => 'fas fa-exclamation-triangle',
-                        ],
-                        [
-                            'href' => app_path('reports/sales_report.php'),
-                            'label' => 'Sales Report',
-                            'icon' => 'fas fa-chart-line',
-                        ],
-                        [
-                            'href' => app_path('reports/profit_report.php'),
-                            'label' => 'Profit Report',
-                            'icon' => 'fas fa-coins',
-                        ],
-                        [
-                            'href' => app_path('reports/customer_due_report.php'),
-                            'label' => 'Customer Due',
-                            'icon' => 'fas fa-file-invoice-dollar',
-                        ],
+                    ['href' => app_path('reports/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'],
+                    ['href' => app_path('reports/category_expense.php'), 'label' => 'Expense Report', 'icon' => 'fas fa-receipt'],
+                    ['href' => app_path('reports/profit_report.php'), 'label' => 'Profit Report', 'icon' => 'fas fa-coins'],
                 ];
-                if($sidebar_table_system_enabled){
-                    array_splice($sidebar_report_items, 2, 0, [
-                        ['href' => app_path('reports/staff_table_sales_report.php'), 'label' => 'Staff & Table Sales', 'icon' => 'fas fa-user-tie'],
-                        ['href' => app_path('reports/staff_commission_report.php'), 'label' => 'Staff Commission', 'icon' => 'fas fa-percent'],
-                    ]);
-                }
                 sidebar_tree('Reports', 'fas fa-chart-bar', $sidebar_report_items);
                 ?>
                 <?php } ?>

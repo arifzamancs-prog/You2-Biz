@@ -274,6 +274,31 @@ require_once '../includes/sidebar.php';
                         'supplier_payment' => 'Supplier Due Payment'
                     ];
 
+                    $transaction_type = strtolower(trim((string)($row['transaction_type'] ?? '')));
+                    $txn_no = trim((string)($row['txn_no'] ?? ''));
+                    $note = trim((string)($row['note'] ?? ''));
+                    $type_label = $type_labels[$transaction_type] ?? '';
+
+                    // Older transaction rows may not have a saved type. Use their
+                    // reference number or note so the history is always meaningful.
+                    if($type_label === ''){
+                        if(stripos($note, 'supplier due payment') !== false || stripos($txn_no, 'SPAY-') === 0){
+                            $type_label = 'Supplier Due Payment';
+                        }elseif(stripos($note, 'purchase') !== false || stripos($txn_no, 'PUR-') === 0){
+                            $type_label = 'Purchase';
+                        }elseif(stripos($note, 'invoice') !== false || stripos($txn_no, 'INV-') === 0){
+                            $type_label = 'Invoice';
+                        }elseif(stripos($note, 'transfer') !== false || stripos($txn_no, 'TRF-') === 0){
+                            $type_label = 'Transfer';
+                        }elseif(stripos($note, 'money in') !== false || stripos($txn_no, 'MIN-') === 0){
+                            $type_label = 'Money In';
+                        }elseif(stripos($note, 'expense') !== false || stripos($txn_no, 'EXP-') === 0){
+                            $type_label = 'Expense';
+                        }else{
+                            $type_label = 'General Transaction';
+                        }
+                    }
+
                     $income_types = [
                         'money_in',
                         'transfer_in',
@@ -282,23 +307,23 @@ require_once '../includes/sidebar.php';
                     ];
 
                     $is_income = in_array(
-                        $row['transaction_type'],
+                        $transaction_type,
                         $income_types
                     );
 
                     $badge_class = $is_income ? 'badge-success' : 'badge-danger';
 
-                    if($row['transaction_type'] == 'transfer_out'){
+                    if($transaction_type == 'transfer_out'){
                         $badge_class = 'badge-warning';
-                    }elseif($row['transaction_type'] == 'transfer_in'){
+                    }elseif($transaction_type == 'transfer_in'){
                         $badge_class = 'badge-info';
-                    }elseif($row['transaction_type'] == 'transfer'){
+                    }elseif($transaction_type == 'transfer'){
                         $badge_class = 'badge-secondary';
                     }
 
                     $wallet_text = $row['wallet_name'];
 
-                    if($row['transaction_type'] == 'transfer'){
+                    if($transaction_type == 'transfer'){
                         $wallet_text =
                             ($row['from_wallet'] ?? '') .
                             ' -> ' .
@@ -320,8 +345,7 @@ require_once '../includes/sidebar.php';
 
                             <span class="badge transaction-type-badge <?= $badge_class; ?>">
                                 <?= htmlspecialchars(
-                                    $type_labels[$row['transaction_type']]
-                                    ?? ucfirst($row['transaction_type'])
+                                    $type_label
                                 ); ?>
                             </span>
 
@@ -337,8 +361,7 @@ require_once '../includes/sidebar.php';
 
                         <td>
 
-                            <span class="<?= $row['transaction_type'] == 'transfer' ? 'text-info' : ($is_income ? 'text-success' : 'text-danger'); ?> font-weight-bold">
-                                <?= $row['transaction_type'] == 'transfer' ? '' : ($is_income ? '+' : '-'); ?>
+                            <span class="text-dark font-weight-bold">
                                 BDT <?= number_format($row['amount'],2); ?>
                             </span>
 

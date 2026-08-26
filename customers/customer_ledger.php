@@ -119,6 +119,8 @@ while(
         'invoice_no' =>
             $row['invoice_no'],
 
+        'wallet_name' => '',
+
         'sort_order' =>
             1,
 
@@ -188,6 +190,8 @@ while(
         'invoice_no' =>
             $payment_invoice_no,
 
+        'wallet_name' => '',
+
         'sort_order' =>
             2,
 
@@ -251,6 +255,8 @@ while(
         'invoice_no' =>
             '',
 
+        'wallet_name' => '',
+
         'sort_order' =>
             0,
 
@@ -298,16 +304,13 @@ $wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
 
 while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
     $is_refund = $row['transaction_type'] === 'invoice_expense';
-    $reference = trim((string)$row['invoice_no']);
-    if(($row['wallet_name'] ?? '') !== ''){
-        $reference .= ' • ' . $row['wallet_name'];
-    }
 
     $ledger[] = [
         'trx_date' => $row['txn_date'],
         'type' => $is_refund ? 'Wallet Refund' : 'Wallet Received',
-        'reference' => $reference,
-        'invoice_no' => '',
+        'reference' => trim((string)$row['invoice_no']),
+        'invoice_no' => trim((string)$row['invoice_no']),
+        'wallet_name' => (string)($row['wallet_name'] ?? ''),
         'sort_order' => $is_refund ? 3 : 2,
         'reference_id' => (int)$row['id'],
         'debit' => $is_refund ? (float)$row['amount'] : 0,
@@ -426,32 +429,14 @@ usort(
 
 /* Summary */
 
-$total_sales = 0;
 $total_paid = 0;
 
 foreach($ledger as $entry){
-
-    $total_sales +=
-        $entry['debit'];
 
     $total_paid +=
         $entry['credit'];
 
 }
-
-$current_due =
-    $total_sales -
-    $total_paid;
-
-$current_due_label =
-    $current_due < 0
-        ? 'Current Outstanding'
-        : 'Current Due';
-
-$current_due_display =
-    $current_due < 0
-        ? abs($current_due)
-        : $current_due;
 
 $running_ledger = [];
 $balance = 0;
@@ -587,21 +572,6 @@ echo htmlspecialchars(
 <tr>
 
 <th>
-Total Sales
-</th>
-
-<td>
-
-<?php
-echo number_format(
-    $total_sales,
-    2
-);
-?>
-
-</td>
-
-<th>
 Total Paid
 </th>
 
@@ -610,21 +580,6 @@ Total Paid
 <?php
 echo number_format(
     $total_paid,
-    2
-);
-?>
-
-</td>
-
-<th>
-<?= htmlspecialchars($current_due_label); ?>
-</th>
-
-<td>
-
-<?php
-echo number_format(
-    $current_due_display,
     2
 );
 ?>
@@ -651,10 +606,9 @@ class="table table-bordered table-striped">
 <tr>
 
 <th>Date</th>
-<th>Reference</th>
-<th>Sales</th>
+<th>Invoice No.</th>
+<th>Type</th>
 <th>Paid</th>
-<th>Current Due</th>
 
 </tr>
 
@@ -669,7 +623,7 @@ if(empty($ledger)){
 
 <tr>
 
-<td colspan="5" class="text-center text-muted">
+<td colspan="4" class="text-center text-muted">
 No ledger entries found.
 </td>
 
@@ -695,7 +649,11 @@ echo htmlspecialchars(app_date($row['trx_date']));
 <td>
 
 <?php
-echo htmlspecialchars($row['reference']);
+echo htmlspecialchars(
+    $row['invoice_no'] !== ''
+        ? $row['invoice_no']
+        : $row['reference']
+);
 ?>
 
 </td>
@@ -703,9 +661,10 @@ echo htmlspecialchars($row['reference']);
 <td>
 
 <?php
-echo number_format(
-    $row['debit'],
-    2
+echo htmlspecialchars(
+    ($row['wallet_name'] ?? '') !== ''
+        ? $row['wallet_name']
+        : '-'
 );
 ?>
 
@@ -722,14 +681,6 @@ echo number_format(
 
 </td>
 
-<td>
-
-<?php
-echo number_format((float)$row['running_balance'], 2);
-?>
-
-</td>
-
 </tr>
 
 <?php } ?>
@@ -740,20 +691,12 @@ echo number_format((float)$row['running_balance'], 2);
 
 <tr>
 
-<th colspan="2" class="text-right">
+<th colspan="3" class="text-right">
 Total
 </th>
 
 <th>
-<?php echo number_format($total_sales,2); ?>
-</th>
-
-<th>
 <?php echo number_format($total_paid,2); ?>
-</th>
-
-<th>
-<?php echo number_format($current_due_display,2); ?>
 </th>
 
 </tr>

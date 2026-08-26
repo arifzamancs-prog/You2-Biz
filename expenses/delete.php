@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/expense_helper.php';
 
 if(!manager_can_modify()){
     header("Location:index.php");
@@ -11,6 +12,7 @@ if(!manager_can_modify()){
 
 $user_id = (int)$_SESSION['user_id'];
 $id = (int)($_GET['id'] ?? 0);
+ensure_expense_support_tables($conn, $user_id);
 
 $stmt = mysqli_prepare($conn, "SELECT * FROM expenses WHERE id=? AND user_id=? LIMIT 1");
 mysqli_stmt_bind_param($stmt, "ii", $id, $user_id);
@@ -19,6 +21,12 @@ $entry = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
 if(!$entry){
     die("Expense entry not found.");
+}
+
+if(in_array(($entry['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true)){
+    $_SESSION['error'] = 'Supplier payment expenses cannot be deleted directly.';
+    header("Location:index.php");
+    exit;
 }
 
 mysqli_begin_transaction($conn);

@@ -57,7 +57,7 @@ require_once '../includes/sidebar.php';
             <thead>
 
             <tr>
-                <th>Wallet</th>
+                <th>Wallet Name</th>
                 <th>Description</th>
                 <th>Balance</th>
                 <th>Status</th>

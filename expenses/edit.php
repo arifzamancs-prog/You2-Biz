@@ -27,6 +27,12 @@ if(!$entry){
     die("Expense entry not found.");
 }
 
+if(in_array(($entry['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true)){
+    $_SESSION['error'] = 'Supplier payment expenses must be changed from the purchase or supplier payment flow.';
+    header("Location:index.php");
+    exit;
+}
+
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $wallet_id = (int)($_POST['wallet_id'] ?? 0);
     $category_id = (int)($_POST['category_id'] ?? 0);
