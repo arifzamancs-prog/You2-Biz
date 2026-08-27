@@ -22,6 +22,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $phone = trim($_POST['phone'] ?? '');
     $address = trim($_POST['address'] ?? '');
     $designation = staff_submitted_designation();
+    $salary = trim($_POST['salary'] ?? '0');
 
     if($name === ''){
         $message = 'Staff name is required.';
@@ -29,10 +30,14 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }elseif($designation === ''){
         $message = 'Please select or enter a designation.';
         $message_type = 'danger';
+    }elseif($salary === '' || !is_numeric($salary) || (float)$salary < 0){
+        $message = 'Please enter a valid salary.';
+        $message_type = 'danger';
     }else{
+        $salary = round((float)$salary, 2);
         create_staff_designation($conn, $user_id, $designation);
-        $stmt = mysqli_prepare($conn, "INSERT INTO staff(user_id,name,email,phone,address,designation) VALUES(?,?,?,?,?,?)");
-        mysqli_stmt_bind_param($stmt, 'isssss', $user_id, $name, $email, $phone, $address, $designation);
+        $stmt = mysqli_prepare($conn, "INSERT INTO staff(user_id,name,email,phone,address,designation,salary) VALUES(?,?,?,?,?,?,?)");
+        mysqli_stmt_bind_param($stmt, 'isssssd', $user_id, $name, $email, $phone, $address, $designation, $salary);
         mysqli_stmt_execute($stmt);
         $staff_id = mysqli_insert_id($conn);
         $staff_code = staff_code_from_id($staff_id);
@@ -72,6 +77,7 @@ require_once '../includes/sidebar.php';
                 <input class="form-control mt-2" name="new_designation" id="new_designation" placeholder="Enter new designation" style="display:none;">
                 <small class="text-muted d-block mt-2">Default 4 designations sob company automatic pabe. Custom designation add kora jabe.</small>
             </div>
+            <div class="form-group"><label>Salary (BDT)</label><input class="form-control" name="salary" type="number" min="0" step="0.01" value="<?= htmlspecialchars($_POST['salary'] ?? '0.00') ?>" required></div>
             <button class="btn btn-primary">Save Staff</button>
             <a href="index.php" class="btn btn-secondary">Back</a>
         </form>

@@ -560,7 +560,7 @@ require_once '../includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    <?= $edit_manager ? 'Edit Access for Your Staff' : 'Create Access for Your Staff'; ?>
+                    <?= $edit_manager ? 'Edit Staff Login Access' : 'Create Staff Login Access'; ?>
                 </h3>
             </div>
 

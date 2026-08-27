@@ -36,6 +36,11 @@ function import_restore_reference_maps()
         'lead_id' => 'leads',
         'product_id' => 'products',
         'purchase_id' => 'purchases',
+        'invoice_id' => 'invoices',
+        'invoice_item_id' => 'invoice_items',
+        'charge_type_id' => 'invoice_charge_types',
+        'stock_batch_id' => 'stock_batches',
+        'opening_due_id' => 'customer_opening_dues',
     ];
 }
 
@@ -52,11 +57,17 @@ function import_restore_priority($table)
         'packages' => 60,
         'purchases' => 70,
         'purchase_items' => 80,
-        'supplier_payments' => 85,
-        'transactions' => 90,
-        'expenses' => 100,
-        'money_ins' => 110,
-        'transfers' => 120,
+        'stock_batches' => 82,
+        'invoice_charge_types' => 83,
+        'invoices' => 84,
+        'invoice_items' => 86,
+        'invoice_charges' => 88,
+        'invoice_item_allocations' => 90,
+        'supplier_payments' => 95,
+        'transactions' => 100,
+        'expenses' => 110,
+        'money_ins' => 120,
+        'transfers' => 130,
     ];
 
     return $priority[$table] ?? 500;
@@ -94,6 +105,16 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
             isset($id_maps[$map_table][(int)$row[$column]])
         ){
             $row[$column] = $id_maps[$map_table][(int)$row[$column]];
+        }
+    }
+
+    // Stock batches use a polymorphic source reference, so map it explicitly.
+    if($table === 'stock_batches' && isset($row['source_id'], $row['source_type'])){
+        $source_type = strtolower(trim((string)$row['source_type']));
+        $source_table = $source_type === 'purchase' ? 'purchases' : ($source_type === 'invoice' ? 'invoices' : null);
+
+        if($source_table && isset($id_maps[$source_table][(int)$row['source_id']])){
+            $row['source_id'] = $id_maps[$source_table][(int)$row['source_id']];
         }
     }
 
@@ -215,6 +236,38 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     Delete Existing Data
                     --------------------------------
                     */
+
+                    // Remove child rows first: these tables are linked to
+                    // company-owned parents and do not have their own user_id.
+                    mysqli_query(
+                        $conn,
+                        "DELETE invoice_item_allocations
+                         FROM invoice_item_allocations
+                         INNER JOIN invoice_items ON invoice_items.id = invoice_item_allocations.invoice_item_id
+                         INNER JOIN invoices ON invoices.id = invoice_items.invoice_id
+                         WHERE invoices.user_id={$user_id}"
+                    );
+                    mysqli_query(
+                        $conn,
+                        "DELETE invoice_charges
+                         FROM invoice_charges
+                         INNER JOIN invoices ON invoices.id = invoice_charges.invoice_id
+                         WHERE invoices.user_id={$user_id}"
+                    );
+                    mysqli_query(
+                        $conn,
+                        "DELETE invoice_items
+                         FROM invoice_items
+                         INNER JOIN invoices ON invoices.id = invoice_items.invoice_id
+                         WHERE invoices.user_id={$user_id}"
+                    );
+                    mysqli_query(
+                        $conn,
+                        "DELETE purchase_items
+                         FROM purchase_items
+                         INNER JOIN purchases ON purchases.id = purchase_items.purchase_id
+                         WHERE purchases.user_id={$user_id}"
+                    );
 
                     $tables = [];
 

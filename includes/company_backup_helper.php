@@ -95,7 +95,7 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
     }
 
     $backup = [
-        'backup_version' => '1.1',
+        'backup_version' => '1.2',
         'created_at' => date('Y-m-d H:i:s'),
         'company_id' => $company_id,
         'company_name' => $company['name'] ?? '',
@@ -143,6 +143,43 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
         }
 
         $backup['data'][$table] = $rows;
+    }
+
+    // Detail tables inherit company ownership from their parent record.
+    // Include them explicitly so invoices and purchases restore completely.
+    $related_tables = [
+        'purchase_items' => ['parent_table' => 'purchases', 'foreign_key' => 'purchase_id'],
+        'invoice_items' => ['parent_table' => 'invoices', 'foreign_key' => 'invoice_id'],
+        'invoice_charges' => ['parent_table' => 'invoices', 'foreign_key' => 'invoice_id'],
+        'invoice_item_allocations' => ['parent_table' => 'invoice_items', 'foreign_key' => 'invoice_item_id'],
+    ];
+
+    foreach($related_tables as $table => $relation){
+        $backup['data'][$table] = [];
+
+        if(!company_backup_table_has_column($conn, $table, $relation['foreign_key'])
+            || empty($backup['data'][$relation['parent_table']])){
+            continue;
+        }
+
+        $parent_ids = array_values(array_filter(array_map(
+            'intval',
+            array_column($backup['data'][$relation['parent_table']], 'id')
+        )));
+
+        if(empty($parent_ids)){
+            continue;
+        }
+
+        $id_list = implode(',', $parent_ids);
+        $related_result = mysqli_query(
+            $conn,
+            "SELECT * FROM `{$table}` WHERE `{$relation['foreign_key']}` IN ({$id_list}) ORDER BY id ASC"
+        );
+
+        while($related_result && ($row = mysqli_fetch_assoc($related_result))){
+            $backup['data'][$table][] = $row;
+        }
     }
 
     $manager_rows = [];

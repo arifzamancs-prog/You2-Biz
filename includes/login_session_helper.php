@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/manager_access_helper.php';
+require_once __DIR__ . '/staff_attendance_helper.php';
 
 function complete_user_login($conn, $user, $account, $owner_id, $role)
 {
@@ -38,4 +39,7 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
          SET last_login = NOW()
          WHERE id = {$login_user_id}"
     );
+
+    // Only staff accounts logging in from a desktop create attendance records.
+    staff_attendance_record_login($conn, $login_user_id, (int)$owner_id);
 }

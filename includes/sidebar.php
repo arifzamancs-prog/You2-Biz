@@ -321,6 +321,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 <?php sidebar_tree('Staff Manage', 'fas fa-user-tie', [
                     ['href' => app_path('staff/index.php'), 'label' => 'Staff List'],
                     ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
+                    ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
                 ]); ?>
 
                 <?php if(is_super_admin_user()){ ?>

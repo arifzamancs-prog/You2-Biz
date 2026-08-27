@@ -167,6 +167,37 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     }
                 }
 
+                // A manager login is issued to a staff member.  Keep the staff
+                // record as the source of truth, so an inactive staff member
+                // cannot continue to use an otherwise active login account.
+                $staff_login_blocked = false;
+
+                if ($role === 'manager' && (int)($user['staff_id'] ?? 0) > 0) {
+                    $staff_login_stmt = mysqli_prepare(
+                        $conn,
+                        "SELECT status FROM staff WHERE id=? AND user_id=? LIMIT 1"
+                    );
+
+                    if ($staff_login_stmt) {
+                        $staff_id = (int)$user['staff_id'];
+                        $staff_owner_id = (int)$owner_id;
+
+                        mysqli_stmt_bind_param(
+                            $staff_login_stmt,
+                            "ii",
+                            $staff_id,
+                            $staff_owner_id
+                        );
+                        mysqli_stmt_execute($staff_login_stmt);
+
+                        $staff_login_result = mysqli_stmt_get_result($staff_login_stmt);
+                        $linked_staff = mysqli_fetch_assoc($staff_login_result) ?: null;
+
+                        $staff_login_blocked = !$linked_staff
+                            || strtolower((string)($linked_staff['status'] ?? '')) !== 'active';
+                    }
+                }
+
                 $account = $user;
 
                 if ($role === 'manager') {
@@ -189,7 +220,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $account = mysqli_fetch_assoc($account_result) ?: $user;
                 }
 
-                if (!$account || $account['status'] !== 'active') {
+                if ($staff_login_blocked) {
+
+                    $message = 'Your staff profile is inactive. Please contact your administrator.';
+
+                } elseif (!$account || $account['status'] !== 'active') {
 
                     $message = $full_version_message;
 

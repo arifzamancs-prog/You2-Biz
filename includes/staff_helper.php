@@ -11,6 +11,7 @@ function ensure_staff_table($conn)
         phone VARCHAR(30) NULL,
         address VARCHAR(255) NULL,
         designation VARCHAR(100) NULL,
+        salary DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         status ENUM('active','inactive') NOT NULL DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -25,6 +26,11 @@ function ensure_staff_table($conn)
     $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'email'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE staff ADD COLUMN email VARCHAR(150) NULL AFTER name");
+    }
+
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'salary'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE staff ADD COLUMN salary DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER designation");
     }
 
     $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'staff_code'");
