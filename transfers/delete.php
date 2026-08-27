@@ -24,9 +24,33 @@ if(!$entry){
 mysqli_begin_transaction($conn);
 
 try{
+    $from_wallet_exists = false;
+    $to_wallet_exists = false;
+
+    if((int)($entry['from_wallet_id'] ?? 0) > 0){
+        $wallet_stmt = mysqli_prepare($conn, "SELECT id FROM wallets WHERE id=? AND user_id=? LIMIT 1");
+        $from_wallet_id = (int)$entry['from_wallet_id'];
+        mysqli_stmt_bind_param($wallet_stmt, "ii", $from_wallet_id, $user_id);
+        mysqli_stmt_execute($wallet_stmt);
+        $from_wallet_exists = mysqli_num_rows(mysqli_stmt_get_result($wallet_stmt)) > 0;
+    }
+
+    if((int)($entry['to_wallet_id'] ?? 0) > 0){
+        $wallet_stmt = mysqli_prepare($conn, "SELECT id FROM wallets WHERE id=? AND user_id=? LIMIT 1");
+        $to_wallet_id = (int)$entry['to_wallet_id'];
+        mysqli_stmt_bind_param($wallet_stmt, "ii", $to_wallet_id, $user_id);
+        mysqli_stmt_execute($wallet_stmt);
+        $to_wallet_exists = mysqli_num_rows(mysqli_stmt_get_result($wallet_stmt)) > 0;
+    }
+
     if(($entry['approval_status'] ?? '') === 'approved'){
-        credit_wallet($conn, (int)$entry['from_wallet_id'], $user_id, (float)$entry['amount']);
-        debit_wallet($conn, (int)$entry['to_wallet_id'], $user_id, (float)$entry['amount']);
+        if($from_wallet_exists){
+            credit_wallet($conn, (int)$entry['from_wallet_id'], $user_id, (float)$entry['amount']);
+        }
+
+        if($to_wallet_exists){
+            debit_wallet($conn, (int)$entry['to_wallet_id'], $user_id, (float)$entry['amount']);
+        }
     }
 
     $delete_txn = mysqli_prepare(

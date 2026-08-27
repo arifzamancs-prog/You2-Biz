@@ -19,7 +19,50 @@ function import_table_has_column($conn, $table, $column)
     return company_backup_table_has_column($conn, $table, $column);
 }
 
-function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_id_map)
+function import_restore_reference_maps()
+{
+    return [
+        'wallet_id' => 'wallets',
+        'from_wallet_id' => 'wallets',
+        'to_wallet_id' => 'wallets',
+        'category_id' => 'categories',
+        'staff_id' => 'staff',
+        'ref_staff_id' => 'staff',
+        'customer_id' => 'customers',
+        'converted_customer_id' => 'customers',
+        'supplier_id' => 'suppliers',
+        'project_id' => 'projects',
+        'package_id' => 'packages',
+        'lead_id' => 'leads',
+        'product_id' => 'products',
+        'purchase_id' => 'purchases',
+    ];
+}
+
+function import_restore_priority($table)
+{
+    static $priority = [
+        'wallets' => 10,
+        'categories' => 20,
+        'staff' => 30,
+        'customers' => 40,
+        'suppliers' => 45,
+        'projects' => 50,
+        'products' => 55,
+        'packages' => 60,
+        'purchases' => 70,
+        'purchase_items' => 80,
+        'supplier_payments' => 85,
+        'transactions' => 90,
+        'expenses' => 100,
+        'money_ins' => 110,
+        'transfers' => 120,
+    ];
+
+    return $priority[$table] ?? 500;
+}
+
+function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_id_map, $id_maps = [])
 {
     if(!is_array($row) || !import_valid_table_name($table)){
         return null;
@@ -43,6 +86,15 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
 
     if(isset($row['created_by']) && isset($manager_id_map[(int)$row['created_by']])){
         $row['created_by'] = $manager_id_map[(int)$row['created_by']];
+    }
+
+    foreach(import_restore_reference_maps() as $column => $map_table){
+        if(
+            array_key_exists($column, $row) &&
+            isset($id_maps[$map_table][(int)$row[$column]])
+        ){
+            $row[$column] = $id_maps[$map_table][(int)$row[$column]];
+        }
     }
 
     if(isset($row['id'])){
@@ -76,7 +128,7 @@ function import_insert_row($conn, $table, $row)
         throw new Exception(mysqli_stmt_error($stmt) ?: mysqli_error($conn));
     }
 
-    return true;
+    return (int)mysqli_insert_id($conn);
 }
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
@@ -392,8 +444,22 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     --------------------------------
                     */
 
+                    $restore_data = $backup['data'];
+                    uksort($restore_data, function ($left, $right) {
+                        $left_priority = import_restore_priority($left);
+                        $right_priority = import_restore_priority($right);
+
+                        if($left_priority === $right_priority){
+                            return strcmp((string)$left, (string)$right);
+                        }
+
+                        return $left_priority <=> $right_priority;
+                    });
+
+                    $id_maps = [];
+
                     foreach(
-                        $backup['data']
+                        $restore_data
                         as $table => $rows
                     ){
                         if(
@@ -413,19 +479,29 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                             $rows
                             as $row
                         ){
+                            $old_id = (int)($row['id'] ?? 0);
                             $prepared_row = import_prepare_row_for_insert(
                                 $conn,
                                 $table,
                                 $row,
                                 $user_id,
-                                $manager_id_map
+                                $manager_id_map,
+                                $id_maps
                             );
 
                             if($prepared_row === null || empty($prepared_row)){
                                 continue;
                             }
 
-                            import_insert_row($conn, $table, $prepared_row);
+                            $new_id = import_insert_row($conn, $table, $prepared_row);
+
+                            if($old_id > 0 && $new_id > 0){
+                                if(!isset($id_maps[$table])){
+                                    $id_maps[$table] = [];
+                                }
+
+                                $id_maps[$table][$old_id] = $new_id;
+                            }
                         }
                     }
 
@@ -443,7 +519,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                             'pricing_plan_requests',
                             $row,
                             $user_id,
-                            $manager_id_map
+                            $manager_id_map,
+                            $id_maps
                         );
 
                         if($prepared_row === null || empty($prepared_row)){
@@ -471,7 +548,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                             'support_tickets',
                             $ticket_row,
                             $user_id,
-                            $manager_id_map
+                            $manager_id_map,
+                            $id_maps
                         );
 
                         if($prepared_ticket === null || empty($prepared_ticket)){

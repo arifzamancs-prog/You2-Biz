@@ -261,12 +261,30 @@ function booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id)
 
     $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
     $amount = (float)$invoice['amount'];
+    $wallet_id = (int)$invoice['wallet_id'];
 
-    // Reverse exactly the posting made on confirmation.
-    if($behavior === 'expense'){
-        credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
-    }else{
-        debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+    $wallet_stmt = mysqli_prepare(
+        $conn,
+        "SELECT balance
+         FROM wallets
+         WHERE id=?
+         AND user_id=?
+         LIMIT 1"
+    );
+    mysqli_stmt_bind_param($wallet_stmt, 'ii', $wallet_id, $user_id);
+    mysqli_stmt_execute($wallet_stmt);
+    $wallet_result = mysqli_stmt_get_result($wallet_stmt);
+    $wallet_row = $wallet_result ? mysqli_fetch_assoc($wallet_result) : null;
+
+    if($wallet_row){
+        $wallet_balance = (float)($wallet_row['balance'] ?? 0);
+
+        // Reverse exactly the posting made on confirmation when the wallet still exists.
+        if($behavior === 'expense'){
+            credit_wallet($conn, $wallet_id, $user_id, $amount);
+        }elseif($wallet_balance >= $amount){
+            debit_wallet($conn, $wallet_id, $user_id, $amount);
+        }
     }
 
     $transaction_stmt = mysqli_prepare(

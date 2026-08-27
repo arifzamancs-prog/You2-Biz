@@ -54,6 +54,95 @@ function dashboard_rows($conn, $sql, $types = '', $params = [])
     return $rows;
 }
 
+function dashboard_resolve_transaction_type_label($conn, $transaction, $user_id)
+{
+    $transaction_type = trim((string)($transaction['transaction_type'] ?? ''));
+
+    $transaction_labels = [
+        'money_in' => 'Money In',
+        'expense' => 'Expense',
+        'transfer' => 'Transfer',
+        'transfer_in' => 'Transfer In',
+        'transfer_out' => 'Transfer Out',
+        'sales_invoice' => 'Sales Invoice',
+        'receive_payment' => 'Receive Due Payment',
+        'purchase' => 'Purchase',
+        'supplier_payment' => 'Supplier Due Payment',
+        'invoice_income' => 'Booking Invoice',
+        'invoice_expense' => 'Invoice Refund',
+        'profit_cash_out' => 'Profit Cash Out',
+        'staff_payment' => 'Staff Payment',
+    ];
+
+    if($transaction_type !== ''){
+        return $transaction_labels[$transaction_type] ?? ucwords(str_replace('_', ' ', $transaction_type));
+    }
+
+    $note = strtolower(trim((string)($transaction['note'] ?? '')));
+    $reference_id = (int)($transaction['reference_id'] ?? 0);
+
+    if($note !== ''){
+        if(strpos($note, 'supplier due payment') !== false || strpos($note, 'supplier payment') !== false){
+            return 'Supplier Due Payment';
+        }
+
+        if(strpos($note, 'purchase') !== false){
+            return 'Purchase';
+        }
+
+        if(strpos($note, 'profit cash out') !== false){
+            return 'Profit Cash Out';
+        }
+
+        if(strpos($note, 'salary') !== false || strpos($note, 'bonus') !== false || strpos($note, 'incentive') !== false){
+            return 'Staff Payment';
+        }
+
+        if(strpos($note, 'invoice') !== false){
+            return 'Booking Invoice';
+        }
+
+        if(strpos($note, 'expense') !== false){
+            return 'Expense';
+        }
+
+        if(strpos($note, 'money in') !== false){
+            return 'Money In';
+        }
+    }
+
+    if($reference_id > 0){
+        $checks = [
+            'transfer' => 'Transfer',
+            'money_ins' => 'Money In',
+            'expenses' => 'Expense',
+            'supplier_payments' => 'Supplier Due Payment',
+            'purchases' => 'Purchase',
+            'booking_invoices' => 'Booking Invoice',
+            'profit_cash_outs' => 'Profit Cash Out',
+            'staff_ledger_entries' => 'Staff Payment',
+        ];
+
+        foreach($checks as $table => $label){
+            $stmt = mysqli_prepare($conn, "SELECT id FROM `{$table}` WHERE id=? AND user_id=? LIMIT 1");
+
+            if(!$stmt){
+                continue;
+            }
+
+            mysqli_stmt_bind_param($stmt, 'ii', $reference_id, $user_id);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+
+            if($result && mysqli_num_rows($result) > 0){
+                return $label;
+            }
+        }
+    }
+
+    return 'Related Entry';
+}
+
 $total_wallet_balance = dashboard_value(
     $conn,
     "SELECT COALESCE(SUM(balance),0)
@@ -237,6 +326,7 @@ $recent_transactions = dashboard_rows(
     "SELECT
         t.txn_date,
         t.transaction_type,
+        t.reference_id,
         t.amount,
         t.note,
         w.wallet_name,
@@ -604,24 +694,20 @@ require_once 'includes/sidebar.php';
                     <?php } ?>
                     <?php foreach($recent_transactions as $transaction){ ?>
                     <?php
-                    $transaction_labels = [
-                        'money_in' => 'Money In',
-                        'expense' => 'Expense',
-                        'transfer' => 'Transfer',
-                        'transfer_in' => 'Transfer In',
-                        'transfer_out' => 'Transfer Out',
-                        'sales_invoice' => 'Sales Invoice',
-                        'receive_payment' => 'Receive Due Payment',
-                        'purchase' => 'Purchase',
-                        'supplier_payment' => 'Supplier Due Payment'
-                    ];
-
                     $income_types = [
                         'money_in',
                         'transfer_in',
                         'sales_invoice',
-                        'receive_payment'
+                        'receive_payment',
+                        'invoice_income'
                     ];
+
+                    $type_label =
+                        dashboard_resolve_transaction_type_label(
+                            $conn,
+                            $transaction,
+                            $user_id
+                        );
 
                     $is_income =
                         in_array(
@@ -643,19 +729,13 @@ require_once 'includes/sidebar.php';
                         <td>
                             <?php if($is_income){ ?>
                                 <span class="badge badge-success">
-                                    <?= htmlspecialchars(
-                                        $transaction_labels[$transaction['transaction_type']]
-                                        ?? $transaction['transaction_type']
-                                    ); ?>
+                                    <?= htmlspecialchars($type_label); ?>
                                 </span>
                             <?php }elseif($transaction['transaction_type'] == 'expense'){ ?>
                                 <span class="badge badge-danger">Expense</span>
                             <?php }else{ ?>
                                 <span class="badge badge-secondary">
-                                    <?= htmlspecialchars(
-                                        $transaction_labels[$transaction['transaction_type']]
-                                        ?? $transaction['transaction_type']
-                                    ); ?>
+                                    <?= htmlspecialchars($type_label); ?>
                                 </span>
                             <?php } ?>
                         </td>

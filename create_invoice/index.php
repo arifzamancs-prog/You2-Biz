@@ -138,9 +138,9 @@ $recent_stmt = mysqli_prepare(
             p.project_name,
             pk.package_name
      FROM booking_invoices bi
-     LEFT JOIN customers c ON c.id = bi.customer_id
-     LEFT JOIN projects p ON p.id = bi.project_id
-     LEFT JOIN packages pk ON pk.id = bi.package_id
+     LEFT JOIN customers c ON c.id = bi.customer_id AND c.user_id = bi.user_id
+     LEFT JOIN projects p ON p.id = bi.project_id AND p.user_id = bi.user_id
+     LEFT JOIN packages pk ON pk.id = bi.package_id AND pk.user_id = bi.user_id
      WHERE bi.user_id=?
      AND bi.invoice_type=?
      ORDER BY bi.id DESC
@@ -316,9 +316,9 @@ require_once '../includes/sidebar.php';
                         <tr>
                             <td><?= htmlspecialchars($invoice['invoice_no']); ?></td>
                             <td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td>
-                            <td><?= htmlspecialchars($invoice['customer_name'] ?: '-'); ?></td>
-                            <td><?= htmlspecialchars($invoice['project_name'] ?: '-'); ?></td>
-                            <td><?= htmlspecialchars($invoice['package_name'] ?: '-'); ?></td>
+                            <td><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing Project #' . (int)$invoice['project_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?></td>
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
                             <td><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($invoice['status'] ?? 'pending')); ?></span></td>
                             <td>

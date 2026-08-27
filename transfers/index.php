@@ -12,8 +12,10 @@ $sql = "SELECT
         FROM transfers t
         LEFT JOIN wallets fw
             ON fw.id = t.from_wallet_id
+            AND fw.user_id = t.user_id
         LEFT JOIN wallets tw
             ON tw.id = t.to_wallet_id
+            AND tw.user_id = t.user_id
         WHERE t.user_id=?
         ORDER BY t.id DESC";
 
@@ -97,7 +99,7 @@ require_once '../includes/sidebar.php';
                     <td>
 
                         <span class="badge badge-danger">
-                            <?= htmlspecialchars($row['from_wallet']); ?>
+                            <?= htmlspecialchars($row['from_wallet'] ?: ('Missing Wallet #' . (int)$row['from_wallet_id'])); ?>
                         </span>
 
                     </td>
@@ -105,7 +107,7 @@ require_once '../includes/sidebar.php';
                     <td>
 
                         <span class="badge badge-success">
-                            <?= htmlspecialchars($row['to_wallet']); ?>
+                            <?= htmlspecialchars($row['to_wallet'] ?: ('Missing Wallet #' . (int)$row['to_wallet_id'])); ?>
                         </span>
 
                     </td>

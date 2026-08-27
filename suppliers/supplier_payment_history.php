@@ -10,6 +10,9 @@ $user_id = $_SESSION['user_id'];
 
 $sql = "SELECT
             sp.id,
+            sp.supplier_id,
+            sp.purchase_id,
+            sp.wallet_id,
             sp.amount,
             sp.payment_date,
             sp.note,
@@ -19,10 +22,13 @@ $sql = "SELECT
         FROM supplier_payments sp
         LEFT JOIN suppliers s
             ON s.id = sp.supplier_id
+            AND s.user_id = sp.user_id
         LEFT JOIN purchases p
             ON p.id = sp.purchase_id
+            AND p.user_id = sp.user_id
         LEFT JOIN wallets w
             ON w.id = sp.wallet_id
+            AND w.user_id = sp.user_id
         WHERE sp.user_id=?
         ORDER BY sp.payment_date DESC, sp.id DESC";
 
@@ -92,15 +98,15 @@ while($row = mysqli_fetch_assoc($result)){
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['supplier_name']); ?>
+                    <?= htmlspecialchars($row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])); ?>
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['purchase_no']); ?>
+                    <?= htmlspecialchars($row['purchase_no'] ?: ('Missing Purchase #' . (int)$row['purchase_id'])); ?>
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['wallet_name']); ?>
+                    <?= htmlspecialchars($row['wallet_name'] ?: ('Missing Wallet #' . (int)$row['wallet_id'])); ?>
                 </td>
 
                 <td>

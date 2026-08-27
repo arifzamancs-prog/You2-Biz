@@ -32,8 +32,20 @@ if(in_array(($entry['source_type'] ?? ''), ['purchase_payment', 'supplier_paymen
 mysqli_begin_transaction($conn);
 
 try{
+    $wallet_exists = false;
+
+    if((int)($entry['wallet_id'] ?? 0) > 0){
+        $wallet_stmt = mysqli_prepare($conn, "SELECT id FROM wallets WHERE id=? AND user_id=? LIMIT 1");
+        $wallet_id = (int)$entry['wallet_id'];
+        mysqli_stmt_bind_param($wallet_stmt, "ii", $wallet_id, $user_id);
+        mysqli_stmt_execute($wallet_stmt);
+        $wallet_exists = mysqli_num_rows(mysqli_stmt_get_result($wallet_stmt)) > 0;
+    }
+
     if(($entry['approval_status'] ?? '') === 'approved'){
-        credit_wallet($conn, (int)$entry['wallet_id'], $user_id, (float)$entry['amount']);
+        if($wallet_exists){
+            credit_wallet($conn, (int)$entry['wallet_id'], $user_id, (float)$entry['amount']);
+        }
     }
 
     $delete_txn = mysqli_prepare(

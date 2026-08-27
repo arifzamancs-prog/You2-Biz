@@ -23,10 +23,10 @@ $stmt = mysqli_prepare(
             pk.package_name,
             w.wallet_name
      FROM booking_invoices bi
-     LEFT JOIN customers c ON c.id = bi.customer_id
-     LEFT JOIN projects p ON p.id = bi.project_id
-     LEFT JOIN packages pk ON pk.id = bi.package_id
-     LEFT JOIN wallets w ON w.id = bi.wallet_id
+     LEFT JOIN customers c ON c.id = bi.customer_id AND c.user_id = bi.user_id
+     LEFT JOIN projects p ON p.id = bi.project_id AND p.user_id = bi.user_id
+     LEFT JOIN packages pk ON pk.id = bi.package_id AND pk.user_id = bi.user_id
+     LEFT JOIN wallets w ON w.id = bi.wallet_id AND w.user_id = bi.user_id
      WHERE bi.id=?
      AND bi.user_id=?
      LIMIT 1"
@@ -89,8 +89,8 @@ if(!$invoice){
             </div>
         </div>
 
-        <div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: '-'); ?></div><div class="contact"><?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><?= htmlspecialchars($invoice['email'] ?: '-'); ?><br><?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong>Project:</strong> <?= htmlspecialchars($invoice['project_name'] ?: '-'); ?><br><strong>Package:</strong> <?= htmlspecialchars($invoice['package_name'] ?: '-'); ?><br><strong>Payment by:</strong> <?= htmlspecialchars($invoice['wallet_name'] ?: '-'); ?><br><strong>Type:</strong> <?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></div></div></div>
-        <table><thead><tr><th>Description</th><th style="width: 180px; text-align:right;">Amount</th></tr></thead><tbody><tr><td><?= htmlspecialchars($invoice['package_name'] ?: booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td style="text-align:right;">BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td></tr></tbody></table>
+        <div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></div><div class="contact"><?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><?= htmlspecialchars($invoice['email'] ?: '-'); ?><br><?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong>Project:</strong> <?= htmlspecialchars($invoice['project_name'] ?: ('Missing Project #' . (int)$invoice['project_id'])); ?><br><strong>Package:</strong> <?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?><br><strong>Payment by:</strong> <?= htmlspecialchars($invoice['wallet_name'] ?: ('Missing Wallet #' . (int)$invoice['wallet_id'])); ?><br><strong>Type:</strong> <?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></div></div></div>
+        <table><thead><tr><th>Description</th><th style="width: 180px; text-align:right;">Amount</th></tr></thead><tbody><tr><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?></td><td style="text-align:right;">BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td></tr></tbody></table>
 
         <table class="summary">
             <tr>

@@ -16,10 +16,19 @@ $sql = "SELECT
             p.paid_amount,
             p.due_amount,
             p.payment_status,
-            s.supplier_name
+            s.supplier_name,
+            (
+                SELECT sp.id
+                FROM supplier_payments sp
+                WHERE sp.purchase_id = p.id
+                AND sp.user_id = p.user_id
+                ORDER BY sp.id DESC
+                LIMIT 1
+            ) AS latest_payment_id
         FROM purchases p
         LEFT JOIN suppliers s
             ON s.id = p.supplier_id
+            AND s.user_id = p.user_id
         WHERE p.user_id=?
         AND p.due_amount > 0
         ORDER BY p.purchase_date DESC, p.id DESC";
@@ -56,7 +65,9 @@ while($row = mysqli_fetch_assoc($result)){
 
 <div class="alert alert-success alert-dismissible fade show">
 
-    Supplier Due Payment Saved Successfully.
+    <?= ($_GET['success'] ?? '') === 'deleted'
+        ? 'Supplier due payment deleted successfully. Purchase and wallet balances were adjusted.'
+        : 'Supplier Due Payment Saved Successfully.'; ?>
 
 </div>
 
@@ -99,7 +110,7 @@ while($row = mysqli_fetch_assoc($result)){
                 <th>Paid</th>
                 <th>Due</th>
                 <th>Status</th>
-                <th width="150">Action</th>
+                <th width="220">Action</th>
 
             </tr>
 
@@ -120,7 +131,7 @@ while($row = mysqli_fetch_assoc($result)){
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['supplier_name']); ?>
+                    <?= htmlspecialchars($row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])); ?>
                 </td>
 
                 <td>
@@ -159,20 +170,33 @@ while($row = mysqli_fetch_assoc($result)){
 
                     <a
                         href="supplier_payment_entry.php?id=<?= $row['id']; ?>"
-                        class="btn btn-success btn-sm">
+                        class="btn btn-success btn-sm"
+                        title="Pay">
 
                         <i class="fas fa-money-bill"></i>
-                        Pay
 
                     </a>
 
                     <a
                         href="../purchases/view.php?id=<?= $row['id']; ?>"
-                        class="btn btn-info btn-sm">
+                        class="btn btn-info btn-sm"
+                        title="View">
 
-                        View
+                        <i class="fas fa-eye"></i>
 
                     </a>
+
+                    <?php if(manager_can_modify() && (int)($row['latest_payment_id'] ?? 0) > 0){ ?>
+                        <a
+                            href="delete_payment.php?id=<?= (int)$row['latest_payment_id']; ?>&purchase_id=<?= (int)$row['id']; ?>"
+                            class="btn btn-danger btn-sm"
+                            title="Delete"
+                            onclick="return confirm('Delete the latest supplier due payment for this purchase? Wallet balance and purchase due will be adjusted.');">
+
+                            <i class="fas fa-trash"></i>
+
+                        </a>
+                    <?php } ?>
 
                 </td>
 

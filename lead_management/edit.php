@@ -10,6 +10,7 @@ ensure_lead_management_table($conn);
 $user_id = (int)$_SESSION['user_id'];
 $id = (int)($_GET['id'] ?? 0);
 $message = '';
+$today = date('Y-m-d');
 
 $lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=? AND status='lead' LIMIT 1");
 mysqli_stmt_bind_param($lead_stmt, 'ii', $id, $user_id);
@@ -30,6 +31,8 @@ $followup_date = trim($_POST['followup_date'] ?? $lead['followup_date']);
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($name === '' || $phone === '' || $followup_date === ''){
         $message = 'Name, Phone and Followup Date are required.';
+    }elseif($followup_date < $today){
+        $message = 'Followup Date cannot be earlier than today.';
     }else{
         $note = $note ?: 'General';
         $update_stmt = mysqli_prepare(
@@ -63,7 +66,7 @@ require_once '../includes/sidebar.php';
             <div class="form-group"><label>Phone</label><input type="text" name="phone" class="form-control" value="<?= htmlspecialchars($phone); ?>" required></div>
             <div class="form-group"><label>Email</label><input type="email" name="email" class="form-control" value="<?= htmlspecialchars($email); ?>"></div>
             <div class="form-group"><label>Note</label><textarea name="note" class="form-control" rows="3"><?= htmlspecialchars($note); ?></textarea></div>
-            <div class="form-group"><label>Followup Date</label><input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" required></div>
+            <div class="form-group"><label>Followup Date</label><input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" min="<?= htmlspecialchars($today); ?>" required></div>
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Update Lead</button>
             <a href="index.php?filter=lead" class="btn btn-secondary">Back</a>
         </form>

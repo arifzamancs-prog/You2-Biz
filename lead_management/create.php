@@ -15,6 +15,7 @@ mysqli_stmt_execute($creator_stmt);
 $creator = mysqli_fetch_assoc(mysqli_stmt_get_result($creator_stmt));
 $creator_name = trim((string)($creator['name'] ?? ''));
 $message = '';
+$today = date('Y-m-d');
 $name = trim($_POST['name'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
 $email = trim($_POST['email'] ?? '');
@@ -24,6 +25,8 @@ $followup_date = trim($_POST['followup_date'] ?? '');
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($name === '' || $phone === '' || $followup_date === ''){
         $message = 'Name, Phone and Followup Date are required.';
+    } elseif($followup_date < $today){
+        $message = 'Followup Date cannot be earlier than today.';
     } else {
         $note = $note ?: 'General';
         $date_value = $followup_date;
@@ -84,7 +87,7 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
                 <label>Followup Date</label>
-                <input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" required>
+                <input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" min="<?= htmlspecialchars($today); ?>" required>
             </div>
 
             <button type="submit" class="btn btn-primary">

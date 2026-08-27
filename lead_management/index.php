@@ -9,6 +9,7 @@ ensure_lead_management_table($conn);
 $user_id = (int)$_SESSION['user_id'];
 $filter = normalize_lead_filter($_GET['filter'] ?? 'lead');
 $message = '';
+$today = date('Y-m-d');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline_update'){
     header('Content-Type: application/json');
@@ -29,10 +30,17 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline
         exit;
     }
 
-    if($field === 'followup_date' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)){
-        http_response_code(422);
-        echo json_encode(['success' => false, 'message' => 'Enter a valid followup date.']);
-        exit;
+    if($field === 'followup_date'){
+        if(!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)){
+            http_response_code(422);
+            echo json_encode(['success' => false, 'message' => 'Enter a valid followup date.']);
+            exit;
+        }
+        if($value < $today){
+            http_response_code(422);
+            echo json_encode(['success' => false, 'message' => 'Followup Date cannot be earlier than today.']);
+            exit;
+        }
     }
 
     if($field === 'note'){
@@ -178,7 +186,7 @@ require_once '../includes/sidebar.php';
                             <td>
                                 <span class="lead-edit-value"><?= htmlspecialchars($lead['followup_date'] ? date('d-m-Y', strtotime($lead['followup_date'])) : '-'); ?></span>
                                 <?php if(manager_can_modify()){ ?>
-                                    <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="followup_date" data-value="<?= htmlspecialchars($lead['followup_date'] ?: ''); ?>" title="Edit Followup Date"><i class="fas fa-edit"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="followup_date" data-value="<?= htmlspecialchars($lead['followup_date'] ?: ''); ?>" data-min="<?= htmlspecialchars($today); ?>" title="Edit Followup Date"><i class="fas fa-edit"></i></button>
                                 <?php } ?>
                             </td>
                             <td>
@@ -263,6 +271,7 @@ require_once '../includes/sidebar.php';
                 input.style.width = field === 'followup_date' ? '125px' : '70%';
                 if(field === 'followup_date'){
                     input.type = 'date';
+                    input.min = button.dataset.min || '';
                 }else{
                     input.rows = 2;
                     input.style.verticalAlign = 'middle';
@@ -302,6 +311,10 @@ require_once '../includes/sidebar.php';
                     const value = input.value.trim();
                     if(field === 'followup_date' && value === ''){
                         window.alert('Followup Date is required.');
+                        return;
+                    }
+                    if(field === 'followup_date' && input.min && value < input.min){
+                        window.alert('Followup Date cannot be earlier than today.');
                         return;
                     }
 

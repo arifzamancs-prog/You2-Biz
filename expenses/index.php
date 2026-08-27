@@ -16,10 +16,13 @@ $sql = "SELECT
         FROM expenses e
         LEFT JOIN wallets w
         ON w.id = e.wallet_id
+        AND w.user_id = e.user_id
         LEFT JOIN categories c
         ON c.id = e.category_id
+        AND c.user_id = e.user_id
         LEFT JOIN staff s
         ON s.id = e.staff_id
+        AND s.user_id = e.user_id
         WHERE e.user_id=?
         ORDER BY e.id DESC";
 
@@ -97,18 +100,18 @@ require_once '../includes/sidebar.php';
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['wallet_name']); ?>
+                    <?= htmlspecialchars($row['wallet_name'] ?: ('Missing Wallet #' . (int)$row['wallet_id'])); ?>
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['category_name']); ?>
+                    <?= htmlspecialchars($row['category_name'] ?: ('Missing Category #' . (int)$row['category_id'])); ?>
                 </td>
 
                 <td>
                     <?=
                         !empty($row['staff_name'])
                             ? htmlspecialchars($row['staff_name']) . (!empty($row['staff_code']) ? ' (' . htmlspecialchars($row['staff_code']) . ')' : '')
-                            : '-';
+                            : (in_array(($row['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true) ? 'N/A' : '-');
                     ?>
                 </td>
 

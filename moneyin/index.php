@@ -11,6 +11,7 @@ $sql = "SELECT
         FROM money_ins m
         LEFT JOIN wallets w
         ON w.id = m.wallet_id
+        AND w.user_id = m.user_id
         WHERE m.user_id=?
         ORDER BY m.id DESC";
 
@@ -86,7 +87,7 @@ require_once '../includes/sidebar.php';
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['wallet_name']); ?>
+                    <?= htmlspecialchars($row['wallet_name'] ?: ('Missing Wallet #' . (int)$row['wallet_id'])); ?>
                 </td>
 
                 <td>

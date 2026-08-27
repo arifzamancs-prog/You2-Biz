@@ -1,0 +1,441 @@
+{
+    "backup_version": "1.1",
+    "created_at": "2026-08-27 09:48:11",
+    "company_id": 35,
+    "company_name": "You2 Technologies",
+    "company_email": "it.arifzamancs@gmail.com",
+    "company_phone": "01977592783",
+    "data": {
+        "activity_logs": [],
+        "booking_invoice_types": [
+            {
+                "id": 1,
+                "type_key": "booking",
+                "type_name": "Booking",
+                "behavior": "income",
+                "status": "active",
+                "created_at": "2026-08-27 09:47:38"
+            },
+            {
+                "id": 2,
+                "type_key": "installment",
+                "type_name": "Installment",
+                "behavior": "income",
+                "status": "active",
+                "created_at": "2026-08-27 09:47:38"
+            },
+            {
+                "id": 3,
+                "type_key": "cancel_return",
+                "type_name": "Cancel\/Return",
+                "behavior": "expense",
+                "status": "active",
+                "created_at": "2026-08-27 09:47:38"
+            },
+            {
+                "id": 4,
+                "type_key": "profit_return",
+                "type_name": "Profit Return",
+                "behavior": "expense",
+                "status": "active",
+                "created_at": "2026-08-27 09:47:38"
+            }
+        ],
+        "booking_invoices": [],
+        "categories": [
+            {
+                "id": 33,
+                "category_name": "Electric bill",
+                "is_hidden": 0,
+                "status": "active",
+                "created_at": "2026-08-25 17:05:36",
+                "updated_at": "2026-08-25 17:05:36"
+            },
+            {
+                "id": 34,
+                "category_name": "Salary",
+                "is_hidden": 1,
+                "status": "active",
+                "created_at": "2026-08-25 17:24:46",
+                "updated_at": "2026-08-25 17:24:46"
+            },
+            {
+                "id": 35,
+                "category_name": "Bonus",
+                "is_hidden": 1,
+                "status": "active",
+                "created_at": "2026-08-25 17:24:46",
+                "updated_at": "2026-08-25 17:24:46"
+            },
+            {
+                "id": 36,
+                "category_name": "Incentive",
+                "is_hidden": 1,
+                "status": "active",
+                "created_at": "2026-08-25 17:24:46",
+                "updated_at": "2026-08-25 17:24:46"
+            }
+        ],
+        "customer_opening_dues": [],
+        "customer_payments": [],
+        "customers": [
+            {
+                "id": 138,
+                "customer_code": null,
+                "customer_name": "Aman",
+                "ref_staff_id": null,
+                "phone": "11111111111",
+                "email": "a@f.com",
+                "address": "Dhaka",
+                "status": "active",
+                "created_at": "2026-08-25 15:13:42"
+            }
+        ],
+        "expenses": [
+            {
+                "id": 51,
+                "txn_no": "TXN-26082517064126",
+                "wallet_id": 81,
+                "category_id": 33,
+                "staff_id": null,
+                "txn_date": "2026-08-25",
+                "amount": "2.00",
+                "note": "No note",
+                "approval_status": "approved",
+                "created_by": 35,
+                "approved_by": 35,
+                "approved_at": "2026-08-25 17:06:41",
+                "created_at": "2026-08-25 17:06:41",
+                "updated_at": "2026-08-25 17:06:41"
+            },
+            {
+                "id": 52,
+                "txn_no": "STP-26082517254661",
+                "wallet_id": 82,
+                "category_id": 35,
+                "staff_id": 6,
+                "txn_date": "2026-08-25",
+                "amount": "3.00",
+                "note": "Xy",
+                "approval_status": "approved",
+                "created_by": 35,
+                "approved_by": 35,
+                "approved_at": "2026-08-25 17:25:46",
+                "created_at": "2026-08-25 17:25:46",
+                "updated_at": "2026-08-25 17:25:46"
+            }
+        ],
+        "invoice_charge_types": [
+            {
+                "id": 166,
+                "charge_name": "Discount",
+                "charge_type": "less",
+                "status": "active",
+                "show_on_invoice": 0,
+                "charge_value_type": "fixed"
+            },
+            {
+                "id": 167,
+                "charge_name": "Labour",
+                "charge_type": "add",
+                "status": "active",
+                "show_on_invoice": 0,
+                "charge_value_type": "fixed"
+            },
+            {
+                "id": 168,
+                "charge_name": "Transport",
+                "charge_type": "add",
+                "status": "active",
+                "show_on_invoice": 0,
+                "charge_value_type": "fixed"
+            },
+            {
+                "id": 169,
+                "charge_name": "VAT",
+                "charge_type": "add",
+                "status": "active",
+                "show_on_invoice": 0,
+                "charge_value_type": "fixed"
+            }
+        ],
+        "invoices": [],
+        "leads": [],
+        "money_ins": [
+            {
+                "id": 41,
+                "txn_no": "TXN-26082516494276",
+                "wallet_id": 81,
+                "txn_date": "2026-08-25",
+                "amount": "100.00",
+                "reference": "",
+                "note": "Test",
+                "approval_status": "approved",
+                "created_by": 35,
+                "approved_by": 35,
+                "approved_at": "2026-08-25 16:49:42",
+                "created_at": "2026-08-25 16:49:42",
+                "updated_at": "2026-08-25 16:49:42"
+            }
+        ],
+        "packages": [],
+        "password_resets": [],
+        "product_categories": [
+            {
+                "id": 47,
+                "category_name": "General (Non Stock\/Service)",
+                "category_type": "non_stock",
+                "status": "active",
+                "created_at": "2026-08-18 20:00:53"
+            },
+            {
+                "id": 48,
+                "category_name": "Stock Product",
+                "category_type": "stock_product",
+                "status": "active",
+                "created_at": "2026-08-18 20:00:53"
+            }
+        ],
+        "products": [
+            {
+                "id": 82,
+                "category_id": 47,
+                "product_name": "Anam",
+                "sku": "",
+                "purchase_price": "0.00",
+                "sale_price": "120.00",
+                "expired_on": null,
+                "current_stock": 0,
+                "opening_stock_quantity": 0,
+                "opening_stock_unit_cost": 0,
+                "status": "active",
+                "created_at": "2026-08-18 22:00:17",
+                "minimum_stock": 0
+            },
+            {
+                "id": 83,
+                "category_id": 48,
+                "product_name": "Bnam",
+                "sku": "",
+                "purchase_price": "100.00",
+                "sale_price": "120.00",
+                "expired_on": null,
+                "current_stock": 100,
+                "opening_stock_quantity": 100,
+                "opening_stock_unit_cost": 100,
+                "status": "active",
+                "created_at": "2026-08-18 22:00:47",
+                "minimum_stock": 5
+            }
+        ],
+        "profit_cash_outs": [],
+        "projects": [],
+        "purchases": [],
+        "restaurant_tables": [],
+        "sms_history": [],
+        "staff": [
+            {
+                "id": 3,
+                "staff_code": "STF-003",
+                "name": "Xman",
+                "email": "a@d.net",
+                "phone": "234567890",
+                "address": "Dhaka",
+                "designation": "Accountant",
+                "status": "active",
+                "created_at": "2026-08-25 13:19:06",
+                "updated_at": "2026-08-25 13:19:06"
+            },
+            {
+                "id": 5,
+                "staff_code": "STF-005",
+                "name": "Zman",
+                "email": "z@g.com",
+                "phone": "23456789098",
+                "address": "Dhaka",
+                "designation": "General Manager",
+                "status": "active",
+                "created_at": "2026-08-25 16:42:51",
+                "updated_at": "2026-08-25 16:42:51"
+            },
+            {
+                "id": 6,
+                "staff_code": "STF-006",
+                "name": "Wman",
+                "email": "w@h.com",
+                "phone": "45789087657890",
+                "address": "Dhaka",
+                "designation": "Director",
+                "status": "active",
+                "created_at": "2026-08-25 16:43:56",
+                "updated_at": "2026-08-25 16:43:56"
+            }
+        ],
+        "staff_designations": [
+            {
+                "id": 1,
+                "designation_name": "Accountant",
+                "is_default": 1,
+                "created_at": "2026-08-25 16:52:25",
+                "updated_at": "2026-08-25 16:52:25"
+            },
+            {
+                "id": 2,
+                "designation_name": "Director",
+                "is_default": 1,
+                "created_at": "2026-08-25 16:52:25",
+                "updated_at": "2026-08-25 16:52:25"
+            },
+            {
+                "id": 3,
+                "designation_name": "General Manager",
+                "is_default": 1,
+                "created_at": "2026-08-25 16:52:25",
+                "updated_at": "2026-08-25 16:52:25"
+            }
+        ],
+        "staff_incentives": [],
+        "staff_ledger_entries": [
+            {
+                "id": 1,
+                "txn_no": "STP-26082516495836",
+                "staff_id": 3,
+                "wallet_id": 81,
+                "entry_type": "salary",
+                "entry_date": "2026-08-25",
+                "amount": 1,
+                "note": "Test",
+                "created_by": 35,
+                "created_at": "2026-08-25 16:49:58"
+            },
+            {
+                "id": 2,
+                "txn_no": "STP-26082517254661",
+                "staff_id": 6,
+                "wallet_id": 82,
+                "entry_type": "bonus",
+                "entry_date": "2026-08-25",
+                "amount": 3,
+                "note": "Xy",
+                "created_by": 35,
+                "created_at": "2026-08-25 17:25:46"
+            }
+        ],
+        "stock_batches": [
+            {
+                "id": 145,
+                "product_id": 83,
+                "source_type": "product_opening",
+                "source_id": 83,
+                "source_no": "OPEN-83",
+                "quantity": 100,
+                "remaining_quantity": 100,
+                "unit_cost": 100,
+                "batch_date": "2026-08-18",
+                "created_at": "2026-08-18 22:00:47"
+            }
+        ],
+        "stock_transactions": [],
+        "supplier_payments": [],
+        "suppliers": [],
+        "transactions": [
+            {
+                "id": 536,
+                "txn_no": "TXN-26082516494276",
+                "wallet_id": 81,
+                "transaction_type": "money_in",
+                "reference_id": 41,
+                "amount": "100.00",
+                "note": "Test",
+                "txn_date": "2026-08-25",
+                "created_at": "2026-08-25 16:49:42"
+            },
+            {
+                "id": 537,
+                "txn_no": "STP-26082516495836",
+                "wallet_id": 81,
+                "transaction_type": "staff_payment",
+                "reference_id": 1,
+                "amount": "1.00",
+                "note": "Staff Salary payment: Test",
+                "txn_date": "2026-08-25",
+                "created_at": "2026-08-25 16:49:58"
+            },
+            {
+                "id": 538,
+                "txn_no": "TXN-26082517064126",
+                "wallet_id": 81,
+                "transaction_type": "expense",
+                "reference_id": 51,
+                "amount": "2.00",
+                "note": "No note",
+                "txn_date": "2026-08-25",
+                "created_at": "2026-08-25 17:06:41"
+            },
+            {
+                "id": 539,
+                "txn_no": "TRF-26082517072050",
+                "wallet_id": 81,
+                "transaction_type": "transfer",
+                "reference_id": 45,
+                "amount": "47.00",
+                "note": "Transfer: x",
+                "txn_date": "2026-08-25",
+                "created_at": "2026-08-25 17:07:20"
+            },
+            {
+                "id": 540,
+                "txn_no": "STP-26082517254661",
+                "wallet_id": 82,
+                "transaction_type": "staff_payment",
+                "reference_id": 2,
+                "amount": "3.00",
+                "note": "Staff Bonus payment: Xy",
+                "txn_date": "2026-08-25",
+                "created_at": "2026-08-25 17:25:46"
+            }
+        ],
+        "transfers": [
+            {
+                "id": 45,
+                "txn_no": "TRF-26082517072050",
+                "from_wallet_id": 81,
+                "to_wallet_id": 82,
+                "txn_date": "2026-08-25",
+                "amount": "47.00",
+                "note": "x",
+                "approval_status": "approved",
+                "created_by": 35,
+                "approved_by": 35,
+                "approved_at": "2026-08-25 17:07:20",
+                "created_at": "2026-08-25 17:07:20",
+                "updated_at": "2026-08-25 17:07:20"
+            }
+        ],
+        "wallets": [
+            {
+                "id": 82,
+                "wallet_name": "AIBL",
+                "description": "Al arafa Bank",
+                "balance": "44.00",
+                "status": "active",
+                "created_at": "2026-08-25 17:06:04",
+                "updated_at": "2026-08-25 17:25:46",
+                "is_system": 0
+            },
+            {
+                "id": 81,
+                "wallet_name": "Cash",
+                "description": "System Default Cash Wallet",
+                "balance": "50.00",
+                "status": "active",
+                "created_at": "2026-08-18 06:04:55",
+                "updated_at": "2026-08-27 09:47:38",
+                "is_system": 1
+            }
+        ],
+        "users_manager_agents": [],
+        "pricing_plan_requests": [],
+        "support_tickets": []
+    }
+}

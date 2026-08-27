@@ -19,12 +19,14 @@ $sql = "SELECT
 
         LEFT JOIN suppliers s
         ON s.id = p.supplier_id
+        AND s.user_id = p.user_id
 
         LEFT JOIN purchase_items pi
         ON pi.purchase_id = p.id
 
         LEFT JOIN products pr
         ON pr.id = pi.product_id
+        AND pr.user_id = p.user_id
 
         WHERE p.user_id=?
 
@@ -138,12 +140,12 @@ mysqli_fetch_assoc($result)
 
 <td>
 <?= htmlspecialchars(
-$row['supplier_name']
+$row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])
 ); ?>
 </td>
 
 <td>
-<?= htmlspecialchars($row['product_names'] ?: '—'); ?>
+<?= htmlspecialchars($row['product_names'] ?: 'Missing Product Link'); ?>
 </td>
 
 <td>

@@ -24,8 +24,34 @@ if(!$entry){
 mysqli_begin_transaction($conn);
 
 try{
+    $wallet_exists = false;
+    $wallet_balance = 0;
+
+    if((int)($entry['wallet_id'] ?? 0) > 0){
+        $wallet_stmt = mysqli_prepare(
+            $conn,
+            "SELECT balance
+             FROM wallets
+             WHERE id=?
+             AND user_id=?
+             LIMIT 1"
+        );
+        $wallet_id = (int)$entry['wallet_id'];
+        mysqli_stmt_bind_param($wallet_stmt, "ii", $wallet_id, $user_id);
+        mysqli_stmt_execute($wallet_stmt);
+        $wallet_result = mysqli_stmt_get_result($wallet_stmt);
+        $wallet_row = $wallet_result ? mysqli_fetch_assoc($wallet_result) : null;
+
+        if($wallet_row){
+            $wallet_exists = true;
+            $wallet_balance = (float)($wallet_row['balance'] ?? 0);
+        }
+    }
+
     if(($entry['approval_status'] ?? '') === 'approved'){
-        debit_wallet($conn, (int)$entry['wallet_id'], $user_id, (float)$entry['amount']);
+        if($wallet_exists && $wallet_balance >= (float)$entry['amount']){
+            debit_wallet($conn, (int)$entry['wallet_id'], $user_id, (float)$entry['amount']);
+        }
     }
 
     $delete_txn = mysqli_prepare(

@@ -508,10 +508,6 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                             'href' => app_path('suppliers/supplier_payment.php'),
                             'label' => 'Supplier Due Payment',
                         ],
-                        [
-                            'href' => app_path('suppliers/supplier_payment_history.php'),
-                            'label' => 'Payment History',
-                        ],
                     ]
                 );
 

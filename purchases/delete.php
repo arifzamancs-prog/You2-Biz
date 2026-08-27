@@ -4,9 +4,11 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_fifo_inventory_tables($conn);
+ensure_expense_support_tables($conn, $user_id);
 
 $purchase_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -78,6 +80,60 @@ $paid_amount =
 
 $payment_wallet_id =
     (int)$purchase['payment_wallet_id'];
+    
+$payment_wallet_exists = false;
+
+if($payment_wallet_id > 0){
+
+    $wallet_stmt = mysqli_prepare(
+        $conn,
+        "SELECT id
+         FROM wallets
+         WHERE id=?
+         AND user_id=?
+         LIMIT 1"
+    );
+
+    mysqli_stmt_bind_param(
+        $wallet_stmt,
+        "ii",
+        $payment_wallet_id,
+        $user_id
+    );
+
+    mysqli_stmt_execute($wallet_stmt);
+
+    $wallet_result = mysqli_stmt_get_result($wallet_stmt);
+    $payment_wallet_exists = $wallet_result && mysqli_num_rows($wallet_result) > 0;
+
+    if($wallet_result){
+        mysqli_free_result($wallet_result);
+    }
+
+    mysqli_stmt_close($wallet_stmt);
+
+}
+
+$supplier_payment_stmt = mysqli_prepare(
+    $conn,
+    "SELECT id, wallet_id, amount
+     FROM supplier_payments
+     WHERE purchase_id=?
+     AND user_id=?
+     ORDER BY id DESC"
+);
+mysqli_stmt_bind_param($supplier_payment_stmt, "ii", $purchase_id, $user_id);
+mysqli_stmt_execute($supplier_payment_stmt);
+$supplier_payment_result = mysqli_stmt_get_result($supplier_payment_stmt);
+$supplier_payments = [];
+$supplier_payment_total = 0;
+
+while($supplier_payment_result && $supplier_payment_row = mysqli_fetch_assoc($supplier_payment_result)){
+    $supplier_payments[] = $supplier_payment_row;
+    $supplier_payment_total += (float)$supplier_payment_row['amount'];
+}
+
+$initial_purchase_payment_amount = max(0, $paid_amount - $supplier_payment_total);
 
     /*
     ------------------------------------
@@ -186,13 +242,50 @@ RESTORE WALLET
 
 if($paid_amount > 0){
 
-    credit_wallet(
-        $conn,
-        $payment_wallet_id,
-        $user_id,
-        $paid_amount
-    );
+    if($payment_wallet_exists && $initial_purchase_payment_amount > 0){
+        credit_wallet(
+            $conn,
+            $payment_wallet_id,
+            $user_id,
+            $initial_purchase_payment_amount
+        );
+    }
 
+}
+
+foreach($supplier_payments as $supplier_payment_row){
+    $supplier_wallet_exists = false;
+    $supplier_wallet_id = (int)$supplier_payment_row['wallet_id'];
+
+    if($supplier_wallet_id > 0){
+        $supplier_wallet_stmt = mysqli_prepare(
+            $conn,
+            "SELECT id
+             FROM wallets
+             WHERE id=?
+             AND user_id=?
+             LIMIT 1"
+        );
+        mysqli_stmt_bind_param($supplier_wallet_stmt, "ii", $supplier_wallet_id, $user_id);
+        mysqli_stmt_execute($supplier_wallet_stmt);
+        $supplier_wallet_result = mysqli_stmt_get_result($supplier_wallet_stmt);
+        $supplier_wallet_exists = $supplier_wallet_result && mysqli_num_rows($supplier_wallet_result) > 0;
+
+        if($supplier_wallet_result){
+            mysqli_free_result($supplier_wallet_result);
+        }
+
+        mysqli_stmt_close($supplier_wallet_stmt);
+    }
+
+    if($supplier_wallet_exists){
+        credit_wallet(
+            $conn,
+            $supplier_wallet_id,
+            $user_id,
+            (float)$supplier_payment_row['amount']
+        );
+    }
 }
 
 $sql = "DELETE FROM transactions
@@ -213,6 +306,48 @@ mysqli_stmt_bind_param(
 );
 
 mysqli_stmt_execute($stmt);
+
+$supplier_txn_stmt = mysqli_prepare(
+    $conn,
+    "DELETE FROM transactions
+     WHERE user_id=?
+     AND transaction_type='supplier_payment'
+     AND reference_id IN (
+        SELECT id
+        FROM supplier_payments
+        WHERE purchase_id=?
+        AND user_id=?
+     )"
+);
+mysqli_stmt_bind_param($supplier_txn_stmt, "iii", $user_id, $purchase_id, $user_id);
+mysqli_stmt_execute($supplier_txn_stmt);
+
+$delete_supplier_expenses_stmt = mysqli_prepare(
+    $conn,
+    "DELETE FROM expenses
+     WHERE user_id=?
+     AND (
+        (source_type='purchase_payment' AND source_id=?)
+        OR
+        (source_type='supplier_payment' AND source_id IN (
+            SELECT id
+            FROM supplier_payments
+            WHERE purchase_id=?
+            AND user_id=?
+        ))
+     )"
+);
+mysqli_stmt_bind_param($delete_supplier_expenses_stmt, "iiii", $user_id, $purchase_id, $purchase_id, $user_id);
+mysqli_stmt_execute($delete_supplier_expenses_stmt);
+
+$delete_supplier_payments_stmt = mysqli_prepare(
+    $conn,
+    "DELETE FROM supplier_payments
+     WHERE purchase_id=?
+     AND user_id=?"
+);
+mysqli_stmt_bind_param($delete_supplier_payments_stmt, "ii", $purchase_id, $user_id);
+mysqli_stmt_execute($delete_supplier_payments_stmt);
 
     /*
     ------------------------------------
