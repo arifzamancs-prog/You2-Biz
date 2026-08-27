@@ -104,7 +104,7 @@ while($row = mysqli_fetch_assoc($result)){
                 </td>
 
                 <td>
-                    <span class="text-danger font-weight-bold">
+                    <span class="text-dark font-weight-bold">
                         <?= number_format($row['amount'],2); ?>
                     </span>
                 </td>

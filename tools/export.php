@@ -21,7 +21,7 @@ $backup['exported_by'] = $_SESSION['user_name'];
 */
 
 $filename =
-'you2wallet_backup_' .
+'you2biz_backup_' .
 date('Ymd_His') .
 '.json';
 

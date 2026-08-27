@@ -535,7 +535,10 @@ $staff_options_sql = "SELECT s.id,s.name,s.designation
                       AND (s.status='active' OR s.id=?)
                       AND NOT EXISTS (
                           SELECT 1 FROM users u
-                          WHERE u.owner_id=? AND u.staff_id=s.id AND u.id<>?
+                          WHERE u.owner_id=?
+                          AND u.staff_id=s.id
+                          AND u.role='manager'
+                          AND u.id<>?
                       )
                       ORDER BY s.name ASC,s.id ASC";
 $staff_options_stmt = mysqli_prepare($conn, $staff_options_sql);
@@ -557,7 +560,7 @@ require_once '../includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    <?= $edit_manager ? 'Edit Access Management' : 'Create Access Management'; ?>
+                    <?= $edit_manager ? 'Edit Access for Your Staff' : 'Create Access for Your Staff'; ?>
                 </h3>
             </div>
 
@@ -576,14 +579,13 @@ require_once '../includes/sidebar.php';
                         value="<?= (int)($edit_manager['id'] ?? 0); ?>">
 
                     <div class="form-group">
-                        <label>Assistant/Manager Name</label>
+                        <label>Staff Name</label>
                         <select name="staff_id" class="form-control staff-select" required>
                             <option value="">Search and select staff</option>
                             <?php while($staff_option = mysqli_fetch_assoc($staff_options)){ $label = $staff_option['name'] . (!empty($staff_option['designation']) ? ' (' . $staff_option['designation'] . ')' : ''); ?>
                                 <option value="<?= (int)$staff_option['id']; ?>" <?= ((int)($edit_manager['staff_id'] ?? 0) === (int)$staff_option['id']) ? 'selected' : ''; ?>><?= htmlspecialchars($label); ?></option>
                             <?php } ?>
                         </select>
-                        <small class="text-muted">Select a staff member. The account name is taken from the selected staff record.</small>
                     </div>
 
                     <div class="form-group">
@@ -602,15 +604,17 @@ require_once '../includes/sidebar.php';
 
                     <div class="form-group">
                         <label>Username</label>
-                        <input
-                            type="text"
-                            name="username"
-                            class="form-control"
-                            value="<?= htmlspecialchars(display_agent_username_base($edit_manager['username'] ?? '', $user_id)); ?>"
-                            required>
-                        <small class="text-muted">
-                            Login username will be saved as username@company-id.
-                        </small>
+                        <div class="input-group" style="max-width: 280px;">
+                            <input
+                                type="text"
+                                name="username"
+                                class="form-control"
+                                value="<?= htmlspecialchars(display_agent_username_base($edit_manager['username'] ?? '', $user_id)); ?>"
+                                required>
+                            <div class="input-group-append">
+                                <span class="input-group-text">@<?= (int)$user_id; ?></span>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -624,6 +628,7 @@ require_once '../includes/sidebar.php';
                             type="password"
                             name="password"
                             class="form-control"
+                            style="max-width: 280px;"
                             minlength="6"
                             <?= $edit_manager ? '' : 'required'; ?>>
                     </div>
@@ -632,7 +637,7 @@ require_once '../includes/sidebar.php';
                         type="submit"
                         class="btn btn-primary">
                         <i class="fas <?= $edit_manager ? 'fa-save' : 'fa-user-plus'; ?>"></i>
-                        <?= $edit_manager ? 'Update Access Management' : 'Create Access Management'; ?>
+                        <?= $edit_manager ? 'Update Access' : 'Create Access'; ?>
                     </button>
 
                     <?php if($edit_manager){ ?>
@@ -701,21 +706,21 @@ require_once '../includes/sidebar.php';
                                 <td>
                                     <a
                                         href="index.php?edit=<?= $row['id']; ?>"
-                                        class="btn btn-sm btn-info">
-                                        Edit
+                                        class="btn btn-sm btn-info" title="Edit Access" aria-label="Edit Access">
+                                        <i class="fas fa-edit"></i>
                                     </a>
 
                                     <?php if($row['status'] === 'active'){ ?>
                                         <a
                                             href="index.php?id=<?= $row['id']; ?>&status=inactive"
-                                            class="btn btn-sm btn-warning">
-                                            Inactive
+                                            class="btn btn-sm btn-warning" title="Deactivate Access" aria-label="Deactivate Access">
+                                            <i class="fas fa-ban"></i>
                                         </a>
                                     <?php }else{ ?>
                                         <a
                                             href="index.php?id=<?= $row['id']; ?>&status=active"
-                                            class="btn btn-sm btn-success">
-                                            Active
+                                            class="btn btn-sm btn-success" title="Activate Access" aria-label="Activate Access">
+                                            <i class="fas fa-check"></i>
                                         </a>
                                     <?php } ?>
 
@@ -723,13 +728,13 @@ require_once '../includes/sidebar.php';
                                         <form method="post" class="d-inline" onsubmit="return confirm('Delete this assistant/manager?');">
                                             <input type="hidden" name="action" value="delete_manager">
                                             <input type="hidden" name="manager_id" value="<?= (int)$row['id']; ?>">
-                                            <button type="submit" class="btn btn-sm btn-danger">
-                                                Delete
+                                            <button type="submit" class="btn btn-sm btn-danger" title="Delete Access" aria-label="Delete Access">
+                                                <i class="fas fa-trash"></i>
                                             </button>
                                         </form>
                                     <?php }else{ ?>
-                                        <button type="button" class="btn btn-sm btn-danger" disabled>
-                                            Delete
+                                        <button type="button" class="btn btn-sm btn-danger" disabled title="Cannot delete: account has history" aria-label="Cannot delete: account has history">
+                                            <i class="fas fa-trash"></i>
                                         </button>
                                     <?php } ?>
                                 </td>

@@ -124,33 +124,27 @@ require_once '../includes/sidebar.php';
 <?php }elseif(manager_can_modify()){ ?>
 
     <a href="edit.php?id=<?= $row['id']; ?>"
-       class="btn btn-info btn-sm">
+       class="btn btn-info btn-sm" title="Edit Wallet" aria-label="Edit Wallet">
 
         <i class="fas fa-edit"></i>
-        Edit
-
     </a>
 
     <?php if($row['status']=='active'){ ?>
 
         <a href="inactive.php?id=<?= $row['id']; ?>"
-           class="btn btn-danger btn-sm"
+           class="btn btn-danger btn-sm" title="Inactive Wallet" aria-label="Inactive Wallet"
            onclick="return confirm('Inactive this wallet?')">
 
             <i class="fas fa-ban"></i>
-            Inactive
-
         </a>
 
     <?php }else{ ?>
 
         <a href="active.php?id=<?= $row['id']; ?>"
-           class="btn btn-success btn-sm"
+           class="btn btn-success btn-sm" title="Activate Wallet" aria-label="Activate Wallet"
            onclick="return confirm('Activate this wallet?')">
 
             <i class="fas fa-check"></i>
-            Active
-
         </a>
 
     <?php } ?>

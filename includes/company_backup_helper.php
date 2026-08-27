@@ -232,10 +232,8 @@ function company_backup_save_file($conn, $company_id, $backup, $backup_type, $cr
 
     $company_id = (int)$company_id;
     $created_by_user_id = (int)$created_by_user_id;
-    $company_name = trim((string)($backup['company_name'] ?? ''));
-    $safe_name = company_backup_slug($company_name);
     $backup_type = trim((string)$backup_type) === '' ? 'delete_all_data' : trim((string)$backup_type);
-    $file_name = $safe_name . '_company_' . $company_id . '_' . $backup_type . '_' . date('Ymd_His') . '.json';
+    $file_name = 'you2biz_company_' . $company_id . '_' . $backup_type . '_' . date('Ymd_His') . '.json';
     $file_path = company_backup_root_dir_path() . '/' . $file_name;
     $json = json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 

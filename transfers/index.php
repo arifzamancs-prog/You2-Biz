@@ -134,13 +134,13 @@ require_once '../includes/sidebar.php';
 
                         <?php if(manager_can_modify()){ ?>
                     <td>
-                            <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm">
-                                Edit
+                            <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm" title="Edit Transfer" aria-label="Edit Transfer">
+                                <i class="fas fa-edit"></i>
                             </a>
                             <a href="delete.php?id=<?= (int)$row['id']; ?>"
-                               class="btn btn-danger btn-sm"
+                               class="btn btn-danger btn-sm" title="Delete Transfer" aria-label="Delete Transfer"
                                onclick="return confirm('Delete this transfer?')">
-                                Delete
+                                <i class="fas fa-trash"></i>
                             </a>
                     </td>
                         <?php } ?>

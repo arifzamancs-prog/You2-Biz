@@ -109,13 +109,13 @@ require_once '../includes/sidebar.php';
 
                     <?php if(manager_can_modify()){ ?>
                 <td>
-                        <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm">
-                            Edit
+                        <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm" title="Edit Money In" aria-label="Edit Money In">
+                            <i class="fas fa-edit"></i>
                         </a>
                         <a href="delete.php?id=<?= (int)$row['id']; ?>"
-                           class="btn btn-danger btn-sm"
+                           class="btn btn-danger btn-sm" title="Delete Money In" aria-label="Delete Money In"
                            onclick="return confirm('Delete this money in entry?')">
-                            Delete
+                            <i class="fas fa-trash"></i>
                         </a>
                 </td>
                     <?php } ?>

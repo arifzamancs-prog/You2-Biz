@@ -138,13 +138,13 @@ require_once '../includes/sidebar.php';
                             <i class="fas fa-lock"></i>
                         </button>
                     <?php }else{ ?>
-                        <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm">
-                            Edit
+                        <a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm" title="Edit Expense" aria-label="Edit Expense">
+                            <i class="fas fa-edit"></i>
                         </a>
                         <a href="delete.php?id=<?= (int)$row['id']; ?>"
-                           class="btn btn-danger btn-sm"
+                           class="btn btn-danger btn-sm" title="Delete Expense" aria-label="Delete Expense"
                            onclick="return confirm('Delete this expense entry?')">
-                            Delete
+                            <i class="fas fa-trash"></i>
                         </a>
                     <?php } ?>
                 </td>

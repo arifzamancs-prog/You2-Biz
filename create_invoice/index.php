@@ -303,7 +303,7 @@ require_once '../includes/sidebar.php';
                     <th>Package</th>
                     <th>Amount</th>
                     <th>Status</th>
-                    <th width="90">Print</th>
+                    <th width="90">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -322,9 +322,8 @@ require_once '../includes/sidebar.php';
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
                             <td><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($invoice['status'] ?? 'pending')); ?></span></td>
                             <td>
-                                <a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" target="_blank" rel="noopener">
+                                <a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" target="_blank" rel="noopener" title="Print Invoice" aria-label="Print Invoice">
                                     <i class="fas fa-print"></i>
-                                    Print
                                 </a>
                             </td>
                         </tr>
