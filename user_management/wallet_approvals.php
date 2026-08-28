@@ -24,21 +24,18 @@ function redirect_approvals($message = '', $type = 'success')
         $location = 'wallet_approvals.php';
     }
 
-    $query = '';
-
     if ($message !== '') {
-        $query = (strpos($location, '?') === false ? '?' : '&') .
-            'message=' . urlencode($message) . '&type=' . urlencode($type);
+        $_SESSION['wallet_approvals_flash_message'] = $message;
+        $_SESSION['wallet_approvals_flash_type'] = $type;
     }
 
-    header("Location: " . $location . $query);
+    header("Location: " . $location);
     exit;
 }
 
-if (isset($_GET['message'])) {
-    $message = $_GET['message'];
-    $message_type = $_GET['type'] ?? 'success';
-}
+$message = $_SESSION['wallet_approvals_flash_message'] ?? '';
+$message_type = $_SESSION['wallet_approvals_flash_type'] ?? '';
+unset($_SESSION['wallet_approvals_flash_message'], $_SESSION['wallet_approvals_flash_type']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
@@ -46,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int)($_POST['id'] ?? 0);
     $action = $_POST['action'] ?? '';
 
-    if (!in_array($source, ['money_in', 'expense', 'transfer'], true) ||
+    if (!in_array($source, ['expense', 'transfer'], true) ||
         !in_array($action, ['approve', 'reject'], true) ||
         $id <= 0) {
 
@@ -57,55 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
 
-        if ($source === 'money_in') {
-
-            $sql = "SELECT *
-                    FROM money_ins
-                    WHERE id=?
-                    AND user_id=?
-                    AND approval_status='pending'
-                    LIMIT 1";
-
-            $stmt = mysqli_prepare($conn, $sql);
-            mysqli_stmt_bind_param($stmt, "ii", $id, $user_id);
-            mysqli_stmt_execute($stmt);
-            $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-
-            if (!$row) {
-                throw new Exception('Pending money in entry not found.');
-            }
-
-            if ($action === 'approve') {
-
-                credit_wallet($conn, $row['wallet_id'], $user_id, $row['amount']);
-
-                record_wallet_transaction(
-                    $conn,
-                    $row['txn_no'],
-                    $user_id,
-                    $row['wallet_id'],
-                    'money_in',
-                    $row['id'],
-                    $row['amount'],
-                    $row['note'],
-                    $row['txn_date']
-                );
-            }
-
-            $status = $action === 'approve' ? 'approved' : 'rejected';
-
-            $update_sql = "UPDATE money_ins
-                           SET approval_status=?,
-                               approved_by=?,
-                               approved_at=NOW()
-                           WHERE id=?
-                           AND user_id=?";
-
-            $update_stmt = mysqli_prepare($conn, $update_sql);
-            mysqli_stmt_bind_param($update_stmt, "siii", $status, $admin_id, $id, $user_id);
-            mysqli_stmt_execute($update_stmt);
-
-        } elseif ($source === 'expense') {
+        if ($source === 'expense') {
 
             $sql = "SELECT *
                     FROM expenses
@@ -213,25 +162,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$money_in_sql = "SELECT
-                    mi.id,
-                    mi.txn_no,
-                    mi.txn_date,
-                    mi.amount,
-                    mi.reference,
-                    mi.note,
-                    mi.created_at,
-                    w.wallet_name,
-                    u.name AS created_by_name
-                 FROM money_ins mi
-                 LEFT JOIN wallets w
-                    ON w.id=mi.wallet_id
-                 LEFT JOIN users u
-                    ON u.id=mi.created_by
-                 WHERE mi.user_id=?
-                 AND mi.approval_status='pending'
-                 ORDER BY mi.created_at DESC";
-
 $expense_sql = "SELECT
                     e.id,
                     e.txn_no,
@@ -274,11 +204,6 @@ $transfer_sql = "SELECT
                  AND t.approval_status='pending'
                  ORDER BY t.created_at DESC";
 
-$money_stmt = mysqli_prepare($conn, $money_in_sql);
-mysqli_stmt_bind_param($money_stmt, "i", $user_id);
-mysqli_stmt_execute($money_stmt);
-$money_ins = mysqli_stmt_get_result($money_stmt);
-
 $expense_stmt = mysqli_prepare($conn, $expense_sql);
 mysqli_stmt_bind_param($expense_stmt, "i", $user_id);
 mysqli_stmt_execute($expense_stmt);
@@ -308,10 +233,7 @@ require_once '../includes/sidebar.php';
     <div class="card-body">
         <ul class="nav nav-tabs" role="tablist">
             <li class="nav-item">
-                <a class="nav-link active" data-toggle="tab" href="#money-in">Money In</a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" data-toggle="tab" href="#expenses">Expenses</a>
+                <a class="nav-link active" data-toggle="tab" href="#expenses">Expenses</a>
             </li>
             <li class="nav-item">
                 <a class="nav-link" data-toggle="tab" href="#transfers">Transfers</a>
@@ -319,34 +241,7 @@ require_once '../includes/sidebar.php';
         </ul>
 
         <div class="tab-content pt-3">
-            <div class="tab-pane fade show active" id="money-in">
-                <table class="table table-bordered table-striped">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Wallet</th>
-                            <th>Amount</th>
-                            <th>Reference</th>
-                            <th>By</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while($row = mysqli_fetch_assoc($money_ins)){ ?>
-                            <tr>
-                                <td><?= htmlspecialchars(app_date($row['txn_date'])); ?></td>
-                                <td><?= htmlspecialchars($row['wallet_name']); ?></td>
-                                <td><?= number_format($row['amount'],2); ?></td>
-                                <td><?= htmlspecialchars($row['reference'] ?? '-'); ?></td>
-                                <td><?= htmlspecialchars($row['created_by_name'] ?? '-'); ?></td>
-                                <td><?php approval_buttons('money_in', $row['id']); ?></td>
-                            </tr>
-                        <?php } ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="tab-pane fade" id="expenses">
+            <div class="tab-pane fade show active" id="expenses">
                 <table class="table table-bordered table-striped">
                     <thead>
                         <tr>

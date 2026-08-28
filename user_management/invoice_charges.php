@@ -4,11 +4,10 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/invoice_charge_helper.php';
 
-require_admin_user();
+require_admin_module_access();
 ensure_invoice_charge_columns($conn);
 
 $user_id = (int)$_SESSION['user_id'];
-ensure_default_invoice_charges($conn, $user_id);
 
 $message = '';
 $message_type = '';
@@ -35,8 +34,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajax_a
     }
 
     if($ajax_action === 'delete'){
-        $used_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS total FROM invoice_charges WHERE charge_type_id=?");
-        mysqli_stmt_bind_param($used_stmt, 'i', $charge_id);
+        if(!can_delete_company_records()){
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Only the company administrator can delete invoice charges.']);
+            exit;
+        }
+        $used_stmt = mysqli_prepare($conn, "SELECT (SELECT COUNT(*) FROM invoice_charges WHERE charge_type_id=?) + (SELECT COUNT(*) FROM booking_invoice_charges WHERE charge_type_id=?) AS total");
+        mysqli_stmt_bind_param($used_stmt, 'ii', $charge_id, $charge_id);
         mysqli_stmt_execute($used_stmt);
         $used = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($used_stmt))['total'] ?? 0);
         if($used > 0){
@@ -203,13 +207,15 @@ if(isset($_GET['id'], $_GET['action'])){
     }
 
     if($action === 'delete'){
+        if(!can_delete_company_records()){
+            $message = 'Only the company administrator can delete invoice charges.';
+            $message_type = 'danger';
+        } else {
         $used_stmt = mysqli_prepare(
             $conn,
-            "SELECT COUNT(*) AS total
-             FROM invoice_charges
-             WHERE charge_type_id=?"
+            "SELECT (SELECT COUNT(*) FROM invoice_charges WHERE charge_type_id=?) + (SELECT COUNT(*) FROM booking_invoice_charges WHERE charge_type_id=?) AS total"
         );
-        mysqli_stmt_bind_param($used_stmt, 'i', $charge_id);
+        mysqli_stmt_bind_param($used_stmt, 'ii', $charge_id, $charge_id);
         mysqli_stmt_execute($used_stmt);
         $used_row = mysqli_fetch_assoc(mysqli_stmt_get_result($used_stmt));
 
@@ -222,6 +228,7 @@ if(isset($_GET['id'], $_GET['action'])){
             );
             mysqli_stmt_bind_param($delete_stmt, 'ii', $charge_id, $user_id);
             mysqli_stmt_execute($delete_stmt);
+        }
         }
     }
 
@@ -252,9 +259,9 @@ if(isset($_GET['edit'])){
 $charges_sql = "SELECT
                     ict.*,
                     (
-                        SELECT COUNT(*)
-                        FROM invoice_charges ic
-                        WHERE ic.charge_type_id=ict.id
+                        SELECT COUNT(*) FROM invoice_charges ic WHERE ic.charge_type_id=ict.id
+                    ) + (
+                        SELECT COUNT(*) FROM booking_invoice_charges bic WHERE bic.charge_type_id=ict.id
                     ) AS used_count
                 FROM invoice_charge_types ict
                 WHERE ict.user_id=?
@@ -414,7 +421,7 @@ require_once '../includes/sidebar.php';
                                     <button type="button" class="btn btn-sm btn-info invoice-charge-action invoice-status-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="active" title="Make Active"><i class="fas fa-toggle-on"></i></button>
                                 <?php } ?>
 
-                                <?php if((int)($charge['used_count'] ?? 0) === 0){ ?>
+                                <?php if(can_delete_company_records() && (int)($charge['used_count'] ?? 0) === 0){ ?>
                                     <button type="button" class="btn btn-sm btn-danger invoice-charge-action" data-charge-id="<?= (int)$charge['id']; ?>" data-charge-action="delete" title="Delete"><i class="fas fa-trash"></i></button>
                                 <?php }else{ ?>
                                     <button class="btn btn-sm btn-secondary" disabled title="This charge is already used"><i class="fas fa-trash"></i></button>

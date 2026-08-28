@@ -34,11 +34,16 @@ function ensure_manager_access_columns($conn)
 function available_manager_permissions()
 {
     return [
-        'staff' => 'Staff',
-        'wallets' => 'Wallet',
-        'customers' => 'Customer',
-        'suppliers' => 'Supplier',
+        'dashboard' => 'Company Dashboard',
+        'staff' => 'Staff Manage',
+        'sales' => 'Sales',
+        'wallets' => 'Wallets',
+        'projects' => 'Project & Package',
+        'customers' => 'Customer Manage',
         'leads' => 'Lead Management',
+        'suppliers' => 'Supplier',
+        'admin' => 'Admin',
+        'notice_publish' => 'Notice Publish',
     ];
 }
 

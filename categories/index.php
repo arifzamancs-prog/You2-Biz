@@ -39,7 +39,7 @@ require_once '../includes/sidebar.php';
             Expence Category List
         </h3>
 
-        <?php if(manager_can_modify()){ ?>
+        <?php if(is_admin_user()){ ?>
 
         <div class="card-tools">
 

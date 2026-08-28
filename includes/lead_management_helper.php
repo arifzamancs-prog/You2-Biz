@@ -13,6 +13,7 @@ function ensure_lead_management_table($conn)
             note TEXT NULL,
             followup_date DATE NULL,
             status ENUM('lead','successful','customer','not_qualified') NOT NULL DEFAULT 'lead',
+            created_by_user_id BIGINT UNSIGNED NULL,
             created_by_name VARCHAR(150) NULL,
             converted_customer_id BIGINT UNSIGNED NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -37,6 +38,12 @@ function ensure_lead_management_table($conn)
     $creator_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'created_by_name'");
     if($creator_column && mysqli_num_rows($creator_column) === 0){
         mysqli_query($conn, "ALTER TABLE leads ADD COLUMN created_by_name VARCHAR(150) NULL AFTER status");
+    }
+
+    $creator_user_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'created_by_user_id'");
+    if($creator_user_column && mysqli_num_rows($creator_user_column) === 0){
+        mysqli_query($conn, "ALTER TABLE leads ADD COLUMN created_by_user_id BIGINT UNSIGNED NULL AFTER status");
+        mysqli_query($conn, "ALTER TABLE leads ADD INDEX idx_leads_creator (user_id, created_by_user_id)");
     }
 
     $converted_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'converted_customer_id'");

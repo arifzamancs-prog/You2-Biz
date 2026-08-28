@@ -153,5 +153,17 @@ if (isset($page_script)) {
 }
 </style>
 
+<?php if(function_exists('can_delete_company_records') && !can_delete_company_records()){ ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const deleteSelector = '[title*="Delete" i], [aria-label*="Delete" i], input[type="submit"][value*="Delete" i], button[value*="delete" i]';
+
+    document.querySelectorAll(deleteSelector).forEach(function (element) {
+        element.remove();
+    });
+});
+</script>
+<?php } ?>
+
 </body>
 </html>

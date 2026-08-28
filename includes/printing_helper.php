@@ -212,6 +212,25 @@ function printing_upload_dir_url()
     return app_path('uploads/printing');
 }
 
+function printing_default_company_seal_filename()
+{
+    return 'default-company-seal.png';
+}
+
+function printing_default_paid_seal_filename()
+{
+    return 'default-paid-seal.png';
+}
+
+function printing_is_default_seal_filename($filename)
+{
+    return in_array(
+        basename((string)$filename),
+        [printing_default_company_seal_filename(), printing_default_paid_seal_filename()],
+        true
+    );
+}
+
 function ensure_printing_upload_dir()
 {
     $dir = printing_upload_dir_path();
@@ -285,7 +304,7 @@ function printing_upload_file($field_name, $current_filename, $prefix)
     $old_filename = basename((string)$current_filename);
     $old_path = printing_upload_dir_path() . '/' . $old_filename;
 
-    if($old_filename !== '' && $old_filename !== $filename && is_file($old_path)){
+    if($old_filename !== '' && !printing_is_default_seal_filename($old_filename) && $old_filename !== $filename && is_file($old_path)){
         @unlink($old_path);
     }
 
@@ -528,12 +547,32 @@ function should_print_invoice_created_by($conn)
 
 function current_company_seal_file($conn)
 {
-    return basename((string)current_printing_user_value($conn, 'company_seal_file', ''));
+    $filename = basename((string)current_printing_user_value(
+        $conn,
+        'company_seal_file',
+        printing_default_company_seal_filename()
+    ));
+
+    if($filename === '' || !is_file(printing_upload_dir_path() . '/' . $filename)){
+        return printing_default_company_seal_filename();
+    }
+
+    return $filename;
 }
 
 function current_paid_seal_file($conn)
 {
-    return basename((string)current_printing_user_value($conn, 'paid_seal_file', ''));
+    $filename = basename((string)current_printing_user_value(
+        $conn,
+        'paid_seal_file',
+        printing_default_paid_seal_filename()
+    ));
+
+    if($filename === '' || !is_file(printing_upload_dir_path() . '/' . $filename)){
+        return printing_default_paid_seal_filename();
+    }
+
+    return $filename;
 }
 
 function current_company_seal_url($conn)
@@ -580,6 +619,11 @@ function current_print_company_logo_option($conn)
 function should_print_company_logo($conn)
 {
     return current_print_company_logo_option($conn) === 'active';
+}
+
+function printing_default_company_logo_url()
+{
+    return printing_file_url('default-company-logo.png');
 }
 
 function current_print_general_top_margin_option($conn)
@@ -641,6 +685,13 @@ function current_print_company_logo_url($conn)
         $logo_path = dirname(__DIR__) . '/uploads/avatars/' . $login_avatar;
         $logo_url = app_path('uploads/avatars/' . rawurlencode($login_avatar));
     }else{
+        // Every company starts with the shared You2 Biz print logo. Once the
+        // company changes its profile photo, the uploaded profile image is used.
+        $default_company_logo_url = printing_default_company_logo_url();
+        if($default_company_logo_url !== ''){
+            return $default_company_logo_url;
+        }
+
         if(trim((string)$logo_url) === ''){
             return '';
         }

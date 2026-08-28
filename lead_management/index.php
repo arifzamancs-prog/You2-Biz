@@ -5,16 +5,84 @@ require_once '../includes/db.php';
 require_once '../includes/lead_management_helper.php';
 
 ensure_lead_management_table($conn);
+require_lead_management_access();
 
 $user_id = (int)$_SESSION['user_id'];
+$lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);
+$lead_scope_sql = is_manager_user() ? ' AND created_by_user_id=?' : '';
+$can_manage_leads = is_admin_user() || is_manager_user();
+$show_lead_reference = is_admin_user();
 $filter = normalize_lead_filter($_GET['filter'] ?? 'lead');
-$message = '';
+$message = $_SESSION['lead_management_flash_message'] ?? '';
+$message_type = $_SESSION['lead_management_flash_type'] ?? 'success';
+unset($_SESSION['lead_management_flash_message'], $_SESSION['lead_management_flash_type']);
 $today = date('Y-m-d');
+
+if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'change_reference'){
+    if(!is_admin_user()){
+        http_response_code(403);
+        exit('Permission denied.');
+    }
+
+    $reference_lead_id = (int)($_POST['lead_id'] ?? 0);
+    $reference_user_id = (int)($_POST['reference_user_id'] ?? 0);
+    $admin_password = (string)($_POST['admin_password'] ?? '');
+
+    $admin_stmt = mysqli_prepare($conn, "SELECT password FROM users WHERE id=? AND role='admin' LIMIT 1");
+    mysqli_stmt_bind_param($admin_stmt, 'i', $user_id);
+    mysqli_stmt_execute($admin_stmt);
+    $admin_account = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_stmt));
+
+    if($reference_lead_id <= 0 || $reference_user_id <= 0 || !$admin_account || !password_verify($admin_password, $admin_account['password'])){
+        $_SESSION['lead_management_flash_message'] = 'A valid Admin Password and staff reference are required.';
+        $_SESSION['lead_management_flash_type'] = 'danger';
+    }else{
+        $reference_stmt = mysqli_prepare(
+            $conn,
+            "SELECT u.id, s.name
+             FROM users u
+             INNER JOIN staff s ON s.id=u.staff_id AND s.user_id=u.owner_id
+             WHERE u.id=? AND u.owner_id=? AND u.role='manager' AND u.status='active' AND s.status='active'
+             LIMIT 1"
+        );
+        mysqli_stmt_bind_param($reference_stmt, 'ii', $reference_user_id, $user_id);
+        mysqli_stmt_execute($reference_stmt);
+        $reference_staff = mysqli_fetch_assoc(mysqli_stmt_get_result($reference_stmt));
+
+        if(!$reference_staff){
+            $_SESSION['lead_management_flash_message'] = 'Selected staff reference is not available.';
+            $_SESSION['lead_management_flash_type'] = 'danger';
+        }else{
+            mysqli_begin_transaction($conn);
+            try {
+                $reference_name = trim((string)$reference_staff['name']);
+                $lead_update_stmt = mysqli_prepare($conn, "UPDATE leads SET created_by_user_id=?, created_by_name=? WHERE id=? AND user_id=?");
+                mysqli_stmt_bind_param($lead_update_stmt, 'isii', $reference_user_id, $reference_name, $reference_lead_id, $user_id);
+                mysqli_stmt_execute($lead_update_stmt);
+
+                $customer_update_stmt = mysqli_prepare($conn, "UPDATE customers SET lead_ref_name=? WHERE lead_id=? AND user_id=?");
+                mysqli_stmt_bind_param($customer_update_stmt, 'sii', $reference_name, $reference_lead_id, $user_id);
+                mysqli_stmt_execute($customer_update_stmt);
+
+                mysqli_commit($conn);
+                $_SESSION['lead_management_flash_message'] = 'Lead reference updated successfully.';
+                $_SESSION['lead_management_flash_type'] = 'success';
+            }catch(Throwable $exception){
+                mysqli_rollback($conn);
+                $_SESSION['lead_management_flash_message'] = 'Unable to update the lead reference.';
+                $_SESSION['lead_management_flash_type'] = 'danger';
+            }
+        }
+    }
+
+    header('Location: index.php?filter=' . urlencode($filter));
+    exit;
+}
 
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline_update'){
     header('Content-Type: application/json');
 
-    if(!manager_can_modify()){
+    if(!$can_manage_leads){
         http_response_code(403);
         echo json_encode(['success' => false, 'message' => 'Permission denied.']);
         exit;
@@ -48,10 +116,14 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline
     }
 
     $sql = $field === 'followup_date'
-        ? 'UPDATE leads SET followup_date=? WHERE id=? AND user_id=?'
-        : 'UPDATE leads SET note=? WHERE id=? AND user_id=?';
+        ? 'UPDATE leads SET followup_date=? WHERE id=? AND user_id=?' . $lead_scope_sql
+        : 'UPDATE leads SET note=? WHERE id=? AND user_id=?' . $lead_scope_sql;
     $update_stmt = mysqli_prepare($conn, $sql);
-    mysqli_stmt_bind_param($update_stmt, 'sii', $value, $lead_id, $user_id);
+    if(is_manager_user()){
+        mysqli_stmt_bind_param($update_stmt, 'siii', $value, $lead_id, $user_id, $lead_owner_id);
+    }else{
+        mysqli_stmt_bind_param($update_stmt, 'sii', $value, $lead_id, $user_id);
+    }
     mysqli_stmt_execute($update_stmt);
 
     $display_value = $field === 'followup_date'
@@ -61,7 +133,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline
     exit;
 }
 
-if(manager_can_modify() && isset($_GET['set_status'], $_GET['id'])){
+if($can_manage_leads && isset($_GET['set_status'], $_GET['id'])){
     $id = (int)$_GET['id'];
     $set_status = normalize_lead_filter($_GET['set_status']);
 
@@ -70,25 +142,33 @@ if(manager_can_modify() && isset($_GET['set_status'], $_GET['id'])){
         "UPDATE leads
          SET status=?
          WHERE id=?
-         AND user_id=?"
+         AND user_id=?{$lead_scope_sql}"
     );
-    mysqli_stmt_bind_param($update_stmt, 'sii', $set_status, $id, $user_id);
+    if(is_manager_user()){
+        mysqli_stmt_bind_param($update_stmt, 'siii', $set_status, $id, $user_id, $lead_owner_id);
+    }else{
+        mysqli_stmt_bind_param($update_stmt, 'sii', $set_status, $id, $user_id);
+    }
     mysqli_stmt_execute($update_stmt);
 
     header('Location: index.php?filter=' . urlencode($set_status === 'customer' ? 'customer' : $filter));
     exit;
 }
 
-if(manager_can_modify() && isset($_GET['delete'])){
+if($can_manage_leads && isset($_GET['delete'])){
     $id = (int)$_GET['delete'];
 
     $delete_stmt = mysqli_prepare(
         $conn,
         "DELETE FROM leads
          WHERE id=?
-         AND user_id=?"
+         AND user_id=?{$lead_scope_sql}"
     );
-    mysqli_stmt_bind_param($delete_stmt, 'ii', $id, $user_id);
+    if(is_manager_user()){
+        mysqli_stmt_bind_param($delete_stmt, 'iii', $id, $user_id, $lead_owner_id);
+    }else{
+        mysqli_stmt_bind_param($delete_stmt, 'ii', $id, $user_id);
+    }
     mysqli_stmt_execute($delete_stmt);
 
     header('Location: index.php?filter=' . urlencode($filter));
@@ -105,14 +185,36 @@ $stmt = mysqli_prepare(
         ON c.id=l.converted_customer_id
         AND c.user_id=l.user_id
      WHERE l.user_id=?
-     AND l.status=?
+     AND l.status=?{$lead_scope_sql}
      ORDER BY COALESCE(l.followup_date, DATE(l.created_at)) ASC, l.id DESC"
 );
-mysqli_stmt_bind_param($stmt, 'is', $user_id, $filter);
+if(is_manager_user()){
+    mysqli_stmt_bind_param($stmt, 'isi', $user_id, $filter, $lead_owner_id);
+}else{
+    mysqli_stmt_bind_param($stmt, 'is', $user_id, $filter);
+}
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 while($result && $row = mysqli_fetch_assoc($result)){
     $leads[] = $row;
+}
+
+$reference_staff_options = [];
+if(is_admin_user()){
+    $reference_options_stmt = mysqli_prepare(
+        $conn,
+        "SELECT u.id AS login_user_id, s.name, s.designation
+         FROM users u
+         INNER JOIN staff s ON s.id=u.staff_id AND s.user_id=u.owner_id
+         WHERE u.owner_id=? AND u.role='manager' AND u.status='active' AND s.status='active'
+         ORDER BY s.name ASC"
+    );
+    mysqli_stmt_bind_param($reference_options_stmt, 'i', $user_id);
+    mysqli_stmt_execute($reference_options_stmt);
+    $reference_options_result = mysqli_stmt_get_result($reference_options_stmt);
+    while($reference_options_result && $reference_staff = mysqli_fetch_assoc($reference_options_result)){
+        $reference_staff_options[] = $reference_staff;
+    }
 }
 
 require_once '../includes/header.php';
@@ -143,7 +245,7 @@ require_once '../includes/sidebar.php';
     <div class="card-body">
 
         <?php if($message){ ?>
-            <div class="alert alert-danger"><?= htmlspecialchars($message); ?></div>
+            <div class="alert alert-<?= htmlspecialchars($message_type); ?>"><?= htmlspecialchars($message); ?></div>
         <?php } ?>
 
         <table id="example1" class="table table-bordered table-striped">
@@ -152,6 +254,7 @@ require_once '../includes/sidebar.php';
                     <th width="90">Lead ID</th>
                     <th width="220">Name</th>
                     <th width="145">Phone</th>
+                    <?php if($show_lead_reference){ ?><th width="160">Ref</th><?php } ?>
                     <th width="145">Followup Date</th>
                     <th width="300">Note</th>
                     <th width="230">Action</th>
@@ -161,7 +264,7 @@ require_once '../includes/sidebar.php';
             <tbody>
                 <?php if(empty($leads)){ ?>
                     <tr>
-                        <td colspan="6" class="text-center text-muted">
+                        <td colspan="<?= $show_lead_reference ? 7 : 6; ?>" class="text-center text-muted">
                             No data available in table
                         </td>
                     </tr>
@@ -183,20 +286,32 @@ require_once '../includes/sidebar.php';
                                         : $lead['phone']
                                 ); ?>
                             </td>
+                            <?php if($show_lead_reference){ ?>
+                                <td>
+                                    <?= htmlspecialchars($lead['created_by_name'] ?: '-'); ?>
+                                    <button type="button"
+                                            class="btn btn-outline-secondary btn-xs lead-reference-change"
+                                            data-id="<?= (int)$lead['id']; ?>"
+                                            data-name="<?= htmlspecialchars($lead['created_by_name'] ?: '-'); ?>"
+                                            title="Change Ref">
+                                        <i class="fas fa-user-edit"></i>
+                                    </button>
+                                </td>
+                            <?php } ?>
                             <td>
                                 <span class="lead-edit-value"><?= htmlspecialchars($lead['followup_date'] ? date('d-m-Y', strtotime($lead['followup_date'])) : '-'); ?></span>
-                                <?php if(manager_can_modify()){ ?>
+                                <?php if($can_manage_leads){ ?>
                                     <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="followup_date" data-value="<?= htmlspecialchars($lead['followup_date'] ?: ''); ?>" data-min="<?= htmlspecialchars($today); ?>" title="Edit Followup Date"><i class="fas fa-edit"></i></button>
                                 <?php } ?>
                             </td>
                             <td>
                                 <span class="lead-edit-value"><?= htmlspecialchars($lead['note'] ?: 'General'); ?></span>
-                                <?php if(manager_can_modify()){ ?>
+                                <?php if($can_manage_leads){ ?>
                                     <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="note" data-value="<?= htmlspecialchars($lead['note'] ?: 'General'); ?>" title="Edit Note"><i class="fas fa-edit"></i></button>
                                 <?php } ?>
                             </td>
                             <td>
-                                <?php if(manager_can_modify()){ ?>
+                                <?php if($can_manage_leads){ ?>
                                     <?php if($filter === 'customer' && (int)($lead['converted_customer_id'] ?? 0) > 0){ ?>
                                         <strong class="text-success">Converted to Customer</strong>
                                     <?php } elseif($filter === 'customer'){ ?>
@@ -245,6 +360,7 @@ require_once '../includes/sidebar.php';
                                         onclick="return confirm('Delete this lead?')">
                                         <i class="fas fa-trash"></i>
                                     </a>
+
                                     <?php } ?>
                                 <?php } else { ?>
                                     <span class="text-muted">No action</span>
@@ -256,7 +372,53 @@ require_once '../includes/sidebar.php';
             </tbody>
         </table>
 
+        <?php if($show_lead_reference){ ?>
+            <div class="modal fade" id="changeLeadReferenceModal" tabindex="-1" role="dialog" aria-hidden="true">
+                <div class="modal-dialog" role="document">
+                    <form method="post" class="modal-content">
+                        <input type="hidden" name="action" value="change_reference">
+                        <input type="hidden" name="lead_id" id="reference-lead-id">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Change Lead Ref</h5>
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-muted mb-3">Current Ref: <strong id="reference-current-name"></strong></p>
+                            <div class="form-group">
+                                <label>New Ref Staff</label>
+                                <select name="reference_user_id" class="form-control" required>
+                                    <option value="">Select staff</option>
+                                    <?php foreach($reference_staff_options as $reference_staff){ ?>
+                                        <option value="<?= (int)$reference_staff['login_user_id']; ?>">
+                                            <?= htmlspecialchars($reference_staff['name'] . (!empty($reference_staff['designation']) ? ' (' . $reference_staff['designation'] . ')' : '')); ?>
+                                        </option>
+                                    <?php } ?>
+                                </select>
+                            </div>
+                            <div class="form-group mb-0">
+                                <label>Admin Password</label>
+                                <input type="password" name="admin_password" class="form-control" autocomplete="current-password" required>
+                                <small class="text-muted">Required to change a lead reference.</small>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Update Ref</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        <?php } ?>
+
         <script>
+        document.querySelectorAll('.lead-reference-change').forEach(function(button) {
+            button.addEventListener('click', function() {
+                document.getElementById('reference-lead-id').value = button.dataset.id;
+                document.getElementById('reference-current-name').textContent = button.dataset.name;
+                $('#changeLeadReferenceModal').modal('show');
+            });
+        });
+
         document.querySelectorAll('.lead-inline-edit').forEach(function(button) {
             button.addEventListener('click', function() {
                 if(button.dataset.editing === '1') return;

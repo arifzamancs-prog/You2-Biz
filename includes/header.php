@@ -8,6 +8,8 @@ require_once __DIR__ . '/branding_helper.php';
 
 $app_favicon_url = branding_favicon_url(isset($conn) ? $conn : null);
 $app_root_path = app_root_path();
+$app_favicon_path = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/\\') . (string)parse_url($app_favicon_url, PHP_URL_PATH);
+$app_favicon_version = is_file($app_favicon_path) ? (string)filemtime($app_favicon_path) : '1';
 ?>
 
 <meta charset="UTF-8">
@@ -16,9 +18,9 @@ $app_root_path = app_root_path();
 
 <title>You2 Biz</title>
 
-<link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($app_favicon_url); ?>">
-<link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($app_favicon_url); ?>">
-<link rel="apple-touch-icon" href="<?= htmlspecialchars($app_favicon_url); ?>">
+<link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($app_favicon_url); ?>?v=<?= htmlspecialchars($app_favicon_version); ?>">
+<link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($app_favicon_url); ?>?v=<?= htmlspecialchars($app_favicon_version); ?>">
+<link rel="apple-touch-icon" href="<?= htmlspecialchars($app_favicon_url); ?>?v=<?= htmlspecialchars($app_favicon_version); ?>">
 
 <!-- Font Awesome -->
 <link rel="stylesheet"

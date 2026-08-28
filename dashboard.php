@@ -11,6 +11,12 @@ require_once 'includes/booking_invoice_helper.php';
 $user_id = (int)$_SESSION['user_id'];
 $user_name = $_SESSION['login_name'] ?? $_SESSION['user_name'] ?? 'User';
 $dashboard_is_agent = is_agent_user();
+$dashboard_is_staff_login = is_manager_user();
+
+if($dashboard_is_staff_login && !manager_has_permission('dashboard')){
+    require_once 'staff_dashboard.php';
+    exit;
+}
 
 ensure_default_cash_wallet($conn, $user_id);
 ensure_invoice_posting_columns($conn);

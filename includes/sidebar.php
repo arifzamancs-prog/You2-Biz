@@ -135,13 +135,47 @@ $sidebar_role = is_super_admin_user()
     : (is_manager_user()
         ? (is_agent_user() ? 'Assistant Access' : 'Manager Access')
         : 'Administrator');
+
+// A staff login is linked with a staff record. Show that person's actual
+// designation under the company name instead of the generic account type.
+if(is_manager_user() && isset($conn) && $conn instanceof mysqli){
+    $sidebar_login_user_id = (int)($_SESSION['login_user_id'] ?? 0);
+
+    if($sidebar_login_user_id > 0){
+        $sidebar_designation_stmt = mysqli_prepare(
+            $conn,
+            "SELECT s.designation
+             FROM users u
+             INNER JOIN staff s
+                ON s.id=u.staff_id
+                AND s.user_id=u.owner_id
+             WHERE u.id=?
+             LIMIT 1"
+        );
+
+        if($sidebar_designation_stmt){
+            mysqli_stmt_bind_param($sidebar_designation_stmt, 'i', $sidebar_login_user_id);
+            mysqli_stmt_execute($sidebar_designation_stmt);
+            $sidebar_designation_row = mysqli_fetch_assoc(
+                mysqli_stmt_get_result($sidebar_designation_stmt)
+            );
+            $sidebar_designation = trim((string)($sidebar_designation_row['designation'] ?? ''));
+
+            if($sidebar_designation !== ''){
+                $sidebar_role = $sidebar_designation . ' Access';
+            }
+        }
+    }
+}
+
 $current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $current_query = [];
 parse_str((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $current_query);
 $sidebar_is_super_admin = is_super_admin_user();
 $sidebar_is_agent_only = is_agent_user() && !$sidebar_is_super_admin;
 $sidebar_can_see_reports = $sidebar_is_super_admin || !is_agent_user();
-$sidebar_can_see_admin = role_power_includes('admin');
+$sidebar_can_see_admin = is_admin_user()
+    || (is_manager_user() && manager_has_permission('admin'));
 $sidebar_table_system_enabled = false;
 
 if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
@@ -318,12 +352,23 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                 <?php sidebar_item(app_path('dashboard.php'), 'Dashboard', 'fas fa-home'); ?>
 
-                <?php sidebar_tree('Staff Manage', 'fas fa-user-tie', [
+                <?php
+                $sidebar_staff_items = [
                     ['href' => app_path('staff/index.php'), 'label' => 'Create Staff'],
                     ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
                     ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
                     ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
-                ]); ?>
+                ];
+                if(is_admin_user()){
+                    array_splice($sidebar_staff_items, 2, 0, [[
+                        'href' => app_path('staff/attendance_settings.php'),
+                        'label' => 'Attendance Settings',
+                    ]]);
+                }
+                if(!is_manager_user() || manager_has_permission('staff')){
+                    sidebar_tree('Staff Manage', 'fas fa-user-tie', $sidebar_staff_items);
+                }
+                ?>
 
                 <?php if(is_super_admin_user()){ ?>
                     <?php
@@ -365,24 +410,42 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                 <li class="nav-header">OPERATIONS</li>
 
-                <?php if($sidebar_is_agent_only){ ?>
+                <?php if(is_admin_user() || manager_has_permission('notice_publish')){ ?>
+                    <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
+                <?php } ?>
+
+                <?php if(is_manager_user()){ ?>
                     <?php
-                    if(sales_module_enabled()){
+                    if(manager_has_permission('sales')){
                     sidebar_tree(
                         'Sales',
                         'fas fa-file-invoice',
                         [
                             [
-                                'href' => app_path('sales/create_invoice.php'),
+                                'href' => app_path('create_invoice/index.php'),
                                 'label' => 'Create Invoice',
                             ],
                             [
-                                'href' => app_path('sales/invoice_list.php'),
+                                'href' => app_path('create_invoice/invoice_list.php'),
                                 'label' => 'Invoice List',
                             ],
                         ]
                     );
                     }
+                    if(manager_has_permission('wallets')){
+                        sidebar_tree('Wallets', 'fas fa-wallet', [
+                            ['href' => app_path('wallets/index.php'), 'label' => 'Wallet List'],
+                            ['href' => app_path('categories/index.php'), 'label' => 'Expense Categories'],
+                            ['href' => app_path('moneyin/index.php'), 'label' => 'Money In'],
+                            ['href' => app_path('expenses/index.php'), 'label' => 'Expenses'],
+                            ['href' => app_path('transfers/index.php'), 'label' => 'Transfers'],
+                            ['href' => app_path('transactions/index.php'), 'label' => 'Transactions'],
+                        ]);
+                    }
+                    if(manager_has_permission('projects')){ sidebar_tree('Project & Package', 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>'Project'],['href'=>app_path('project_package/packages.php'),'label'=>'Package List']]); }
+                    if(manager_has_permission('customers')){ sidebar_tree('Customer Manage', 'fas fa-users', [['href'=>app_path('customers/index.php'),'label'=>'Create Customer']]); }
+                    if(manager_has_permission('suppliers')){ sidebar_tree('Suppliers', 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>'Suppliers'],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>'Supplier Due Payment']]); }
+                    if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
                 <?php }else{ ?>
 
@@ -443,10 +506,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                             'href' => app_path('transactions/index.php'),
                             'label' => 'Transactions',
                         ],
-                    ], is_manager_user() ? [] : [[
-                        'href' => app_path('profit_cash_out/index.php'),
-                        'label' => 'Profit Cash Out',
-                    ]])
+                    ])
                 );
 
                 if(products_module_enabled()){
@@ -560,7 +620,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 sidebar_tree(
                     'Sales',
                     'fas fa-file-invoice',
-                    [
+                    array_merge([
                         [
                             'href' => app_path('create_invoice/index.php'),
                             'label' => 'Create Invoice',
@@ -571,18 +631,13 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                             'label' => 'Invoice List',
                             'icon' => 'far fa-circle',
                         ],
-                        [
+                    ], is_admin_user() ? [[
                             'href' => app_path('create_invoice/manage_invoice_types.php'),
                             'label' => 'Manage Invoice Type',
                             'icon' => 'far fa-circle',
-                        ],
-                    ]
+                        ]] : [])
                 );
                 ?>
-
-                <?php if($sidebar_can_see_admin && sidebar_has_active_manager()){ ?>
-                    <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>
-                <?php } ?>
 
                 <?php } ?>
 
@@ -603,9 +658,18 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 <?php if($sidebar_can_see_admin){ ?>
                     <li class="nav-header">ADMIN</li>
 
-                    <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
+                    <?php if(is_admin_user()){ ?>
+                        <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
+                    <?php } ?>
+                    <?php if(is_admin_user()){ ?>
+                        <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>
+                    <?php } ?>
                     <?php sidebar_item(app_path('user_management/invoice_charges.php'), 'Invoice Charges', 'fas fa-percentage'); ?>
                     <?php sidebar_item(app_path('user_management/printing_option.php'), 'Printing Option', 'fas fa-print'); ?>
+                    <?php if(!is_manager_user()){ ?>
+                        <?php sidebar_item(app_path('profit_cash_out/index.php'), 'Profit Cash Out', 'fas fa-coins'); ?>
+                    <?php } ?>
+                    <?php if(is_admin_user()){ ?>
                     <?php
                     sidebar_tree(
                         'Tools',
@@ -629,32 +693,29 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ]
                     );
                     ?>
+                    <?php } ?>
                 <?php } ?>
 
-                <?php if(is_admin_user()){ ?>
-                    <li class="nav-header">HELP</li>
-
-                    <?php
-                    sidebar_tree(
-                        'Help',
-                        'fas fa-life-ring',
-                        [
-                            [
-                                'href' => app_path('help/video_tutorial.php'),
-                                'label' => 'Video Tutorial',
-                            ],
-                            [
-                                'href' => app_path('help/pricing_plan.php'),
-                                'label' => 'Pricing Plan',
-                            ],
-                            [
-                                'href' => app_path('help/support.php'),
-                                'label' => 'Support',
-                            ],
-                        ]
-                    );
-                    ?>
-                <?php } ?>
+                <li class="nav-header">HELP</li>
+                <?php
+                $sidebar_help_items = [
+                    [
+                        'href' => app_path('help/video_tutorial.php'),
+                        'label' => 'Video Tutorial',
+                    ],
+                ];
+                if(is_admin_user()){
+                    $sidebar_help_items[] = [
+                        'href' => app_path('help/pricing_plan.php'),
+                        'label' => 'Pricing Plan',
+                    ];
+                    $sidebar_help_items[] = [
+                        'href' => app_path('help/support.php'),
+                        'label' => 'Support',
+                    ];
+                }
+                sidebar_tree('Help', 'fas fa-life-ring', $sidebar_help_items);
+                ?>
 
                 <li class="nav-header">SESSION</li>
 

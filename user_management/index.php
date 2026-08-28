@@ -188,6 +188,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
     $manager_type = 'agent';
     $access_permissions = normalize_manager_permissions($_POST['access_permissions'] ?? []);
     $access_permissions_json = json_encode($access_permissions);
+    $sensitive_permissions = ['dashboard', 'projects', 'admin'];
+    $requires_admin_password = count(array_intersect($sensitive_permissions, $access_permissions)) > 0;
+    $admin_password = (string)($_POST['admin_password'] ?? '');
     $username_base = normalize_agent_username_base($_POST['username'] ?? '');
     $username = build_agent_login_username($username_base, $user_id);
     $password = $_POST['password'] ?? '';
@@ -223,6 +226,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delet
         mysqli_stmt_execute($staff_stmt);
         $selected_staff = mysqli_fetch_assoc(mysqli_stmt_get_result($staff_stmt));
         if($selected_staff){ $name = trim((string)$selected_staff['name']); }
+    }
+
+    if ($requires_admin_password) {
+        $admin_password_stmt = mysqli_prepare($conn, "SELECT password FROM users WHERE id=? AND role='admin' LIMIT 1");
+        mysqli_stmt_bind_param($admin_password_stmt, 'i', $user_id);
+        mysqli_stmt_execute($admin_password_stmt);
+        $admin_row = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_password_stmt));
+
+        if(!$admin_row || !password_verify($admin_password, $admin_row['password'])){
+            user_management_flash_and_redirect('Admin Password is required to grant Company Dashboard, Project & Package, or Admin access.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
+        }
     }
 
     if ($limit_error !== '') {
@@ -602,6 +616,12 @@ require_once '../includes/sidebar.php';
                         </div>
                     </div>
 
+                    <div class="form-group" id="sensitive-permission-password" style="display:none;">
+                        <label>Admin Password</label>
+                        <input type="password" name="admin_password" class="form-control" style="max-width: 280px;" autocomplete="current-password">
+                        <small class="text-muted">Required for Company Dashboard, Project &amp; Package, or Admin access.</small>
+                    </div>
+
                     <div class="form-group">
                         <label>Username</label>
                         <div class="input-group" style="max-width: 280px;">
@@ -755,6 +775,6 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
-$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); });</script>";
+$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); }); document.addEventListener('DOMContentLoaded', function(){ const sensitive = ['dashboard', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const sync = function(){ const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
 require_once '../includes/footer.php';
 ?>

@@ -8,6 +8,7 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+$supplier_can_add = is_admin_user() || (is_manager_user() && manager_has_permission('suppliers'));
 
 $sql = "SELECT *
         FROM suppliers
@@ -52,7 +53,7 @@ Suppliers
 
 </h3>
 
-<?php if(manager_can_modify()){ ?>
+<?php if($supplier_can_add){ ?>
 
 <div class="card-tools">
 

@@ -4,16 +4,22 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/lead_management_helper.php';
 
-require_admin_user();
+require_lead_management_access();
 ensure_lead_management_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
 $id = (int)($_GET['id'] ?? 0);
 $message = '';
 $today = date('Y-m-d');
+$lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);
+$lead_scope_sql = is_manager_user() ? ' AND created_by_user_id=?' : '';
 
-$lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=? AND status='lead' LIMIT 1");
-mysqli_stmt_bind_param($lead_stmt, 'ii', $id, $user_id);
+$lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql} LIMIT 1");
+if(is_manager_user()){
+    mysqli_stmt_bind_param($lead_stmt, 'iii', $id, $user_id, $lead_owner_id);
+}else{
+    mysqli_stmt_bind_param($lead_stmt, 'ii', $id, $user_id);
+}
 mysqli_stmt_execute($lead_stmt);
 $lead = mysqli_fetch_assoc(mysqli_stmt_get_result($lead_stmt));
 
@@ -39,9 +45,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $conn,
             "UPDATE leads
              SET name=?, phone=?, email=?, note=?, followup_date=?
-             WHERE id=? AND user_id=? AND status='lead'"
+             WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql}"
         );
-        mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
+        if(is_manager_user()){
+            mysqli_stmt_bind_param($update_stmt, 'sssssiii', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id);
+        }else{
+            mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
+        }
 
         if(mysqli_stmt_execute($update_stmt)){
             header('Location: index.php?filter=lead');

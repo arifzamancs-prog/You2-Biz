@@ -1,10 +1,12 @@
 <?php
 
 require_once __DIR__ . '/staff_helper.php';
+require_once __DIR__ . '/manager_access_helper.php';
 
 function ensure_staff_attendance_tables($conn)
 {
     ensure_staff_table($conn);
+    ensure_manager_access_columns($conn);
 
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_attendance_settings (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -49,6 +51,7 @@ function ensure_staff_attendance_tables($conn)
         login_ip VARCHAR(45) NULL,
         login_device ENUM('desktop','mobile') NOT NULL DEFAULT 'desktop',
         attendance_status ENUM('present','late','absent','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present',
+        is_auto_absent TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_staff_attendance_day (user_id, staff_id, attendance_date),
         INDEX idx_attendance_user_date (user_id, attendance_date),
@@ -60,6 +63,10 @@ function ensure_staff_attendance_tables($conn)
         && (stripos($attendance_status_info['Type'], "'absent'") === false || stripos($attendance_status_info['Type'], "'casual_leave'") === false)) {
         mysqli_query($conn, "ALTER TABLE staff_attendance_logs MODIFY attendance_status ENUM('present','late','absent','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present'");
     }
+    $auto_absent_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_logs LIKE 'is_auto_absent'");
+    if (!$auto_absent_column || mysqli_num_rows($auto_absent_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_logs ADD COLUMN is_auto_absent TINYINT(1) NOT NULL DEFAULT 0 AFTER attendance_status");
+    }
 
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_monthly_salaries (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -68,6 +75,9 @@ function ensure_staff_attendance_tables($conn)
         salary_year SMALLINT UNSIGNED NOT NULL,
         salary_month TINYINT UNSIGNED NOT NULL,
         assigned_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
+        salary_start_date DATE NULL,
+        payable_days INT UNSIGNED NOT NULL DEFAULT 0,
+        prorated_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
         late_days INT NOT NULL DEFAULT 0,
         absent_days INT NOT NULL DEFAULT 0,
         casual_leave_days INT NOT NULL DEFAULT 0,
@@ -86,6 +96,9 @@ function ensure_staff_attendance_tables($conn)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     $salary_payment_columns = [
+        'salary_start_date' => "ALTER TABLE staff_monthly_salaries ADD COLUMN salary_start_date DATE NULL AFTER assigned_salary",
+        'payable_days' => "ALTER TABLE staff_monthly_salaries ADD COLUMN payable_days INT UNSIGNED NOT NULL DEFAULT 0 AFTER salary_start_date",
+        'prorated_salary' => "ALTER TABLE staff_monthly_salaries ADD COLUMN prorated_salary DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER payable_days",
         'payment_status' => "ALTER TABLE staff_monthly_salaries ADD COLUMN payment_status ENUM('pending','paid') NOT NULL DEFAULT 'pending' AFTER generated_salary",
         'paid_ledger_id' => "ALTER TABLE staff_monthly_salaries ADD COLUMN paid_ledger_id BIGINT UNSIGNED NULL AFTER payment_status",
         'paid_wallet_id' => "ALTER TABLE staff_monthly_salaries ADD COLUMN paid_wallet_id BIGINT UNSIGNED NULL AFTER paid_ledger_id",
@@ -130,6 +143,42 @@ function staff_attendance_client_ip()
     return substr($ip, 0, 45);
 }
 
+function staff_attendance_auto_mark_absent($conn, $company_user_id)
+{
+    $company_user_id = (int)$company_user_id;
+    if ($company_user_id <= 0) return 0;
+
+    ensure_staff_attendance_tables($conn);
+    $settings = staff_attendance_settings($conn, $company_user_id);
+    if (date('H:i:s') <= ($settings['absent_after_time'] ?? '12:00:00')) return 0;
+
+    $today = date('Y-m-d');
+    $closed_stmt = mysqli_prepare($conn, 'SELECT id FROM staff_office_closed_days WHERE user_id=? AND closed_date=? LIMIT 1');
+    mysqli_stmt_bind_param($closed_stmt, 'is', $company_user_id, $today);
+    mysqli_stmt_execute($closed_stmt);
+    if (mysqli_num_rows(mysqli_stmt_get_result($closed_stmt)) > 0) return 0;
+
+    // Only staff who have been granted a manager login access are enrolled in attendance.
+    $staff_stmt = mysqli_prepare($conn, "SELECT s.id AS staff_id, u.id AS login_user_id
+        FROM staff s INNER JOIN users u ON u.staff_id=s.id AND u.owner_id=s.user_id AND u.role='manager'
+        WHERE s.user_id=? AND s.status='active'");
+    mysqli_stmt_bind_param($staff_stmt, 'i', $company_user_id);
+    mysqli_stmt_execute($staff_stmt);
+    $staffs = mysqli_stmt_get_result($staff_stmt);
+    $insert = mysqli_prepare($conn, "INSERT IGNORE INTO staff_attendance_logs
+        (user_id, staff_id, login_user_id, attendance_date, login_at, login_ip, login_device, attendance_status, is_auto_absent)
+        VALUES (?, ?, ?, ?, NOW(), '', 'desktop', 'absent', 1)");
+    $created = 0;
+    while ($staff = mysqli_fetch_assoc($staffs)) {
+        $staff_id = (int)$staff['staff_id'];
+        $login_user_id = (int)$staff['login_user_id'];
+        mysqli_stmt_bind_param($insert, 'iiis', $company_user_id, $staff_id, $login_user_id, $today);
+        mysqli_stmt_execute($insert);
+        $created += mysqli_stmt_affected_rows($insert) > 0 ? 1 : 0;
+    }
+    return $created;
+}
+
 function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
 {
     $login_user_id = (int)$login_user_id;
@@ -155,6 +204,7 @@ function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
     }
 
     $settings = staff_attendance_settings($conn, $company_user_id);
+    staff_attendance_auto_mark_absent($conn, $company_user_id);
     $today = date('Y-m-d');
     $closed_stmt = mysqli_prepare($conn, 'SELECT id FROM staff_office_closed_days WHERE user_id=? AND closed_date=? LIMIT 1');
     mysqli_stmt_bind_param($closed_stmt, 'is', $company_user_id, $today);
@@ -168,14 +218,14 @@ function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
     $device = 'desktop';
 
     $stmt = mysqli_prepare($conn, "INSERT INTO staff_attendance_logs
-        (user_id, staff_id, login_user_id, attendance_date, login_at, login_ip, login_device, attendance_status)
-        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)
-        ON DUPLICATE KEY UPDATE login_user_id=VALUES(login_user_id), login_at=VALUES(login_at), login_ip=VALUES(login_ip), login_device=VALUES(login_device), attendance_status=VALUES(attendance_status)");
+        (user_id, staff_id, login_user_id, attendance_date, login_at, login_ip, login_device, attendance_status, is_auto_absent)
+        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, 0)
+        ON DUPLICATE KEY UPDATE login_user_id=VALUES(login_user_id), login_at=VALUES(login_at), login_ip=VALUES(login_ip), login_device=VALUES(login_device), attendance_status=VALUES(attendance_status), is_auto_absent=0");
     mysqli_stmt_bind_param($stmt, 'iiissss', $company_user_id, $staff_id, $login_user_id, $today, $ip, $device, $status);
     mysqli_stmt_execute($stmt);
 }
 
-function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $active_only = true)
+function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $active_only = true, $include_not_started = false)
 {
     ensure_staff_attendance_tables($conn);
     $user_id = (int)$user_id;
@@ -183,8 +233,6 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
     $month = (int)$month;
     $month_start = sprintf('%04d-%02d-01', $year, $month);
     $month_end = date('Y-m-t', strtotime($month_start));
-    $today = date('Y-m-d');
-    $period_end = $month_start > $today ? null : min($month_end, $today);
     $settings = staff_attendance_settings($conn, $user_id);
     $days_in_month = (int)date('t', strtotime($month_start));
 
@@ -206,6 +254,17 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         $attendance[(int)$log['staff_id']][$log['attendance_date']] = $log['attendance_status'];
     }
 
+    // A salary begins only after the staff member's first recorded desktop login.
+    // Earlier months therefore cannot receive a salary row for a newly enabled account.
+    $first_login_dates = [];
+    $first_login_stmt = mysqli_prepare($conn, 'SELECT staff_id, MIN(attendance_date) AS first_login_date FROM staff_attendance_logs WHERE user_id=? AND attendance_date<=? AND is_auto_absent=0 GROUP BY staff_id');
+    mysqli_stmt_bind_param($first_login_stmt, 'is', $user_id, $month_end);
+    mysqli_stmt_execute($first_login_stmt);
+    $first_login_result = mysqli_stmt_get_result($first_login_stmt);
+    while ($first_login = mysqli_fetch_assoc($first_login_result)) {
+        $first_login_dates[(int)$first_login['staff_id']] = $first_login['first_login_date'];
+    }
+
     $staff_sql = "SELECT id, name, staff_code, salary, created_at FROM staff WHERE user_id=?" . ($active_only ? " AND status='active'" : '') . ' ORDER BY name ASC';
     $staff_stmt = mysqli_prepare($conn, $staff_sql);
     mysqli_stmt_bind_param($staff_stmt, 'i', $user_id);
@@ -215,11 +274,27 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
 
     while ($staff = mysqli_fetch_assoc($staff_result)) {
         $staff_id = (int)$staff['id'];
+        $first_login_date = $first_login_dates[$staff_id] ?? null;
+        if (!$first_login_date) {
+            if ($include_not_started) {
+                $rows[] = [
+                    'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'],
+                    'salary' => (float)$staff['salary'], 'salary_start_date' => null, 'payable_days' => 0,
+                    'prorated_salary' => 0, 'late_days' => 0, 'absent_days' => 0,
+                    'casual_leave_days' => 0, 'medical_leave_days' => 0,
+                    'cut_days' => 0, 'cut_amount' => 0, 'generated_salary' => 0,
+                ];
+            }
+            continue;
+        }
+        $salary_start_date = max($month_start, $first_login_date);
+        if ($salary_start_date > $month_end) {
+            continue;
+        }
         $late_days = 0; $absent_days = 0; $casual_leave_days = 0; $medical_leave_days = 0;
-        $staff_start = max($month_start, date('Y-m-d', strtotime($staff['created_at'])));
-        if ($period_end && $staff_start <= $period_end) {
-            $cursor = new DateTime($staff_start);
-            $end = new DateTime($period_end);
+        if ($salary_start_date <= $month_end) {
+            $cursor = new DateTime($salary_start_date);
+            $end = new DateTime($month_end);
             while ($cursor <= $end) {
                 $day = $cursor->format('Y-m-d');
                 if (empty($closed_days[$day])) {
@@ -235,13 +310,16 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         $late_cut_days = intdiv($late_days, max(1, (int)$settings['late_days_for_salary_cut']));
         $salary_cut_days = $late_cut_days + $absent_days;
         $assigned_salary = (float)$staff['salary'];
-        $cut_amount = min($assigned_salary, round(($assigned_salary / $days_in_month) * $salary_cut_days, 2));
+        $payable_days = (int)((new DateTime($salary_start_date))->diff(new DateTime($month_end))->days + 1);
+        $prorated_salary = round(($assigned_salary / $days_in_month) * $payable_days, 2);
+        $cut_amount = min($prorated_salary, round(($assigned_salary / $days_in_month) * $salary_cut_days, 2));
         $rows[] = [
             'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'],
             'salary' => $assigned_salary, 'late_days' => $late_days, 'absent_days' => $absent_days,
             'casual_leave_days' => $casual_leave_days, 'medical_leave_days' => $medical_leave_days,
-            'cut_days' => $salary_cut_days, 'cut_amount' => $cut_amount,
-            'generated_salary' => max(0, round($assigned_salary - $cut_amount, 2)),
+            'salary_start_date' => $salary_start_date, 'payable_days' => $payable_days,
+            'prorated_salary' => $prorated_salary, 'cut_days' => $salary_cut_days, 'cut_amount' => $cut_amount,
+            'generated_salary' => max(0, round($prorated_salary - $cut_amount, 2)),
         ];
     }
     return $rows;
@@ -255,9 +333,9 @@ function staff_attendance_generate_monthly_salaries($conn, $user_id)
     $month = (int)$period->format('n');
     $rows = staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, false);
     $created = 0;
-    $stmt = mysqli_prepare($conn, 'INSERT IGNORE INTO staff_monthly_salaries (user_id, staff_id, salary_year, salary_month, assigned_salary, late_days, absent_days, casual_leave_days, medical_leave_days, salary_cut_days, salary_cut_amount, generated_salary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt = mysqli_prepare($conn, 'INSERT IGNORE INTO staff_monthly_salaries (user_id, staff_id, salary_year, salary_month, assigned_salary, salary_start_date, payable_days, prorated_salary, late_days, absent_days, casual_leave_days, medical_leave_days, salary_cut_days, salary_cut_amount, generated_salary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     foreach ($rows as $row) {
-        mysqli_stmt_bind_param($stmt, 'iiiidiiiiidd', $user_id, $row['staff_id'], $year, $month, $row['salary'], $row['late_days'], $row['absent_days'], $row['casual_leave_days'], $row['medical_leave_days'], $row['cut_days'], $row['cut_amount'], $row['generated_salary']);
+        mysqli_stmt_bind_param($stmt, 'iiiidsidiiiiidd', $user_id, $row['staff_id'], $year, $month, $row['salary'], $row['salary_start_date'], $row['payable_days'], $row['prorated_salary'], $row['late_days'], $row['absent_days'], $row['casual_leave_days'], $row['medical_leave_days'], $row['cut_days'], $row['cut_amount'], $row['generated_salary']);
         mysqli_stmt_execute($stmt);
         $created += mysqli_stmt_affected_rows($stmt) > 0 ? 1 : 0;
     }

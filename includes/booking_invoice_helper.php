@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/invoice_charge_helper.php';
 
 function ensure_booking_invoice_table($conn)
 {
@@ -22,6 +23,7 @@ function ensure_booking_invoice_table($conn)
             invoice_date DATE NOT NULL,
             amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
             notes TEXT NULL,
+            created_by_user_id BIGINT UNSIGNED NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_booking_invoice_no (invoice_no),
@@ -59,6 +61,57 @@ function ensure_booking_invoice_table($conn)
     if(!$confirmed_column || mysqli_num_rows($confirmed_column) === 0){
         mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN confirmed_at DATETIME NULL AFTER wallet_effect_applied");
     }
+
+    $created_by_column = mysqli_query($conn, "SHOW COLUMNS FROM booking_invoices LIKE 'created_by_user_id'");
+    if(!$created_by_column || mysqli_num_rows($created_by_column) === 0){
+        mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN created_by_user_id BIGINT UNSIGNED NULL AFTER notes");
+    }
+
+    mysqli_query($conn, "CREATE TABLE IF NOT EXISTS booking_invoice_charges (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        booking_invoice_id BIGINT UNSIGNED NOT NULL,
+        charge_type_id BIGINT UNSIGNED NOT NULL,
+        charge_name VARCHAR(100) NOT NULL,
+        charge_type ENUM('add','less') NOT NULL DEFAULT 'add',
+        charge_value_type ENUM('fixed','percent') NOT NULL DEFAULT 'fixed',
+        input_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+        charge_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        INDEX idx_booking_invoice_charge (booking_invoice_id),
+        INDEX idx_booking_charge_type (charge_type_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+function booking_invoice_active_charges($conn, $user_id)
+{
+    $stmt = mysqli_prepare($conn, "SELECT id, charge_name, charge_type, charge_value_type FROM invoice_charge_types WHERE user_id=? AND status='active' AND show_on_invoice=1 ORDER BY id ASC");
+    mysqli_stmt_bind_param($stmt, 'i', $user_id); mysqli_stmt_execute($stmt);
+    return mysqli_stmt_get_result($stmt);
+}
+
+function booking_invoice_charge_total($conn, $user_id, $base_amount, $charge_inputs, $preserved_rows = [])
+{
+    $base_amount = max(0, (float)$base_amount); $net = $base_amount; $rows = [];
+    foreach ((array)$charge_inputs as $charge_id => $input_value) {
+        $charge_id=(int)$charge_id; $input_value=(float)$input_value; if($charge_id<=0 || $input_value==0) continue;
+        $stmt=mysqli_prepare($conn,"SELECT id,charge_name,charge_type,charge_value_type FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($stmt,'ii',$charge_id,$user_id); mysqli_stmt_execute($stmt); $charge=mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)); if(!$charge) continue;
+        $amount=round(calculate_invoice_charge_amount($input_value,$charge['charge_value_type'],$base_amount),2);
+        $net += $charge['charge_type']==='less' ? -$amount : $amount;
+        $rows[]=['charge'=>$charge,'input_value'=>$input_value,'amount'=>$amount];
+    }
+    // Charges that were made inactive after an invoice was created are historical
+    // records. Keep their original amount when another part of that invoice is edited.
+    foreach ((array)$preserved_rows as $preserved_row) {
+        $charge = $preserved_row['charge'] ?? null;
+        if(!$charge || empty($charge['charge_type'])) continue;
+        $amount = round((float)($preserved_row['amount'] ?? 0), 2);
+        $net += $charge['charge_type'] === 'less' ? -$amount : $amount;
+        $rows[] = [
+            'charge' => $charge,
+            'input_value' => (float)($preserved_row['input_value'] ?? 0),
+            'amount' => $amount
+        ];
+    }
+    return ['total'=>max(0,round($net,2)),'rows'=>$rows];
 }
 
 function booking_default_invoice_types()

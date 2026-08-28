@@ -6,9 +6,10 @@ require_once '../includes/wallet_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/booking_invoice_helper.php';
 
-require_admin_user();
+require_sales_access();
 
 $user_id = (int)$_SESSION['user_id'];
+$created_by_user_id = (int)($_SESSION['login_user_id'] ?? $user_id);
 
 ensure_project_package_tables($conn);
 ensure_booking_invoice_table($conn);
@@ -21,10 +22,12 @@ $message = '';
 $customer_id = (int)($_POST['customer_id'] ?? 0);
 $project_id = (int)($_POST['project_id'] ?? 0);
 $package_id = (int)($_POST['package_id'] ?? 0);
-$wallet_id = (int)($_POST['wallet_id'] ?? 0);
+$cash_wallet_id = ensure_default_cash_wallet($conn, $user_id);
+$wallet_id = (int)($_POST['wallet_id'] ?? $cash_wallet_id);
 $invoice_date = trim($_POST['invoice_date'] ?? date('m/d/Y'));
 $amount = trim($_POST['amount'] ?? '');
 $notes = trim($_POST['notes'] ?? '');
+$charge_inputs = $_POST['charge_value'] ?? [];
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $save_action = $_POST['save_action'] ?? 'save';
@@ -33,22 +36,24 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
     $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
     $numeric_amount = (float)$amount;
+    $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
+    $final_amount = $charge_calculation['total'];
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $normalized_date === '' || $numeric_amount <= 0){
-        $message = 'Customer, Project, Package, Wallet, Date and valid Price are required.';
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0){
+        $message = 'Customer, Project, Package, Date and valid Price are required.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
 
         $insert_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO booking_invoices
-             (user_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, notes)
+             (user_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, notes, created_by_user_id)
              VALUES
-             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
         mysqli_stmt_bind_param(
             $insert_stmt,
-            'isiiiissds',
+            'isiiiissdsi',
             $user_id,
             $invoice_no,
             $customer_id,
@@ -57,12 +62,15 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $wallet_id,
             $type,
             $normalized_date,
-            $numeric_amount,
-            $notes
+            $final_amount,
+            $notes,
+            $created_by_user_id
         );
 
         if(mysqli_stmt_execute($insert_stmt)){
             $saved_id = (int)mysqli_insert_id($conn);
+            $charge_insert = mysqli_prepare($conn, "INSERT INTO booking_invoice_charges (booking_invoice_id,charge_type_id,charge_name,charge_type,charge_value_type,input_value,charge_amount) VALUES (?,?,?,?,?,?,?)");
+            foreach($charge_calculation['rows'] as $charge_row){ $c=$charge_row['charge']; mysqli_stmt_bind_param($charge_insert,'iisssdd',$saved_id,$c['id'],$c['charge_name'],$c['charge_type'],$c['charge_value_type'],$charge_row['input_value'],$charge_row['amount']); mysqli_stmt_execute($charge_insert); }
             if($save_action === 'save_print'){
                 try {
                     confirm_booking_invoice($conn, $saved_id, $user_id);
@@ -125,6 +133,7 @@ $wallet_result = active_wallets_result($conn, $user_id);
 while($wallet_result && $row = mysqli_fetch_assoc($wallet_result)){
     $wallets[] = $row;
 }
+$invoice_charges = booking_invoice_active_charges($conn, $user_id);
 
 $recent_invoices = [];
 $recent_stmt = mysqli_prepare(
@@ -176,13 +185,34 @@ require_once '../includes/sidebar.php';
                     ? 'Invoice saved and confirmed. Wallet balance has been updated and the print page opened in a new tab.'
                     : 'Invoice saved as Pending. Wallet balance will not change until it is confirmed.'; ?>
             </div>
+            <script>if(window.history.replaceState){ const url=new URL(window.location.href); url.searchParams.delete('saved'); window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : '')); }</script>
         <?php } ?>
 
         <form method="post" id="create-invoice-form">
             <div class="row">
-                <div class="col-md-6">
+                <div class="col-md-3">
                     <div class="form-group">
-                        <label>Customer Profile</label>
+                        <label>Date</label>
+                        <input type="text" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="mm/dd/yyyy" required>
+                    </div>
+                </div>
+
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label>Invoice Type</label>
+                        <select name="invoice_type" class="form-control" required>
+                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
+                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
+                                    <?= htmlspecialchars($type_name); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label>Customer Name</label>
                         <select name="customer_id" class="form-control" required>
                             <option value="">Select Customer</option>
                             <?php foreach($customers as $customer){ ?>
@@ -228,13 +258,6 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-4">
                     <div class="form-group">
-                        <label>Date</label>
-                        <input type="text" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="mm/dd/yyyy" required>
-                    </div>
-                </div>
-
-                <div class="col-md-4">
-                    <div class="form-group">
                         <label>Price (BDT)</label>
                         <input id="amount" type="number" step="0.01" min="0" name="amount" class="form-control" value="<?= htmlspecialchars($amount); ?>" required>
                     </div>
@@ -244,28 +267,14 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Wallet</label>
                         <select name="wallet_id" class="form-control" required>
-                            <option value="">Select Wallet</option>
                             <?php foreach($wallets as $wallet){ ?>
-                                <option value="<?= (int)$wallet['id']; ?>" <?= $wallet_id === (int)$wallet['id'] ? 'selected' : ''; ?>>
-                                    <?= htmlspecialchars($wallet['wallet_name']); ?>
-                                </option>
+                                <option value="<?= (int)$wallet['id']; ?>" <?= $wallet_id === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option>
                             <?php } ?>
                         </select>
                     </div>
                 </div>
 
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label>Invoice Type</label>
-                        <select name="invoice_type" class="form-control" required>
-                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
-                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
-                                    <?= htmlspecialchars($type_name); ?>
-                                </option>
-                            <?php } ?>
-                        </select>
-                    </div>
-                </div>
+                <?php while($charge = mysqli_fetch_assoc($invoice_charges)){ ?><div class="col-md-4"><div class="form-group"><label><?= htmlspecialchars($charge['charge_name']) ?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?><?= $charge['charge_value_type']==='percent'?', %':'' ?>)</label><input type="number" min="0" step="0.01" class="form-control invoice-charge-input" name="charge_value[<?= (int)$charge['id'] ?>]" value="<?= htmlspecialchars($charge_inputs[$charge['id']] ?? '') ?>"></div></div><?php } ?>
 
                 <div class="col-md-12">
                     <div class="form-group">

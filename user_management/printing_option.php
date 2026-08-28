@@ -4,10 +4,11 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
 
-require_admin_user();
+require_admin_module_access();
 
-$message = '';
-$message_type = '';
+$message = $_SESSION['printing_option_flash_message'] ?? '';
+$message_type = $_SESSION['printing_option_flash_type'] ?? '';
+unset($_SESSION['printing_option_flash_message'], $_SESSION['printing_option_flash_type']);
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $printing_option = normalize_printing_option(
@@ -68,7 +69,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 $message .= ' Seal stamp preview and print settings have been updated.';
             }
 
-            $message_type = 'success';
+            $_SESSION['printing_option_flash_message'] = $message;
+            $_SESSION['printing_option_flash_type'] = 'success';
+            header('Location: printing_option.php');
+            exit;
         }else{
             $message = 'Printing option could not be updated.';
             $message_type = 'danger';
@@ -284,7 +288,7 @@ require_once '../includes/sidebar.php';
                         </div>
 
                         <div class="form-group mb-0">
-                            <label>Print Invoice Created By (Assistant/Manager)</label>
+                            <label>Print Invoice Created By</label>
 
                             <div class="custom-control custom-radio mb-2">
                                 <input
@@ -335,7 +339,7 @@ require_once '../includes/sidebar.php';
                                         class="form-control-file"
                                         accept=".png,.jpg,.jpeg,.webp">
                                     <small class="form-text text-muted">
-                                        Recommended transparent PNG for better print quality.
+                                        Recommended transparent PNG for better print.
                                     </small>
                                 </div>
 
@@ -344,7 +348,7 @@ require_once '../includes/sidebar.php';
                                         id="company_seal_preview"
                 src="<?= htmlspecialchars($company_seal_url !== '' ? $company_seal_url : '/assets/you2biz-logo.png'); ?>"
                                         alt="Company Seal Preview"
-                                        style="max-width: 180px; max-height: 160px; width: auto; <?= $company_seal_url !== '' ? '' : 'opacity:.18;'; ?>">
+                                        style="max-width: 110px; max-height: 90px; width: auto; <?= $company_seal_url !== '' ? '' : 'opacity:.18;'; ?>">
                                 </div>
 
                                 <div class="form-group mb-0">
@@ -397,7 +401,7 @@ require_once '../includes/sidebar.php';
                                         id="paid_seal_preview"
                 src="<?= htmlspecialchars($paid_seal_url !== '' ? $paid_seal_url : '/assets/you2biz-logo.png'); ?>"
                                         alt="Paid Seal Preview"
-                                        style="max-width: 180px; max-height: 160px; width: auto; <?= $paid_seal_url !== '' ? '' : 'opacity:.18;'; ?>">
+                                        style="max-width: 110px; max-height: 90px; width: auto; <?= $paid_seal_url !== '' ? '' : 'opacity:.18;'; ?>">
                                 </div>
 
                                 <div class="form-group mb-0">
@@ -469,16 +473,16 @@ require_once '../includes/sidebar.php';
                     <div class="border rounded p-3 mb-3">
                         <label class="mb-1">Company Logo Print</label>
                         <div class="text-muted small mb-3">
-                            In General Print, the official You2 Biz logo from the super admin branding settings will be used by default. If the user updates their profile photo, that image will be used as the print logo instead.
+                            This You2 Biz logo is used by default. After the company updates its profile photo, that photo will be used as the print logo instead.
                         </div>
 
                         <div class="row align-items-center">
                             <div class="col-md-4 mb-3 mb-md-0">
-                                <div class="border rounded p-3 bg-light text-center">
+                                <div class="border rounded p-2 bg-light text-center" style="height: 120px; overflow: hidden;">
                                     <img
                 src="<?= htmlspecialchars($company_logo_url !== '' ? $company_logo_url : '/assets/you2biz-logo.png'); ?>"
                                         alt="Company Logo Preview"
-                                        style="max-width: 170px; max-height: 110px; width: auto; opacity: <?= $company_logo_url !== '' ? '.45' : '.12'; ?>;">
+                                        style="display: block; width: 100%; max-width: 150px; height: 100px; max-height: 100%; margin: 0 auto; object-fit: contain; opacity: <?= $company_logo_url !== '' ? '1' : '.12'; ?>;">
                                 </div>
                             </div>
 

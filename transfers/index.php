@@ -45,7 +45,7 @@ require_once '../includes/sidebar.php';
             Transfer History
         </h3>
 
-        <div class="card-tools">
+        <?php if(is_admin_user()){ ?><div class="card-tools">
 
             <a href="create.php"
                class="btn btn-primary btn-sm">
@@ -55,7 +55,7 @@ require_once '../includes/sidebar.php';
 
             </a>
 
-        </div>
+        </div><?php } ?>
 
     </div>
 

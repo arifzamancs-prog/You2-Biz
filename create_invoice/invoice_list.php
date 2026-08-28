@@ -2,7 +2,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
-require_admin_user();
+require_sales_access();
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_booking_invoice_table($conn);

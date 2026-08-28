@@ -15,7 +15,6 @@ require_once '../includes/invoice_reference_helper.php';
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
 ensure_invoice_charge_columns($conn);
-ensure_default_invoice_charges($conn, $user_id);
 ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
