@@ -319,9 +319,10 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 <?php sidebar_item(app_path('dashboard.php'), 'Dashboard', 'fas fa-home'); ?>
 
                 <?php sidebar_tree('Staff Manage', 'fas fa-user-tie', [
-                    ['href' => app_path('staff/index.php'), 'label' => 'Staff List'],
-                    ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
+                    ['href' => app_path('staff/index.php'), 'label' => 'Create Staff'],
                     ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
+                    ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
+                    ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
                 ]); ?>
 
                 <?php if(is_super_admin_user()){ ?>

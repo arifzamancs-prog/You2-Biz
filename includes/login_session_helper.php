@@ -40,6 +40,9 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
          WHERE id = {$login_user_id}"
     );
 
+    // The first login on a new month creates the previous month's salary snapshots.
+    staff_attendance_generate_monthly_salaries($conn, (int)$owner_id);
+
     // Only staff accounts logging in from a desktop create attendance records.
     staff_attendance_record_login($conn, $login_user_id, (int)$owner_id);
 }
