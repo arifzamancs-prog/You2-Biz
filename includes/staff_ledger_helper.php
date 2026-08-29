@@ -2,19 +2,8 @@
 
 function ensure_staff_ledger_table($conn)
 {
-    $transaction_type = mysqli_query($conn, "SHOW COLUMNS FROM transactions LIKE 'transaction_type'");
-    $transaction_type_row = $transaction_type ? mysqli_fetch_assoc($transaction_type) : null;
-    if($transaction_type_row && strpos((string)($transaction_type_row['Type'] ?? ''), "'staff_payment'") === false){
-        mysqli_query(
-            $conn,
-            "ALTER TABLE transactions MODIFY transaction_type ENUM(
-                'money_in','expense','transfer','transfer_in','transfer_out',
-                'sales_invoice','receive_payment','purchase','supplier_payment',
-                'profit_cash_out','staff_payment'
-            ) NOT NULL"
-        );
-    }
-
+    // Loading the ledger must not run an ALTER on the shared transactions
+    // table. Older live databases can reject that migration and return 500.
     mysqli_query(
         $conn,
         "CREATE TABLE IF NOT EXISTS staff_ledger_entries (
@@ -34,6 +23,22 @@ function ensure_staff_ledger_table($conn)
             INDEX idx_staff_ledger_staff (staff_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+}
+
+function ensure_staff_ledger_transaction_type($conn)
+{
+    $transaction_type = mysqli_query($conn, "SHOW COLUMNS FROM transactions LIKE 'transaction_type'");
+    $transaction_type_row = $transaction_type ? mysqli_fetch_assoc($transaction_type) : null;
+    if($transaction_type_row && strpos((string)($transaction_type_row['Type'] ?? ''), "'staff_payment'") === false){
+        mysqli_query(
+            $conn,
+            "ALTER TABLE transactions MODIFY transaction_type ENUM(
+                'money_in','expense','transfer','transfer_in','transfer_out',
+                'sales_invoice','receive_payment','purchase','supplier_payment',
+                'profit_cash_out','staff_payment'
+            ) NOT NULL"
+        );
+    }
 }
 
 function staff_ledger_type_label($entry_type)

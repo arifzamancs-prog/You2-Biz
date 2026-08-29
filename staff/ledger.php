@@ -28,6 +28,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         $error='Select staff, wallet and payment type, then enter a valid amount.';
     }else{
         ensure_expense_support_tables($conn, $user_id);
+        ensure_staff_ledger_transaction_type($conn);
         mysqli_begin_transaction($conn);
         try{
             $staff_stmt=mysqli_prepare($conn,"SELECT id FROM staff WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($staff_stmt,'ii',$staff_id,$user_id); mysqli_stmt_execute($staff_stmt);
