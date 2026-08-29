@@ -65,18 +65,39 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $status = $_POST['attendance_status'] ?? '';
         $admin_password = (string)($_POST['admin_password'] ?? '');
         $allowed_statuses = ['present', 'late', 'absent', 'closed_day', 'casual_leave', 'medical_leave'];
-        $admin_stmt = mysqli_prepare($conn, "SELECT password FROM users WHERE id=? AND role='admin' LIMIT 1");
-        mysqli_stmt_bind_param($admin_stmt, 'i', $user_id);
-        mysqli_stmt_execute($admin_stmt);
-        $admin = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_stmt));
-        if($attendance_id <= 0 || !in_array($status, $allowed_statuses, true) || !$admin || !password_verify($admin_password, $admin['password'])){
-            $message = 'Admin password or attendance status is invalid.';
+        if(!is_admin_user()){
+            $message = 'Only the company Admin can update attendance status.';
             $message_type = 'danger';
         }else{
-            $stmt = mysqli_prepare($conn, 'UPDATE staff_attendance_logs SET attendance_status=? WHERE id=? AND user_id=?');
-            mysqli_stmt_bind_param($stmt, 'sii', $status, $attendance_id, $user_id);
-            mysqli_stmt_execute($stmt);
-            $message = 'Attendance status updated.';
+            // Older company accounts may have an empty legacy role in the database,
+            // while the active session is already recognised as Admin.
+            $admin_stmt = mysqli_prepare($conn, 'SELECT password FROM users WHERE id=? LIMIT 1');
+            mysqli_stmt_bind_param($admin_stmt, 'i', $user_id);
+            mysqli_stmt_execute($admin_stmt);
+            $admin = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_stmt));
+            if($attendance_id <= 0 || !in_array($status, $allowed_statuses, true) || !$admin || !password_verify($admin_password, $admin['password'])){
+                $message = 'Admin password or attendance status is invalid.';
+                $message_type = 'danger';
+            }else{
+                // A manual correction must no longer be treated as an automatic absence.
+                $stmt = mysqli_prepare($conn, 'UPDATE staff_attendance_logs SET attendance_status=?, is_auto_absent=0 WHERE id=? AND user_id=?');
+                if(!$stmt){
+                    $message = 'Attendance record could not be updated.';
+                    $message_type = 'danger';
+                }else{
+                    mysqli_stmt_bind_param($stmt, 'sii', $status, $attendance_id, $user_id);
+                    if(!mysqli_stmt_execute($stmt)){
+                        $message = 'Attendance record could not be updated.';
+                        $message_type = 'danger';
+                }else{
+                    $message = 'Attendance status updated.';
+                    if(!$is_ajax){
+                        header('Location: attendance.php?status_updated=1');
+                        exit;
+                    }
+                }
+                }
+            }
         }
     }
 
@@ -100,6 +121,14 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
 $settings = staff_attendance_settings($conn, $user_id);
 staff_attendance_auto_mark_absent($conn, $user_id);
+$edit_attendance = null;
+$edit_attendance_id = (int)($_GET['edit_attendance'] ?? 0);
+if(is_admin_user() && $edit_attendance_id > 0){
+    $edit_stmt = mysqli_prepare($conn, "SELECT a.id, a.attendance_status, a.attendance_date, s.name, s.staff_code FROM staff_attendance_logs a INNER JOIN staff s ON s.id=a.staff_id AND s.user_id=a.user_id WHERE a.id=? AND a.user_id=? LIMIT 1");
+    mysqli_stmt_bind_param($edit_stmt, 'ii', $edit_attendance_id, $user_id);
+    mysqli_stmt_execute($edit_stmt);
+    $edit_attendance = mysqli_fetch_assoc(mysqli_stmt_get_result($edit_stmt)) ?: null;
+}
 $salary_cut_display_value = round(100 / (int)date('t'), 2);
 $month = max(1, min(12, (int)($_GET['month'] ?? date('n'))));
 $year = max(2020, min(2100, (int)($_GET['year'] ?? date('Y'))));
@@ -167,6 +196,9 @@ $yearly_attendance_log = mysqli_query($conn, "SELECT a.*, s.name, s.staff_code, 
 
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
+<?php if(isset($_GET['status_updated'])): ?><div class="alert alert-success">Attendance status updated.</div><?php endif; ?>
+<?php if(!is_admin_user()): ?><style>.status-edit{display:none!important}</style><?php endif; ?>
+<?php if($edit_attendance): ?><div id="attendance-status-editor" class="card"><div class="card-header"><h3 class="card-title">Update Attendance Status — <?=htmlspecialchars($edit_attendance['name'])?> <small class="text-muted">(<?=htmlspecialchars($edit_attendance['staff_code'])?>, <?=date('d-m-Y', strtotime($edit_attendance['attendance_date']))?>)</small></h3></div><form method="post"><div class="card-body row"><input type="hidden" name="action" value="update_attendance_status"><input type="hidden" name="attendance_id" value="<?= (int)$edit_attendance['id'] ?>"><div class="col-md-4 form-group"><label>Status</label><select name="attendance_status" class="form-control"><option value="present" <?=$edit_attendance['attendance_status']==='present'?'selected':''?>>Present</option><option value="late" <?=$edit_attendance['attendance_status']==='late'?'selected':''?>>Late</option><option value="absent" <?=$edit_attendance['attendance_status']==='absent'?'selected':''?>>Absent</option><option value="closed_day" <?=$edit_attendance['attendance_status']==='closed_day'?'selected':''?>>Office Closed Day</option><option value="casual_leave" <?=$edit_attendance['attendance_status']==='casual_leave'?'selected':''?>>Casual Leave</option><option value="medical_leave" <?=$edit_attendance['attendance_status']==='medical_leave'?'selected':''?>>Medical Leave</option></select></div><div class="col-md-4 form-group"><label>Admin Password</label><input type="password" required name="admin_password" class="form-control" autocomplete="current-password"></div><div class="col-md-4 form-group d-flex align-items-end"><button class="btn btn-primary mr-2"><i class="fas fa-save"></i> Update Status</button><a href="attendance.php" class="btn btn-secondary">Cancel</a></div></div></form></div><?php endif; ?>
 <div class="row d-none">
  <div class="col-lg-7"><div class="card"><div class="card-header"><h3 class="card-title">Attendance Rules</h3></div><form id="attendance-rules-form" method="post"><div class="card-body row">
   <input type="hidden" name="action" value="save_settings"><input type="hidden" name="ajax" value="1">
@@ -180,8 +212,8 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
  </div><div class="card-footer"><span id="rules-feedback" class="text-success mr-3"></span><button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Rules</button></div></form></div></div>
  <div class="col-lg-5"><div class="card"><div class="card-header"><h3 class="card-title">Office Closed Days</h3></div><div class="card-body"><form id="closed-day-form" method="post" class="row"><input type="hidden" name="action" value="add_closed_day"><input type="hidden" name="ajax" value="1"><div class="col-5 form-group"><input type="date" required name="closed_date" class="form-control"></div><div class="col-5 form-group"><input type="text" name="closed_title" class="form-control" placeholder="Holiday name"></div><div class="col-2"><button type="submit" class="btn btn-success" title="Save closed day"><i class="fas fa-plus"></i></button></div></form><table class="table table-sm table-bordered"><thead><tr><th>Date</th><th>Reason</th><th></th></tr></thead><tbody id="closed-days-list"><?php while($day=mysqli_fetch_assoc($closed_days)): $past_closed_day=$day['closed_date'] < $today; ?><tr data-closed-day-id="<?= (int)$day['id'] ?>"><td><?= date('d-m-Y', strtotime($day['closed_date'])) ?></td><td><?= htmlspecialchars($day['title']) ?></td><td><button type="button" class="btn btn-danger btn-xs closed-day-delete" data-closed-day-id="<?= (int)$day['id'] ?>" title="<?= $past_closed_day ? 'Past closed days cannot be removed' : 'Remove' ?>" <?= $past_closed_day ? 'disabled' : '' ?>><i class="fas fa-trash"></i></button></td></tr><?php endwhile; ?></tbody></table></div></div></div>
 </div>
-<div class="card"><div class="card-header"><h3 class="card-title">Today's Attendance Roster</h3><div class="card-tools"><span class="text-muted"><?= date('d-m-Y') ?></span></div></div><div class="card-body table-responsive"><table class="table table-bordered table-sm mb-0"><thead><tr><th>Staff</th><th>Designation</th><th>Desktop Login</th><th>IP Address</th><th>Status</th></tr></thead><tbody><?php while($member=mysqli_fetch_assoc($today_roster)): $status=$member['attendance_status'] ?: ($today_is_closed ? 'closed_day' : (date('H:i:s') > ($settings['absent_after_time'] ?? '12:00:00') ? 'absent' : 'pending')); $auto_absent=!empty($member['is_auto_absent']) && $status==='absent'; $badge=$status==='present'?'success':($status==='late'?'warning':($status==='absent'?'danger':'secondary')); ?><tr><td><?= htmlspecialchars($member['name']) ?> <small class="text-muted">(<?= htmlspecialchars($member['staff_code']) ?>)</small></td><td><?= htmlspecialchars($member['designation']) ?></td><td><?= $auto_absent ? '—' : ($member['login_at'] ? date('h:i A', strtotime($member['login_at'])) : '—') ?></td><td><?= $auto_absent ? '—' : htmlspecialchars($member['login_ip'] ?: '—') ?></td><td><span class="badge badge-<?= $badge ?>"><?= $auto_absent ? 'Auto Absent' : htmlspecialchars(ucwords(str_replace('_',' ',$status))) ?></span><?php if($member['attendance_id']): ?> <button type="button" class="btn btn-outline-secondary btn-xs status-edit" data-id="<?= (int)$member['attendance_id'] ?>" data-status="<?= htmlspecialchars($member['attendance_status']) ?>" title="Edit status"><i class="fas fa-edit"></i></button><?php endif; ?></td></tr><?php endwhile; ?></tbody></table></div></div>
-<div class="card"><div class="card-header"><h3 class="card-title">Desktop Login Attendance Log</h3></div><div class="card-body table-responsive"><table id="example1" class="table table-bordered table-striped"><thead><tr><th>Date</th><th>Staff</th><th>Designation</th><th>Login Time</th><th>IP Address</th><th>Device</th><th>Status</th></tr></thead><tbody><?php while($row=mysqli_fetch_assoc($attendance)): $class=$row['attendance_status']==='present'?'success':($row['attendance_status']==='late'?'warning':($row['attendance_status']==='absent'?'danger':'secondary')); $auto_absent=!empty($row['is_auto_absent']) && $row['attendance_status']==='absent'; ?><tr><td><?= date('d-m-Y', strtotime($row['attendance_date'])) ?></td><td><?= htmlspecialchars($row['staff_name']) ?> <small class="text-muted">(<?= htmlspecialchars($row['staff_code']) ?>)</small></td><td><?= htmlspecialchars($row['designation']) ?></td><td><?= $auto_absent ? '—' : date('h:i A', strtotime($row['login_at'])) ?></td><td><?= $auto_absent ? '—' : htmlspecialchars($row['login_ip']) ?></td><td><?= $auto_absent ? 'Auto' : 'Desktop' ?></td><td><span class="badge badge-<?= $class ?> attendance-status-badge"><?= $auto_absent ? 'Auto Absent' : htmlspecialchars(ucwords(str_replace('_',' ',$row['attendance_status']))) ?></span> <button type="button" class="btn btn-outline-secondary btn-xs status-edit" data-id="<?= (int)$row['id'] ?>" data-status="<?= htmlspecialchars($row['attendance_status']) ?>" title="Edit status"><i class="fas fa-edit"></i></button></td></tr><?php endwhile; ?></tbody></table></div></div>
+<div class="card"><div class="card-header"><h3 class="card-title">Today's Attendance Roster</h3><div class="card-tools"><span class="text-muted"><?= date('d-m-Y') ?></span></div></div><div class="card-body table-responsive"><table class="table table-bordered table-sm mb-0"><thead><tr><th>Staff</th><th>Designation</th><th>Desktop Login</th><th>IP Address</th><th>Status</th></tr></thead><tbody><?php while($member=mysqli_fetch_assoc($today_roster)): $status=$member['attendance_status'] ?: ($today_is_closed ? 'closed_day' : (date('H:i:s') > ($settings['absent_after_time'] ?? '12:00:00') ? 'absent' : 'pending')); $auto_absent=!empty($member['is_auto_absent']) && $status==='absent'; $badge=$status==='present'?'success':($status==='late'?'warning':($status==='absent'?'danger':'secondary')); ?><tr><td><?= htmlspecialchars($member['name']) ?> <small class="text-muted">(<?= htmlspecialchars($member['staff_code']) ?>)</small></td><td><?= htmlspecialchars($member['designation']) ?></td><td><?= $auto_absent ? '—' : ($member['login_at'] ? date('h:i A', strtotime($member['login_at'])) : '—') ?></td><td><?= $auto_absent ? '—' : htmlspecialchars($member['login_ip'] ?: '—') ?></td><td><span class="badge badge-<?= $badge ?>"><?= htmlspecialchars(ucwords(str_replace('_',' ',$status))) ?></span><?php if($member['attendance_id']): ?> <button type="button" class="btn btn-outline-secondary btn-xs status-edit" data-id="<?= (int)$member['attendance_id'] ?>" data-status="<?= htmlspecialchars($member['attendance_status']) ?>" title="Edit status"><i class="fas fa-edit"></i></button><?php endif; ?></td></tr><?php endwhile; ?></tbody></table></div></div>
+<div class="card"><div class="card-header"><h3 class="card-title">Desktop Login Attendance Log</h3></div><div class="card-body table-responsive"><table id="example1" class="table table-bordered table-striped"><thead><tr><th>Date</th><th>Staff</th><th>Designation</th><th>Login Time</th><th>IP Address</th><th>Device</th><th>Status</th></tr></thead><tbody><?php while($row=mysqli_fetch_assoc($attendance)): $class=$row['attendance_status']==='present'?'success':($row['attendance_status']==='late'?'warning':($row['attendance_status']==='absent'?'danger':'secondary')); $auto_absent=!empty($row['is_auto_absent']) && $row['attendance_status']==='absent'; ?><tr><td><?= date('d-m-Y', strtotime($row['attendance_date'])) ?></td><td><?= htmlspecialchars($row['staff_name']) ?> <small class="text-muted">(<?= htmlspecialchars($row['staff_code']) ?>)</small></td><td><?= htmlspecialchars($row['designation']) ?></td><td><?= $auto_absent ? '—' : date('h:i A', strtotime($row['login_at'])) ?></td><td><?= $auto_absent ? '—' : htmlspecialchars($row['login_ip']) ?></td><td><?= $auto_absent ? 'Auto' : 'Desktop' ?></td><td><span class="badge badge-<?= $class ?> attendance-status-badge"><?= htmlspecialchars(ucwords(str_replace('_',' ',$row['attendance_status']))) ?></span><?php if(is_admin_user()): ?> <a href="attendance.php?edit_attendance=<?= (int)$row['id'] ?>#attendance-status-editor" class="btn btn-outline-secondary btn-xs" title="Edit status"><i class="fas fa-edit"></i></a><?php endif; ?></td></tr><?php endwhile; ?></tbody></table></div></div>
 <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-calendar-check mr-2"></i>Yearly Attendance Summary</h3></div><div class="card-body">
 <form method="get" class="row align-items-end mb-3"><div class="col-md-4 form-group mb-md-0"><label>Staff</label><select name="attendance_staff_id" class="form-control"><option value="0">All Staff</option><?php while($attendance_staff=mysqli_fetch_assoc($attendance_staffs)){ ?><option value="<?=$attendance_staff['id']?>" <?=$attendance_staff_id===(int)$attendance_staff['id']?'selected':''?>><?=htmlspecialchars($attendance_staff['name'])?> (<?=htmlspecialchars($attendance_staff['staff_code'])?>)</option><?php } ?></select></div><div class="col-md-3 form-group mb-md-0"><label>Month</label><select name="attendance_summary_month" class="form-control"><option value="0" <?=$attendance_summary_month===0?'selected':''?>>All Months</option><?php for($summary_month=1;$summary_month<=12;$summary_month++): ?><option value="<?=$summary_month?>" <?=$attendance_summary_month===$summary_month?'selected':''?>><?=date('F', mktime(0,0,0,$summary_month,1))?></option><?php endfor; ?></select></div><div class="col-md-3 form-group mb-md-0"><label>Year</label><select name="attendance_year" class="form-control"><?php while($year_row=mysqli_fetch_assoc($attendance_years)){ $year_value=(int)$year_row['attendance_year']; ?><option value="<?=$year_value?>" <?=$attendance_year===$year_value?'selected':''?>><?=$year_value?></option><?php } ?></select></div><div class="col-md-2 mt-3 mt-md-0"><button class="btn btn-primary"><i class="fas fa-filter"></i> View Attendance</button></div></form>
 <div class="table-responsive"><table class="table table-bordered table-striped"><thead><tr><th>Staff</th><th>Designation</th><th class="text-center">Present</th><th class="text-center">Late</th><th class="text-center">Absent</th><th class="text-center">Casual Leave</th><th class="text-center">Medical Leave</th><th class="text-center">Office Closed Day</th></tr></thead><tbody><?php while($yearly_summary=mysqli_fetch_assoc($yearly_attendance_summary)){ ?><tr><td><?=htmlspecialchars($yearly_summary['name'])?> <small class="text-muted">(<?=htmlspecialchars($yearly_summary['staff_code'])?>)</small></td><td><?=htmlspecialchars($yearly_summary['designation'] ?: '-')?></td><td class="text-center"><span class="badge badge-success"><?=(int)$yearly_summary['present_count']?></span></td><td class="text-center"><span class="badge badge-warning"><?=(int)$yearly_summary['late_count']?></span></td><td class="text-center"><span class="badge badge-danger"><?=(int)$yearly_summary['absent_count']?></span></td><td class="text-center"><span class="badge badge-info"><?=(int)$yearly_summary['casual_leave_count']?></span></td><td class="text-center"><span class="badge badge-primary"><?=(int)$yearly_summary['medical_leave_count']?></span></td><td class="text-center"><span class="badge badge-secondary"><?=(int)$yearly_summary['closed_day_count']?></span></td></tr><?php } ?></tbody></table></div>
@@ -235,10 +267,7 @@ document.getElementById('closed-days-list').addEventListener('click', async func
 });
 document.addEventListener('click', function(event) {
  const button = event.target.closest('.status-edit'); if (!button) return;
- document.getElementById('attendance-status-id').value = button.dataset.id;
- document.getElementById('attendance-status-value').value = button.dataset.status;
- document.getElementById('status-feedback').textContent = '';
- $('#attendanceStatusModal').modal('show');
+ window.location.href = 'attendance.php?edit_attendance=' + encodeURIComponent(button.dataset.id);
 });
 document.getElementById('attendance-status-form').addEventListener('submit', async function(event) {
  event.preventDefault();

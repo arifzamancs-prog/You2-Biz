@@ -29,6 +29,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }elseif($wallet_id <= 0 || $amount <= 0 || $txn_date === ''){
         $error = 'Select a wallet and enter a valid cash out amount.';
     }else{
+        ensure_profit_cash_out_transaction_type($conn);
         mysqli_begin_transaction($conn);
         try{
             $wallet_stmt = mysqli_prepare($conn, "SELECT id FROM wallets WHERE id=? AND user_id=? AND status='active' LIMIT 1");

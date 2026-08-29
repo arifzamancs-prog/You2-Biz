@@ -10,7 +10,9 @@ require_once '../includes/staff_attendance_helper.php';
 
 require_staff_manage_access();
 $user_id=(int)$_SESSION['user_id'];
-ensure_staff_table($conn); ensure_staff_ledger_table($conn); ensure_staff_attendance_tables($conn); ensure_default_cash_wallet($conn,$user_id); ensure_expense_support_tables($conn, $user_id);
+// Keep the ledger list available even if an older live database still needs
+// expense-table upgrades. Those upgrades are only required when saving a row.
+ensure_staff_table($conn); ensure_staff_ledger_table($conn); ensure_default_cash_wallet($conn,$user_id);
 $error='';
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
@@ -25,6 +27,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     if($staff_id<=0 || $wallet_id<=0 || !in_array($entry_type,['bonus','incentive'],true) || $entry_date==='' || $amount<=0){
         $error='Select staff, wallet and payment type, then enter a valid amount.';
     }else{
+        ensure_expense_support_tables($conn, $user_id);
         mysqli_begin_transaction($conn);
         try{
             $staff_stmt=mysqli_prepare($conn,"SELECT id FROM staff WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($staff_stmt,'ii',$staff_id,$user_id); mysqli_stmt_execute($staff_stmt);
