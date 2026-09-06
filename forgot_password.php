@@ -174,9 +174,9 @@ body.auth-page{
 
 .auth-panel{
     background:
-        linear-gradient(150deg, rgba(8,15,31,.9) 0%, rgba(14,28,54,.82) 36%, rgba(22,101,52,.54) 100%);
-    border-right:1px solid rgba(255,255,255,.12);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
+        linear-gradient(148deg, #081a3b 0%, #0b3b75 43%, #0c7669 100%);
+    border-right:1px solid rgba(255,255,255,.2);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.24), inset -20px 0 48px rgba(1,13,34,.16);
     color:#fff;
     display:flex;
     flex-direction:column;
@@ -188,9 +188,10 @@ body.auth-page{
 
 .auth-panel::before{
     background:
-        radial-gradient(circle at 14% 18%, rgba(59,130,246,.42), transparent 26%),
-        radial-gradient(circle at 78% 22%, rgba(255,255,255,.16), transparent 18%),
-        radial-gradient(circle at 82% 82%, rgba(34,197,94,.26), transparent 34%);
+        radial-gradient(circle at 4% 9%, rgba(125,211,252,.5), transparent 28%),
+        radial-gradient(circle at 93% 8%, rgba(255,255,255,.24), transparent 20%),
+        radial-gradient(circle at 76% 88%, rgba(45,212,191,.34), transparent 36%),
+        radial-gradient(circle at 18% 77%, rgba(59,130,246,.3), transparent 31%);
     content:"";
     inset:0;
     opacity:.95;
@@ -200,8 +201,9 @@ body.auth-page{
 
 .auth-panel::after{
     background:
-        linear-gradient(180deg, rgba(255,255,255,.16), transparent 22%, rgba(255,255,255,.05) 100%),
-        linear-gradient(115deg, transparent 0 56%, rgba(255,255,255,.08) 56% 62%, transparent 62% 100%);
+        linear-gradient(180deg, rgba(255,255,255,.2), transparent 17%, rgba(255,255,255,.04) 100%),
+        linear-gradient(118deg, transparent 0 48%, rgba(255,255,255,.1) 48% 51%, transparent 51% 100%),
+        repeating-linear-gradient(0deg, transparent 0 37px, rgba(255,255,255,.035) 38px 39px);
     content:"";
     inset:1px;
     position:absolute;
@@ -222,7 +224,7 @@ body.auth-page{
     background:rgba(255,255,255,.16);
     border:1px solid rgba(255,255,255,.2);
     border-radius:18px;
-    box-shadow:0 12px 30px rgba(15,23,42,.22);
+    box-shadow:0 16px 34px rgba(1,15,42,.28), inset 0 1px 0 rgba(255,255,255,.2);
     display:flex;
     height:74px;
     justify-content:center;
@@ -275,9 +277,10 @@ body.auth-page{
 }
 
 .auth-logo--image-only::after{
-    background:linear-gradient(135deg, rgba(59,130,246,.26), rgba(34,197,94,.14));
-    border:1px solid rgba(255,255,255,.18);
+    background:linear-gradient(135deg, rgba(255,255,255,.22), rgba(125,211,252,.12) 54%, rgba(45,212,191,.16));
+    border:1px solid rgba(255,255,255,.26);
     border-radius:24px;
+    box-shadow:0 18px 38px rgba(1,15,42,.22), inset 0 1px 0 rgba(255,255,255,.24);
     content:"";
     inset:-14px -18px -12px -18px;
     position:absolute;
