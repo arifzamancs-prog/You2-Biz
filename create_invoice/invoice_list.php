@@ -63,7 +63,7 @@ require_once '../includes/sidebar.php';
         <?php if(isset($_GET['updated'])){ ?><div class="alert alert-success">Invoice updated and wallet balance adjusted.</div><?php } ?>
         <?php if(isset($_GET['error'])){ ?><div class="alert alert-danger"><?= htmlspecialchars($_GET['error']); ?></div><?php } ?>
         <form method="get" class="mb-3"><div class="row">
-            <div class="col-md-4 form-group"><label>Invoice Type</label><select name="invoice_type" class="form-control"><option value="">All Types</option><?php foreach($invoice_types as $type_key => $type_name){ ?><option value="<?= htmlspecialchars($type_key); ?>" <?= $selected_type === $type_key ? 'selected' : ''; ?>><?= htmlspecialchars($type_name); ?></option><?php } ?></select></div>
+            <div class="col-md-4 form-group"><label>Payment Type</label><select name="invoice_type" class="form-control"><option value="">All Types</option><?php foreach($invoice_types as $type_key => $type_name){ ?><option value="<?= htmlspecialchars($type_key); ?>" <?= $selected_type === $type_key ? 'selected' : ''; ?>><?= htmlspecialchars($type_name); ?></option><?php } ?></select></div>
             <div class="col-md-3 form-group"><label>From Date</label><input type="date" name="date_from" class="form-control" value="<?= htmlspecialchars($date_from); ?>"></div>
             <div class="col-md-3 form-group"><label>To Date</label><input type="date" name="date_to" class="form-control" value="<?= htmlspecialchars($date_to); ?>"></div>
             <div class="col-md-2 form-group d-flex align-items-end"><button class="btn btn-primary mr-2" type="submit">Search</button><a href="invoice_list.php" class="btn btn-secondary">Reset</a></div>

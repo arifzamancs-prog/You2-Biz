@@ -13,6 +13,8 @@ $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 ensure_booking_invoice_table($conn);
+ensure_booking_invoice_type_table($conn, (int)$_SESSION['user_id']);
+$invoice_types = booking_invoice_types($conn, (int)$_SESSION['user_id'], false);
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -121,6 +123,16 @@ while(
 
         'wallet_name' => '',
 
+        'payment_type' => '',
+
+        'note' => '',
+
+        'project_details' => '',
+
+        'booking_date' => $row['invoice_date'],
+
+        'total_amount' => (float)$row['total_amount'],
+
         'sort_order' =>
             1,
 
@@ -192,6 +204,16 @@ while(
 
         'wallet_name' => '',
 
+        'payment_type' => '',
+
+        'note' => $row['note'],
+
+        'project_details' => '',
+
+        'booking_date' => $row['payment_date'],
+
+        'total_amount' => 0,
+
         'sort_order' =>
             2,
 
@@ -257,6 +279,16 @@ while(
 
         'wallet_name' => '',
 
+        'payment_type' => '',
+
+        'note' => '',
+
+        'project_details' => '',
+
+        'booking_date' => $row['entry_date'],
+
+        'total_amount' => (float)$row['amount'],
+
         'sort_order' =>
             0,
 
@@ -283,11 +315,23 @@ $wallet_transaction_sql = "SELECT
         t.amount,
         t.note,
         bi.invoice_no,
+        bi.invoice_type,
+        bi.notes AS invoice_note,
+        bi.invoice_date,
+        bi.amount AS invoice_amount,
+        p.project_name,
+        pk.package_name,
         w.wallet_name
     FROM transactions t
     INNER JOIN booking_invoices bi
         ON bi.id=t.reference_id
         AND bi.user_id=t.user_id
+    LEFT JOIN projects p
+        ON p.id=bi.project_id
+        AND p.user_id=bi.user_id
+    LEFT JOIN packages pk
+        ON pk.id=bi.package_id
+        AND pk.user_id=bi.user_id
     LEFT JOIN wallets w
         ON w.id=t.wallet_id
         AND w.user_id=t.user_id
@@ -311,6 +355,15 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
         'reference' => trim((string)$row['invoice_no']),
         'invoice_no' => trim((string)$row['invoice_no']),
         'wallet_name' => (string)($row['wallet_name'] ?? ''),
+        'payment_type' => booking_invoice_type_label($row['invoice_type'] ?? '', $invoice_types),
+        'note' => trim((string)($row['invoice_note'] ?? '')) !== '' ? (string)$row['invoice_note'] : 'confirmed',
+        'project_details' => trim(
+            (string)($row['project_name'] ?? '') .
+            (($row['project_name'] ?? '') !== '' && ($row['package_name'] ?? '') !== '' ? ' - ' : '') .
+            (string)($row['package_name'] ?? '')
+        ),
+        'booking_date' => $row['invoice_date'],
+        'total_amount' => $is_refund ? 0 : (float)$row['invoice_amount'],
         'sort_order' => $is_refund ? 3 : 2,
         'reference_id' => (int)$row['id'],
         'debit' => $is_refund ? (float)$row['amount'] : 0,
@@ -430,27 +483,130 @@ usort(
 /* Summary */
 
 $total_paid = 0;
+$total_amount = 0;
+$booking_summary_rows = [];
 
 foreach($ledger as $entry){
 
     $total_paid +=
-        $entry['credit'];
+        ((float)$entry['credit'] - (float)$entry['debit']);
+
+    $entry_total_amount = (float)($entry['total_amount'] ?? 0);
+    $entry_project_details = trim((string)($entry['project_details'] ?? ''));
+    $entry_booking_date = trim((string)($entry['booking_date'] ?? ''));
+
+    if($entry_total_amount > 0){
+        $total_amount += $entry_total_amount;
+
+        $summary_key = trim((string)($entry['invoice_no'] ?? ''));
+
+        if($summary_key === ''){
+            $summary_key = $entry_project_details . '|' . $entry_booking_date . '|' . number_format($entry_total_amount, 2, '.', '');
+        }
+
+        if(!isset($booking_summary_rows[$summary_key])){
+            $booking_summary_rows[$summary_key] = [
+                'project_details' => $entry_project_details !== '' ? $entry_project_details : '-',
+                'booking_date' => $entry_booking_date !== '' ? app_date($entry_booking_date) : '-',
+                'total_amount' => $entry_total_amount,
+            ];
+        }
+    }
 
 }
 
-$running_ledger = [];
-$balance = 0;
+$total_due = $total_amount - $total_paid;
+
+if($total_due < 0 && abs($total_due) < 0.01){
+    $total_due = 0;
+}
+
+$ledger_groups = [];
 
 foreach($ledger as $row){
+    $row_project_details = trim((string)($row['project_details'] ?? ''));
+    $row_booking_date = trim((string)($row['booking_date'] ?? ''));
+    $group_key = $row_project_details !== ''
+        ? 'project-package-' . md5($row_project_details)
+        : '';
 
-    $balance += (float)$row['debit'];
-    $balance -= (float)$row['credit'];
+    if($group_key === ''){
+        $group_key = 'entry-' . ($row['type'] ?? 'ledger') . '-' . ($row['reference_id'] ?? count($ledger_groups));
+    }
 
-    $row['running_balance'] = $balance;
-    $running_ledger[] = $row;
+    if(!isset($ledger_groups[$group_key])){
+        $ledger_groups[$group_key] = [
+            'project_details' => trim((string)($row['project_details'] ?? '')) !== ''
+                ? trim((string)$row['project_details'])
+                : '-',
+            'booking_date' => trim((string)($row['booking_date'] ?? '')) !== ''
+                ? app_date($row['booking_date'])
+                : '-',
+            'booking_dates' => [],
+            'total_amount' => 0,
+            'total_paid' => 0,
+            'total_due' => 0,
+            'latest_time' => strtotime($row['trx_date']) ?: 0,
+            'rows' => [],
+        ];
+    }
+
+    $row_total_amount = (float)($row['total_amount'] ?? 0);
+
+    if($row_total_amount > 0){
+        $ledger_groups[$group_key]['total_amount'] += $row_total_amount;
+    }
+
+    if(
+        $ledger_groups[$group_key]['project_details'] === '-' &&
+        trim((string)($row['project_details'] ?? '')) !== ''
+    ){
+        $ledger_groups[$group_key]['project_details'] = trim((string)$row['project_details']);
+    }
+
+    if(
+        $ledger_groups[$group_key]['booking_date'] === '-' &&
+        $row_booking_date !== ''
+    ){
+        $ledger_groups[$group_key]['booking_date'] = app_date($row_booking_date);
+    }
+
+    if($row_booking_date !== ''){
+        $ledger_groups[$group_key]['booking_dates'][$row_booking_date] = app_date($row_booking_date);
+    }
+
+    $ledger_groups[$group_key]['total_paid'] += ((float)$row['credit'] - (float)$row['debit']);
+    $ledger_groups[$group_key]['latest_time'] = max(
+        (int)$ledger_groups[$group_key]['latest_time'],
+        strtotime($row['trx_date']) ?: 0
+    );
+
+    $ledger_groups[$group_key]['rows'][] = $row;
 }
 
-$ledger = array_reverse($running_ledger);
+foreach($ledger_groups as &$group){
+    $group_running_paid = 0;
+    $group_rows = [];
+
+    if(!empty($group['booking_dates'])){
+        $group['booking_date'] = implode(', ', array_values($group['booking_dates']));
+    }
+
+    foreach($group['rows'] as $row){
+        $group_running_paid += ((float)$row['credit'] - (float)$row['debit']);
+        $row['due'] = max(0, (float)$group['total_amount'] - $group_running_paid);
+        $group_rows[] = $row;
+    }
+
+    $group['rows'] = array_reverse($group_rows);
+    $group['total_due'] = max(0, (float)$group['total_amount'] - (float)$group['total_paid']);
+}
+
+unset($group);
+
+uasort($ledger_groups, function($a, $b){
+    return ((int)$b['latest_time']) <=> ((int)$a['latest_time']);
+});
 
 ?>
 
@@ -572,17 +728,26 @@ echo htmlspecialchars(
 <tr>
 
 <th>
-Total Paid
+Grand Total Paid
 </th>
 
 <td>
 
-<?php
-echo number_format(
-    $total_paid,
-    2
-);
-?>
+<?php echo number_format($total_paid, 2); ?>
+
+</td>
+
+</tr>
+
+<tr>
+
+<th>
+Grand Total Due
+</th>
+
+<td>
+
+<?php echo number_format($total_due, 2); ?>
 
 </td>
 
@@ -594,10 +759,9 @@ echo number_format(
 
 </div>
 
-<hr>
+<?php if(empty($ledger_groups)){ ?>
 
 <table
-id="example1"
 data-desktop-table="true"
 class="table table-bordered table-striped">
 
@@ -606,9 +770,11 @@ class="table table-bordered table-striped">
 <tr>
 
 <th>Date</th>
-<th>Invoice No.</th>
-<th>Type</th>
+<th>Payment Type</th>
+<th>Note</th>
+<th>Payment By</th>
 <th>Paid</th>
+<th>Due</th>
 
 </tr>
 
@@ -618,68 +784,97 @@ class="table table-bordered table-striped">
 
 <?php
 
-if(empty($ledger)){
 ?>
 
 <tr>
 
-<td colspan="4" class="text-center text-muted">
+<td colspan="6" class="text-center text-muted">
 No ledger entries found.
 </td>
 
 </tr>
 
 <?php
-}
+?>
 
-foreach($ledger as $row){
+</tbody>
 
+</table>
+
+<?php } ?>
+
+<?php foreach($ledger_groups as $group){ ?>
+
+<hr>
+
+<table class="table table-bordered">
+
+<tr>
+<th>Project Details</th>
+<td><?php echo htmlspecialchars($group['project_details']); ?></td>
+</tr>
+
+<tr>
+<th>Booking Date</th>
+<td><?php echo htmlspecialchars($group['booking_date']); ?></td>
+</tr>
+
+<tr>
+<th>Total Amount</th>
+<td><?php echo number_format((float)$group['total_amount'], 2); ?></td>
+</tr>
+
+<tr>
+<th>Total Paid</th>
+<td><?php echo number_format((float)$group['total_paid'], 2); ?></td>
+</tr>
+
+<tr>
+<th>Total Due</th>
+<td><?php echo number_format((float)$group['total_due'], 2); ?></td>
+</tr>
+
+</table>
+
+<table
+data-desktop-table="true"
+class="table table-bordered table-striped">
+
+<thead>
+
+<tr>
+
+<th>Date</th>
+<th>Payment Type</th>
+<th>Note</th>
+<th>Payment By</th>
+<th>Paid</th>
+<th>Due</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<?php foreach($group['rows'] as $row){
+    $row_amount = (float)$row['credit'] - (float)$row['debit'];
 ?>
 
 <tr>
 
+<td><?php echo htmlspecialchars(app_date($row['trx_date'])); ?></td>
+<td><?php echo htmlspecialchars(($row['payment_type'] ?? '') !== '' ? $row['payment_type'] : '-'); ?></td>
+<td><?php echo htmlspecialchars(trim((string)($row['note'] ?? '')) !== '' ? $row['note'] : '-'); ?></td>
+<td><?php echo htmlspecialchars(($row['wallet_name'] ?? '') !== '' ? $row['wallet_name'] : '-'); ?></td>
 <td>
-
 <?php
-echo htmlspecialchars(app_date($row['trx_date']));
+echo $row_amount < 0
+    ? '-' . number_format(abs($row_amount), 2)
+    : number_format($row_amount, 2);
 ?>
-
 </td>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $row['invoice_no'] !== ''
-        ? $row['invoice_no']
-        : $row['reference']
-);
-?>
-
-</td>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    ($row['wallet_name'] ?? '') !== ''
-        ? $row['wallet_name']
-        : '-'
-);
-?>
-
-</td>
-
-<td>
-
-<?php
-echo number_format(
-    $row['credit'],
-    2
-);
-?>
-
-</td>
+<td><?php echo number_format((float)($row['due'] ?? 0), 2); ?></td>
 
 </tr>
 
@@ -690,22 +885,16 @@ echo number_format(
 <tfoot>
 
 <tr>
-
-<th colspan="3" class="text-right">
-Total
-</th>
-
-<th>
-<?php echo number_format($total_paid,2); ?>
-</th>
-
+<th colspan="4" class="text-right">Total</th>
+<th><?php echo number_format((float)$group['total_paid'], 2); ?></th>
+<th><?php echo number_format((float)$group['total_due'], 2); ?></th>
 </tr>
 
 </tfoot>
 
 </table>
 
-</div>
+<?php } ?>
 
 </div>
 

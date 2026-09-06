@@ -14,6 +14,9 @@ require_once '../includes/email_verification_helper.php';
 require_once '../includes/signup_message_helper.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/restaurant_table_helper.php';
+require_once '../includes/wallet_helper.php';
+require_once '../includes/printing_helper.php';
+require_once '../includes/product_category_helper.php';
 
 require_super_admin_user();
 ensure_all_admin_invoice_charges($conn);
@@ -22,6 +25,7 @@ ensure_sms_marketing_columns($conn);
 ensure_email_verification_columns($conn);
 ensure_signup_message_settings_table($conn);
 ensure_restaurant_tables_table($conn);
+printing_ensure_column($conn);
 
 function ensure_pricing_plan_request_table($conn)
 {
@@ -502,7 +506,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $company_id = (int)($_POST['company_id'] ?? 0);
     $form_action = $_POST['form_action'] ?? 'update_company';
 
-    if($form_action === 'approve_request'){
+    if($form_action === 'create_company'){
+        $company_name = trim((string)($_POST['company_name'] ?? ''));
+        $company_email = trim((string)($_POST['company_email'] ?? ''));
+        $company_phone = trim((string)($_POST['company_phone'] ?? ''));
+        $company_password = (string)($_POST['company_password'] ?? '');
+
+        if($company_name === ''){
+            super_admin_flash_and_redirect('Company or account name is required.', 'danger');
+        }
+
+        if(!filter_var($company_email, FILTER_VALIDATE_EMAIL)){
+            super_admin_flash_and_redirect('Please enter a valid company email address.', 'danger');
+        }
+
+        if($company_phone === ''){
+            super_admin_flash_and_redirect('Company phone number is required.', 'danger');
+        }
+
+        if(strlen($company_password) < 6){
+            super_admin_flash_and_redirect('Password must contain at least 6 characters.', 'danger');
+        }
+
+        $duplicate_message = contact_duplicate_message($conn, 'email', $company_email);
+        if($duplicate_message === ''){
+            $duplicate_message = contact_duplicate_message($conn, 'phone', $company_phone);
+        }
+
+        if($duplicate_message !== ''){
+            super_admin_flash_and_redirect($duplicate_message, 'danger');
+        }
+
+        $password_hash = password_hash($company_password, PASSWORD_DEFAULT);
+        $avatar = branding_company_default_avatar_filename($conn);
+        $create_stmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO users
+                (name, email, phone, password, role, status, avatar, email_verified, email_verified_at)
+             VALUES (?, ?, ?, ?, 'admin', 'active', ?, 1, NOW())"
+        );
+
+        if(!$create_stmt){
+            super_admin_flash_and_redirect('Company could not be created.', 'danger');
+        }
+
+        mysqli_stmt_bind_param(
+            $create_stmt,
+            'sssss',
+            $company_name,
+            $company_email,
+            $company_phone,
+            $password_hash,
+            $avatar
+        );
+
+        if(!mysqli_stmt_execute($create_stmt)){
+            mysqli_stmt_close($create_stmt);
+            super_admin_flash_and_redirect('Company could not be created.', 'danger');
+        }
+
+        $new_company_id = (int)mysqli_insert_id($conn);
+        mysqli_stmt_close($create_stmt);
+
+        $safe_avatar = mysqli_real_escape_string($conn, $avatar);
+        $default_printing_option = mysqli_real_escape_string($conn, printing_default_user_value($conn, 'printing_option', 'general'));
+        $default_seal = mysqli_real_escape_string($conn, basename((string)printing_default_user_value($conn, 'company_seal_file', printing_default_company_seal_filename())));
+        $default_paid_seal = mysqli_real_escape_string($conn, basename((string)printing_default_user_value($conn, 'paid_seal_file', printing_default_paid_seal_filename())));
+
+        mysqli_query($conn, "UPDATE users SET
+            owner_id={$new_company_id},
+            avatar='{$safe_avatar}',
+            printing_option='{$default_printing_option}',
+            company_seal_file='{$default_seal}',
+            paid_seal_file='{$default_paid_seal}',
+            subscription_plan='Trial',
+            subscription_status='trial',
+            max_managers={$trial_manager_limit},
+            max_products={$trial_product_limit},
+            max_invoices_monthly={$trial_invoice_limit},
+            subscription_expires_at=DATE_ADD(created_at, INTERVAL 30 DAY),
+            date_format='{$trial_date_format}'
+            WHERE id={$new_company_id} LIMIT 1");
+
+        ensure_default_product_categories($conn, $new_company_id);
+        ensure_default_invoice_charges($conn, $new_company_id);
+        ensure_default_cash_wallet($conn, $new_company_id);
+
+        super_admin_flash_and_redirect('Company created and verified successfully.', 'success');
+    }elseif($form_action === 'approve_request'){
         $request_id = (int)($_POST['request_id'] ?? 0);
         [$approved, $approve_message] = super_admin_activate_requested_plan($conn, $request_id, $unlimited_limit_value);
         super_admin_flash_and_redirect($approve_message, $approved ? 'success' : 'danger');
@@ -976,6 +1067,11 @@ require_once '../includes/sidebar.php';
         <h3 class="card-title">
             Super Admin
         </h3>
+        <div class="card-tools">
+            <button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#createCompanyModal">
+                <i class="fas fa-plus"></i> Create Company
+            </button>
+        </div>
     </div>
 
     <div class="card-body">
@@ -1259,6 +1355,43 @@ require_once '../includes/sidebar.php';
                 <?php } ?>
             </tbody>
         </table>
+    </div>
+</div>
+
+<div class="modal fade" id="createCompanyModal" tabindex="-1" role="dialog" aria-labelledby="createCompanyModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <form method="post" class="modal-content">
+            <input type="hidden" name="form_action" value="create_company">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createCompanyModalLabel">Create Verified Company</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="company_name">Company or Account Name</label>
+                    <input type="text" id="company_name" name="company_name" class="form-control" required autocomplete="organization">
+                </div>
+                <div class="form-group">
+                    <label for="company_email">Email</label>
+                    <input type="email" id="company_email" name="company_email" class="form-control" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="company_phone">Phone</label>
+                    <input type="text" id="company_phone" name="company_phone" class="form-control" required autocomplete="tel">
+                </div>
+                <div class="form-group mb-0">
+                    <label for="company_password">Password</label>
+                    <input type="password" id="company_password" name="company_password" class="form-control" minlength="6" required autocomplete="new-password">
+                    <small class="text-muted">The company will be created active and email-verified. No verification link will be sent.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-building"></i> Create Company</button>
+            </div>
+        </form>
     </div>
 </div>
 

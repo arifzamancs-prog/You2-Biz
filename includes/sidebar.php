@@ -394,11 +394,6 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                                 'icon' => 'fas fa-archive',
                             ],
                             [
-                                'href' => app_path('super_admin/leads.php'),
-                                'label' => 'Leads',
-                                'icon' => 'fas fa-user-plus',
-                            ],
-                            [
                                 'href' => app_path('user_management/marketing.php'),
                                 'label' => 'Marketing',
                                 'icon' => 'fas fa-sms',
@@ -443,7 +438,18 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ]);
                     }
                     if(manager_has_permission('projects')){ sidebar_tree('Project & Package', 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>'Project'],['href'=>app_path('project_package/packages.php'),'label'=>'Package List']]); }
-                    if(manager_has_permission('customers')){ sidebar_tree('Customer Manage', 'fas fa-users', [['href'=>app_path('customers/index.php'),'label'=>'Create Customer']]); }
+                    if(manager_has_permission('customers')){
+                        $sidebar_customer_items = [
+                            ['href'=>app_path('customers/index.php'),'label'=>'Create Customer'],
+                        ];
+                        if(is_admin_user()){
+                            $sidebar_customer_items[] = [
+                                'href'=>app_path('customers/form_settings.php'),
+                                'label'=>'Cus. form settings',
+                            ];
+                        }
+                        sidebar_tree('Customer Manage', 'fas fa-users', $sidebar_customer_items);
+                    }
                     if(manager_has_permission('suppliers')){ sidebar_tree('Suppliers', 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>'Suppliers'],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>'Supplier Due Payment']]); }
                     if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
@@ -546,12 +552,15 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 sidebar_tree(
                     'Customer Manage',
                     'fas fa-users',
-                    [
+                    array_merge([
                         [
                             'href' => app_path('customers/index.php'),
                             'label' => 'Create Customer',
                         ],
-                    ]
+                    ], is_admin_user() ? [[
+                        'href' => app_path('customers/form_settings.php'),
+                        'label' => 'Cus. form settings',
+                    ]] : [])
                 );
 
                 sidebar_tree(
@@ -633,7 +642,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                         ],
                     ], is_admin_user() ? [[
                             'href' => app_path('create_invoice/manage_invoice_types.php'),
-                            'label' => 'Manage Invoice Type',
+                            'label' => 'Manage Payment Type',
                             'icon' => 'far fa-circle',
                         ]] : [])
                 );

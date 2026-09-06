@@ -199,7 +199,7 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-3">
                     <div class="form-group">
-                        <label>Invoice Type</label>
+                        <label>Payment Type</label>
                         <select name="invoice_type" class="form-control" required>
                             <?php foreach($invoice_types as $type_key => $type_name){ ?>
                                 <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>

@@ -11,7 +11,6 @@ $user_id = (int)$_SESSION['user_id'];
 $message = '';
 $project_id = (int)($_POST['project_id'] ?? 0);
 $package_name = trim($_POST['package_name'] ?? '');
-$package_code = trim($_POST['package_code'] ?? '');
 $price = trim($_POST['price'] ?? '');
 $description = trim($_POST['description'] ?? '');
 
@@ -37,39 +36,20 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($project_id <= 0 || $package_name === '' || $price_value < 0){
         $message = 'Project, Package Name and valid Price are required.';
     } else {
-        if($package_code !== ''){
-            $check_stmt = mysqli_prepare(
-                $conn,
-                "SELECT id
-                 FROM packages
-                 WHERE user_id=?
-                 AND package_code=?
-                 LIMIT 1"
-            );
-            mysqli_stmt_bind_param($check_stmt, "is", $user_id, $package_code);
-            mysqli_stmt_execute($check_stmt);
-            $check_result = mysqli_stmt_get_result($check_stmt);
-
-            if($check_result && mysqli_num_rows($check_result) > 0){
-                $message = 'Package Code already exists.';
-            }
-        }
-
         if($message === ''){
             $insert_stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO packages
-                 (user_id, project_id, package_name, package_code, price, description, status)
+                 (user_id, project_id, package_name, price, description, status)
                  VALUES
-                 (?, ?, ?, ?, ?, ?, 'active')"
+                 (?, ?, ?, ?, ?, 'active')"
             );
             mysqli_stmt_bind_param(
                 $insert_stmt,
-                "iissds",
+                "iisds",
                 $user_id,
                 $project_id,
                 $package_name,
-                $package_code,
                 $price_value,
                 $description
             );
@@ -115,11 +95,6 @@ require_once '../includes/sidebar.php';
             <div class="form-group">
                 <label>Package Name</label>
                 <input type="text" name="package_name" class="form-control" value="<?= htmlspecialchars($package_name); ?>" required>
-            </div>
-
-            <div class="form-group">
-                <label>Package Code</label>
-                <input type="text" name="package_code" class="form-control" value="<?= htmlspecialchars($package_code); ?>">
             </div>
 
             <div class="form-group">

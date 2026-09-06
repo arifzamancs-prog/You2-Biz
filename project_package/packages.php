@@ -77,7 +77,6 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                 <tr>
                     <th>Project</th>
                     <th>Package Name</th>
-                    <th>Package Code</th>
                     <th>Price</th>
                     <th>Description</th>
                     <th>Status</th>
@@ -90,7 +89,7 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
             <tbody>
                 <?php if(empty($packages)): ?>
                     <tr>
-                        <td colspan="<?= manager_can_modify() ? '7' : '6'; ?>" class="text-center text-muted">
+                        <td colspan="<?= manager_can_modify() ? '6' : '5'; ?>" class="text-center text-muted">
                             No package found yet.
                         </td>
                     </tr>
@@ -100,7 +99,6 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                         <tr>
                             <td><?= htmlspecialchars($package['project_name'] ?? '-'); ?></td>
                             <td><?= htmlspecialchars($package['package_name']); ?></td>
-                            <td><?= htmlspecialchars($package['package_code'] ?: '-'); ?></td>
                             <td>BDT <?= number_format((float)$package['price'], 2); ?></td>
                             <td><?= htmlspecialchars($package['description'] ?: '-'); ?></td>
                             <td>
