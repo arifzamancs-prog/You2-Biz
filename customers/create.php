@@ -7,6 +7,7 @@ require_once '../includes/input_validation_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/lead_management_helper.php';
 require_once '../includes/customer_form_helper.php';
+require_once '../includes/customer_portal_helper.php';
 
 function ensure_customer_form_columns($conn)
 {
@@ -38,6 +39,7 @@ ensure_staff_table($conn);
 ensure_customer_form_columns($conn);
 ensure_lead_management_table($conn);
 customer_form_ensure_schema($conn);
+ensure_customer_portal_columns($conn);
 
 $message = '';
 $lead_id = (int)($_POST['lead_id'] ?? $_GET['lead_id'] ?? 0);
@@ -76,6 +78,7 @@ $phone = trim($_POST['phone'] ?? ($pending_lead['phone'] ?? ''));
 $email = trim($_POST['email'] ?? ($pending_lead['email'] ?? ''));
 $address = trim($_POST['address'] ?? '');
 $status = $_POST['status'] ?? 'active';
+$customer_photo = '';
 $customer_form_fields = customer_form_get_fields($conn, $user_id);
 $customer_custom_fields = array_values(array_filter($customer_form_fields, function($field){
     return empty($field['is_system']);
@@ -102,6 +105,38 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $customer_name = normalize_person_name($customer_name);
     $phone = normalize_phone_input($phone);
     $email = normalize_email_input($email);
+
+    $photo_required = false;
+    foreach($customer_form_fields as $field){
+        if(($field['field_key'] ?? '') === 'photo' && !empty($field['is_required'])){
+            $photo_required = true;
+            break;
+        }
+    }
+
+    $photo_upload_message = '';
+    $uploaded_customer_photo = customer_form_upload_photo(
+        $_FILES['custom_fields']['name']['photo'] ?? null
+            ? [
+                'name' => $_FILES['custom_fields']['name']['photo'],
+                'type' => $_FILES['custom_fields']['type']['photo'],
+                'tmp_name' => $_FILES['custom_fields']['tmp_name']['photo'],
+                'error' => $_FILES['custom_fields']['error']['photo'],
+                'size' => $_FILES['custom_fields']['size']['photo'],
+            ]
+            : null,
+        $user_id,
+        'photo',
+        $photo_upload_message
+    );
+    if($photo_upload_message !== ''){
+        $message = $photo_upload_message;
+    } elseif($uploaded_customer_photo !== ''){
+        $customer_photo = $uploaded_customer_photo;
+    } elseif($photo_required){
+        $message = 'Photo is required.';
+    }
+
     foreach($customer_custom_fields as $custom_field){
         $field_key = (string)$custom_field['field_key'];
         if($custom_field['field_type'] === 'photo'){
@@ -233,12 +268,13 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     phone,
                     email,
                     address,
+                    photo,
                     extra_data,
                     status
                 )
                 VALUES
                 (
-                    ?,?,?,?,NULLIF(?,0),?,?,?,?,?,?
+                    ?,?,?,?,NULLIF(?,0),?,?,?,?,?,?,?
                 )";
 
         $stmt = mysqli_prepare($conn,$sql);
@@ -246,7 +282,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
         mysqli_stmt_bind_param(
             $stmt,
-            "issiissssss",
+            "issiisssssss",
             $user_id,
             $customer_code,
             $customer_name,
@@ -256,6 +292,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             $phone,
             $email,
             $address,
+            $customer_photo,
             $extra_data_json,
             $status
         );
@@ -367,6 +404,9 @@ require_once '../includes/sidebar.php';
                 <?php
                 $field_key = (string)$custom_field['field_key'];
                 $field_value = $customer_extra_values[$field_key] ?? '';
+                if($field_key === 'photo'){
+                    $field_value = $customer_photo;
+                }
                 ?>
                 <?php if($field_key === 'customer_code'){ ?>
                     <div class="form-group">

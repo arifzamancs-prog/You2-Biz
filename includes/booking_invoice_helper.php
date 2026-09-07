@@ -67,6 +67,11 @@ function ensure_booking_invoice_table($conn)
         mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN created_by_user_id BIGINT UNSIGNED NULL AFTER notes");
     }
 
+    $total_price_column = mysqli_query($conn, "SHOW COLUMNS FROM booking_invoices LIKE 'total_price'");
+    if(!$total_price_column || mysqli_num_rows($total_price_column) === 0){
+        mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN total_price DECIMAL(12,2) NULL AFTER amount");
+    }
+
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS booking_invoice_charges (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         booking_invoice_id BIGINT UNSIGNED NOT NULL,
@@ -120,7 +125,6 @@ function booking_default_invoice_types()
         'booking' => 'Booking',
         'installment' => 'Installment',
         'cancel_return' => 'Cancel/Return',
-        'profit_return' => 'Profit Return',
     ];
 }
 
@@ -130,8 +134,12 @@ function booking_default_invoice_type_behaviors()
         'booking' => 'income',
         'installment' => 'income',
         'cancel_return' => 'expense',
-        'profit_return' => 'expense',
     ];
+}
+
+function booking_system_invoice_type_keys()
+{
+    return array_keys(booking_default_invoice_types());
 }
 
 function ensure_booking_invoice_type_table($conn, $user_id)
@@ -180,6 +188,17 @@ function ensure_booking_invoice_type_table($conn, $user_id)
         mysqli_stmt_bind_param($behavior_stmt, 'sis', $behavior, $user_id, $type_key);
         mysqli_stmt_execute($behavior_stmt);
     }
+
+    $removed_default_stmt = mysqli_prepare(
+        $conn,
+        "UPDATE booking_invoice_types
+         SET status='inactive'
+         WHERE user_id=?
+         AND type_key='profit_return'
+         AND status='active'"
+    );
+    mysqli_stmt_bind_param($removed_default_stmt, 'i', $user_id);
+    mysqli_stmt_execute($removed_default_stmt);
 }
 
 function booking_invoice_types($conn = null, $user_id = 0, $active_only = true)

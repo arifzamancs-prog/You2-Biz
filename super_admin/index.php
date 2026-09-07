@@ -625,14 +625,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }elseif($form_action === 'update_contact'){
+        $company_name = trim((string)($_POST['company_name'] ?? ''));
         $company_email = trim((string)($_POST['company_email'] ?? ''));
+        $company_phone = trim((string)($_POST['company_phone'] ?? ''));
 
         if($company_id <= 0){
             super_admin_flash_and_redirect('Invalid company selected.', 'danger');
         }
 
+        if($company_name === ''){
+            super_admin_flash_and_redirect('Company name is required.', 'danger');
+        }
+
         if($company_email === '' || !filter_var($company_email, FILTER_VALIDATE_EMAIL)){
             super_admin_flash_and_redirect('Please enter a valid email address.', 'danger');
+        }
+
+        if($company_phone === ''){
+            super_admin_flash_and_redirect('Company phone number is required.', 'danger');
         }
 
         $company_check_stmt = mysqli_prepare(
@@ -653,7 +663,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $company_check_row = $company_check_result ? mysqli_fetch_assoc($company_check_result) : null;
 
         if(!$company_check_row || ($company_check_row['role'] ?? '') !== 'admin'){
-            super_admin_flash_and_redirect('Only admin company email can be updated here.', 'danger');
+            super_admin_flash_and_redirect('Only admin company profile can be updated here.', 'danger');
         }
 
         $duplicate_message = contact_duplicate_message_in_table(
@@ -666,13 +676,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
 
         if($duplicate_message !== ''){
-            super_admin_flash_and_redirect('Email already exists.', 'danger');
+            super_admin_flash_and_redirect($duplicate_message, 'danger');
+        }
+
+        $duplicate_message = contact_duplicate_message_in_table(
+            $conn,
+            'users',
+            'User',
+            'phone',
+            $company_phone,
+            $company_id
+        );
+
+        if($duplicate_message !== ''){
+            super_admin_flash_and_redirect($duplicate_message, 'danger');
         }
 
         $contact_stmt = mysqli_prepare(
             $conn,
             "UPDATE users
-             SET email=?
+             SET name=?,
+                 email=?,
+                 phone=?,
+                 status='active',
+                 email_verified=1,
+                 email_verified_at=NOW(),
+                 email_verification_token_hash=NULL,
+                 email_verification_expires_at=NULL
              WHERE id=?
              AND role='admin'
              LIMIT 1"
@@ -682,10 +712,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Contact update failed.', 'danger');
         }
 
-        mysqli_stmt_bind_param($contact_stmt, "si", $company_email, $company_id);
+        mysqli_stmt_bind_param($contact_stmt, "sssi", $company_name, $company_email, $company_phone, $company_id);
 
         if(mysqli_stmt_execute($contact_stmt)){
-            super_admin_flash_and_redirect('Contact email updated successfully.', 'success');
+            super_admin_flash_and_redirect('Company profile updated and verified successfully.', 'success');
         }
 
         super_admin_flash_and_redirect('Contact update failed.', 'danger');
@@ -1105,20 +1135,36 @@ require_once '../includes/sidebar.php';
                                 <div class="company-email-readonly">
                                     <?= htmlspecialchars($row['email']); ?>
                                 </div>
-                                <div class="company-email-editor mt-2" style="display:none;">
+                                <small class="company-phone-readonly"><?= htmlspecialchars($row['phone']); ?></small>
+                                <div class="company-profile-editor mt-2" style="display:none;">
+                                    <input
+                                        type="text"
+                                        name="company_name"
+                                        class="form-control form-control-sm company-profile-input mb-1"
+                                        value="<?= htmlspecialchars($row['name']); ?>"
+                                        placeholder="Company name"
+                                        required>
                                     <input
                                         type="email"
                                         name="company_email"
-                                        class="form-control form-control-sm company-email-input"
-                                        value="<?= htmlspecialchars($row['email']); ?>">
+                                        class="form-control form-control-sm company-profile-input mb-1"
+                                        value="<?= htmlspecialchars($row['email']); ?>"
+                                        placeholder="Email"
+                                        required>
+                                    <input
+                                        type="text"
+                                        name="company_phone"
+                                        class="form-control form-control-sm company-profile-input"
+                                        value="<?= htmlspecialchars($row['phone']); ?>"
+                                        placeholder="Phone"
+                                        required>
                                 </div>
-                                <small><?= htmlspecialchars($row['phone']); ?></small>
                                 <div class="mt-2">
                                     <button
                                         type="button"
                                         class="btn btn-info btn-sm email-edit-toggle"
-                                        onclick="return toggleContactEmailEdit(this);">
-                                        Edit Email
+                                        onclick="return toggleCompanyProfileEdit(this);">
+                                        Edit Profile
                                     </button>
                                     <button
                                         type="submit"
@@ -1423,18 +1469,19 @@ function showDeleteConfirm(button){
     }
 }
 
-function toggleContactEmailEdit(button){
+function toggleCompanyProfileEdit(button){
     if(!button){
         return false;
     }
 
     var form = button.closest(".contact-edit-form");
-    var input = form ? form.querySelector(".company-email-input") : null;
+    var input = form ? form.querySelector(".company-profile-input") : null;
     var readonlyBox = form ? form.querySelector(".company-email-readonly") : null;
-    var editorBox = form ? form.querySelector(".company-email-editor") : null;
+    var phoneReadonly = form ? form.querySelector(".company-phone-readonly") : null;
+    var editorBox = form ? form.querySelector(".company-profile-editor") : null;
     var actionInput = form ? form.querySelector("input[name=\"form_action\"]") : null;
 
-    if(!form || !input || !actionInput || !readonlyBox || !editorBox){
+    if(!form || !input || !actionInput || !readonlyBox || !phoneReadonly || !editorBox){
         return false;
     }
 
@@ -1444,11 +1491,12 @@ function toggleContactEmailEdit(button){
     }
 
     readonlyBox.style.display = "none";
+    phoneReadonly.style.display = "none";
     editorBox.style.display = "block";
     input.focus();
     input.select();
     actionInput.value = "update_contact";
-    button.textContent = "Update Email";
+    button.textContent = "Update Profile";
     button.type = "submit";
     return false;
 }

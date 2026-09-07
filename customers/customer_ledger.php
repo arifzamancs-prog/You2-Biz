@@ -319,6 +319,7 @@ $wallet_transaction_sql = "SELECT
         bi.notes AS invoice_note,
         bi.invoice_date,
         bi.amount AS invoice_amount,
+        COALESCE(NULLIF(bi.total_price, 0), pk.price, bi.amount) AS package_price,
         p.project_name,
         pk.package_name,
         w.wallet_name
@@ -363,7 +364,7 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
             (string)($row['package_name'] ?? '')
         ),
         'booking_date' => $row['invoice_date'],
-        'total_amount' => $is_refund ? 0 : (float)$row['invoice_amount'],
+        'total_amount' => $is_refund ? 0 : (float)$row['package_price'],
         'sort_order' => $is_refund ? 3 : 2,
         'reference_id' => (int)$row['id'],
         'debit' => $is_refund ? (float)$row['amount'] : 0,
@@ -526,9 +527,14 @@ $ledger_groups = [];
 foreach($ledger as $row){
     $row_project_details = trim((string)($row['project_details'] ?? ''));
     $row_booking_date = trim((string)($row['booking_date'] ?? ''));
-    $group_key = $row_project_details !== ''
-        ? 'project-package-' . md5($row_project_details)
+    $row_invoice_no = trim((string)($row['invoice_no'] ?? ''));
+    $group_key = $row_invoice_no !== ''
+        ? 'invoice-' . md5($row_invoice_no)
         : '';
+
+    if($group_key === '' && $row_project_details !== ''){
+        $group_key = 'project-package-' . md5($row_project_details . '|' . $row_booking_date . '|' . ($row['reference_id'] ?? count($ledger_groups)));
+    }
 
     if($group_key === ''){
         $group_key = 'entry-' . ($row['type'] ?? 'ledger') . '-' . ($row['reference_id'] ?? count($ledger_groups));
@@ -604,9 +610,40 @@ foreach($ledger_groups as &$group){
 
 unset($group);
 
+foreach($ledger_groups as $group_key => $group){
+    if(
+        trim((string)($group['project_details'] ?? '')) !== '-' &&
+        (float)($group['total_amount'] ?? 0) <= 0
+    ){
+        unset($ledger_groups[$group_key]);
+    }
+}
+
 uasort($ledger_groups, function($a, $b){
     return ((int)$b['latest_time']) <=> ((int)$a['latest_time']);
 });
+
+$total_amount = 0;
+$total_paid = 0;
+
+foreach($ledger_groups as $group){
+    $total_amount += (float)($group['total_amount'] ?? 0);
+    $total_paid += (float)($group['total_paid'] ?? 0);
+}
+
+$total_due = $total_amount - $total_paid;
+if($total_due < 0 && abs($total_due) < 0.01){
+    $total_due = 0;
+}
+
+$purchased_package_count = 0;
+foreach($ledger_groups as $group){
+    if((float)($group['total_amount'] ?? 0) > 0){
+        $purchased_package_count++;
+    }
+}
+
+$show_grand_summary = $purchased_package_count > 1;
 
 ?>
 
@@ -655,64 +692,25 @@ uasort($ledger_groups, function($a, $b){
 
 <div class="row">
 
-<div class="col-md-4">
+<div class="<?php echo $show_grand_summary ? 'col-md-4' : 'col-md-12'; ?>">
 
 <table class="table table-bordered">
 
 <tr>
-
-<th>
-Customer
-</th>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $customer['customer_name']
-);
-?>
-
-</td>
-
+<th>Customer</th>
+<td><?php echo htmlspecialchars($customer['customer_name']); ?></td>
 </tr>
 
 <tr>
-
-<th>
-Phone
-</th>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $customer['phone']
-);
-?>
-
-</td>
-
+<th>Phone</th>
+<td><?php echo htmlspecialchars($customer['phone']); ?></td>
 </tr>
 
 <?php if(!empty($customer['address'])){ ?>
 
 <tr>
-
-<th>
-Address
-</th>
-
-<td>
-
-<?php
-echo htmlspecialchars(
-    $customer['address']
-);
-?>
-
-</td>
-
+<th>Address</th>
+<td><?php echo htmlspecialchars($customer['address']); ?></td>
 </tr>
 
 <?php } ?>
@@ -721,41 +719,37 @@ echo htmlspecialchars(
 
 </div>
 
+<?php if($show_grand_summary){ ?>
+
 <div class="col-md-8">
 
 <table class="table table-bordered">
 
 <tr>
-
-<th>
-Grand Total Paid
-</th>
-
-<td>
-
-<?php echo number_format($total_paid, 2); ?>
-
-</td>
-
+<th>Total Package</th>
+<td><?php echo (int)$purchased_package_count; ?></td>
 </tr>
 
 <tr>
+<th>Grand Total Amount</th>
+<td><?php echo number_format($total_amount, 2); ?></td>
+</tr>
 
-<th>
-Grand Total Due
-</th>
+<tr>
+<th>Grand Total Paid</th>
+<td><?php echo number_format($total_paid, 2); ?></td>
+</tr>
 
-<td>
-
-<?php echo number_format($total_due, 2); ?>
-
-</td>
-
+<tr>
+<th>Grand Total Due</th>
+<td><?php echo number_format($total_due, 2); ?></td>
 </tr>
 
 </table>
 
 </div>
+
+<?php } ?>
 
 </div>
 
@@ -782,10 +776,6 @@ class="table table-bordered table-striped">
 
 <tbody>
 
-<?php
-
-?>
-
 <tr>
 
 <td colspan="6" class="text-center text-muted">
@@ -793,9 +783,6 @@ No ledger entries found.
 </td>
 
 </tr>
-
-<?php
-?>
 
 </tbody>
 

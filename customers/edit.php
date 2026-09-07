@@ -4,11 +4,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/customer_form_helper.php';
+require_once '../includes/customer_portal_helper.php';
 require_once '../includes/staff_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_staff_table($conn);
 customer_form_ensure_schema($conn);
+ensure_customer_portal_columns($conn);
 
 $id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -45,6 +47,7 @@ $customer_custom_fields = array_values(array_filter($customer_form_fields, funct
     return empty($field['is_system']);
 }));
 $customer_extra_values = customer_form_decode_extra($customer['extra_data'] ?? '');
+$customer_photo = trim((string)($customer['photo'] ?? ''));
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
@@ -68,6 +71,14 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $status =
     $_POST['status'];
+
+    $photo_required = false;
+    foreach($customer_form_fields as $field){
+        if(($field['field_key'] ?? '') === 'photo' && !empty($field['is_required'])){
+            $photo_required = true;
+            break;
+        }
+    }
     $duplicate_message = '';
 
     if($customer_code === ''){
@@ -82,6 +93,31 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         $message = 'Email is required.';
     } elseif($address === ''){
         $message = 'Address is required.';
+    }
+
+if(empty($message)){
+        $photo_upload_message = '';
+        $uploaded_customer_photo = customer_form_upload_photo(
+            $_FILES['custom_fields']['name']['photo'] ?? null
+                ? [
+                    'name' => $_FILES['custom_fields']['name']['photo'],
+                    'type' => $_FILES['custom_fields']['type']['photo'],
+                    'tmp_name' => $_FILES['custom_fields']['tmp_name']['photo'],
+                    'error' => $_FILES['custom_fields']['error']['photo'],
+                    'size' => $_FILES['custom_fields']['size']['photo'],
+                ]
+                : null,
+            (int)$user_id,
+            'photo',
+            $photo_upload_message
+        );
+        if($photo_upload_message !== ''){
+            $message = $photo_upload_message;
+        } elseif($uploaded_customer_photo !== ''){
+            $customer_photo = $uploaded_customer_photo;
+        } elseif($photo_required && $customer_photo === ''){
+            $message = 'Photo is required.';
+        }
     }
 
 if(empty($message)){
@@ -189,6 +225,7 @@ if(empty($message)){
                 phone=?,
                 email=?,
                 address=?,
+                photo=?,
                 extra_data=?,
                 status=?
             WHERE id=?
@@ -202,13 +239,14 @@ if(empty($message)){
 
     mysqli_stmt_bind_param(
         $stmt,
-        "ssisssssii",
+        "ssissssssii",
         $customer_code,
         $customer_name,
         $ref_staff_id,
         $phone,
         $email,
         $address,
+        $customer_photo,
         $extra_data_json,
         $status,
         $id,
@@ -262,6 +300,9 @@ require_once '../includes/sidebar.php';
                 <?php
                 $field_key = (string)$custom_field['field_key'];
                 $field_value = $customer_extra_values[$field_key] ?? '';
+                if($field_key === 'photo'){
+                    $field_value = $customer_photo;
+                }
                 ?>
                 <?php if($field_key === 'customer_code'){ ?>
                     <div class="form-group">

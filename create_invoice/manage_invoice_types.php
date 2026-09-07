@@ -7,6 +7,7 @@ require_admin_user();
 $user_id = (int)$_SESSION['user_id'];
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
+$system_type_keys = booking_system_invoice_type_keys();
 $message = '';
 $error = '';
 
@@ -18,6 +19,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $behavior = $_POST['behavior'] ?? '';
         if($type_name === '' || $type_key === '' || !in_array($behavior, ['income', 'expense'], true)){
             $error = 'Enter a payment type name and select its behavior.';
+        }elseif(in_array($type_key, $system_type_keys, true) || $type_key === 'profit_return'){
+            $error = 'This payment type name is reserved by the system.';
         }else{
             $stmt = mysqli_prepare($conn, "INSERT INTO booking_invoice_types (user_id, type_key, type_name, behavior, status) VALUES (?, ?, ?, ?, 'active') ON DUPLICATE KEY UPDATE type_name=VALUES(type_name), behavior=VALUES(behavior), status='active'");
             mysqli_stmt_bind_param($stmt, 'isss', $user_id, $type_key, $type_name, $behavior);
@@ -33,6 +36,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $type_row = mysqli_fetch_assoc(mysqli_stmt_get_result($type_stmt));
         if(!$type_row){
             $error = 'Payment type not found.';
+        }elseif(in_array($type_row['type_key'], $system_type_keys, true)){
+            $error = 'System payment types are fixed and cannot be deleted.';
         }else{
             $count_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS total FROM booking_invoices WHERE user_id=? AND invoice_type=?");
             mysqli_stmt_bind_param($count_stmt, 'is', $user_id, $type_row['type_key']);
@@ -50,13 +55,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }
 }
 
-$types_result = mysqli_query($conn, "SELECT t.*, COUNT(bi.id) AS transaction_count FROM booking_invoice_types t LEFT JOIN booking_invoices bi ON bi.user_id=t.user_id AND bi.invoice_type=t.type_key WHERE t.user_id={$user_id} GROUP BY t.id ORDER BY t.status='active' DESC, t.type_name");
+$types_result = mysqli_query($conn, "SELECT t.*, COUNT(bi.id) AS transaction_count FROM booking_invoice_types t LEFT JOIN booking_invoices bi ON bi.user_id=t.user_id AND bi.invoice_type=t.type_key WHERE t.user_id={$user_id} AND t.type_key<>'profit_return' GROUP BY t.id ORDER BY FIELD(t.type_key, 'booking', 'cancel_return', 'installment') DESC, t.status='active' DESC, t.type_name");
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
 <div class="card"><div class="card-header"><h3 class="card-title">Manage Payment Type</h3></div><div class="card-body">
 <?php if($message){ ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
 <?php if($error){ ?><div class="alert alert-danger"><?= htmlspecialchars($error); ?></div><?php } ?>
 <form method="post" class="mb-4"><input type="hidden" name="action" value="add"><div class="row"><div class="col-md-5 form-group"><label>New Payment Type</label><input type="text" name="type_name" class="form-control" maxlength="100" required></div><div class="col-md-3 form-group"><label>Behavior</label><select name="behavior" class="form-control" required><option value="">Select Behavior</option><option value="income">Income</option><option value="expense">Expense</option></select></div><div class="col-md-2 form-group d-flex align-items-end"><button class="btn btn-primary">Add Type</button></div></div></form>
-<table id="example1" class="table table-bordered table-striped"><thead><tr><th>Payment Type</th><th>Behavior</th><th>Status</th><th>Transactions</th><th width="100">Action</th></tr></thead><tbody><?php while($type = mysqli_fetch_assoc($types_result)){ ?><tr><td><?= htmlspecialchars($type['type_name']); ?></td><td><span class="badge badge-<?= $type['behavior'] === 'income' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($type['behavior'])); ?></span></td><td><span class="badge badge-<?= $type['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= htmlspecialchars(ucfirst($type['status'])); ?></span></td><td><?= (int)$type['transaction_count']; ?></td><td><?php if($type['status'] === 'active' && (int)$type['transaction_count'] > 0){ ?><button class="btn btn-secondary btn-sm" disabled title="This type has transactions"><i class="fas fa-trash"></i></button><?php }elseif($type['status'] === 'active'){ ?><form method="post" onsubmit="return confirm('Remove this payment type?');"><input type="hidden" name="action" value="delete"><input type="hidden" name="type_id" value="<?= (int)$type['id']; ?>"><button class="btn btn-danger btn-sm" title="Delete"><i class="fas fa-trash"></i></button></form><?php } ?></td></tr><?php } ?></tbody></table>
+<table id="example1" class="table table-bordered table-striped"><thead><tr><th>Payment Type</th><th>Behavior</th><th>Status</th><th>Transactions</th><th width="100">Action</th></tr></thead><tbody><?php while($type = mysqli_fetch_assoc($types_result)){ $is_system_type = in_array($type['type_key'], $system_type_keys, true); ?><tr><td><?= htmlspecialchars($type['type_name']); ?></td><td><span class="badge badge-<?= $type['behavior'] === 'income' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($type['behavior'])); ?></span></td><td><span class="badge badge-<?= $type['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= htmlspecialchars(ucfirst($type['status'])); ?></span></td><td><?= (int)$type['transaction_count']; ?></td><td><?php if($is_system_type){ ?><span class="text-muted">Fixed</span><?php }elseif($type['status'] === 'active' && (int)$type['transaction_count'] > 0){ ?><button class="btn btn-secondary btn-sm" disabled title="This type has transactions"><i class="fas fa-trash"></i></button><?php }elseif($type['status'] === 'active'){ ?><form method="post" onsubmit="return confirm('Remove this payment type?');"><input type="hidden" name="action" value="delete"><input type="hidden" name="type_id" value="<?= (int)$type['id']; ?>"><button class="btn btn-danger btn-sm" title="Delete"><i class="fas fa-trash"></i></button></form><?php } ?></td></tr><?php } ?></tbody></table>
 </div></div>
 <?php require_once '../includes/footer.php'; ?>

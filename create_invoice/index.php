@@ -16,7 +16,8 @@ ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
 
 $invoice_types = booking_invoice_types($conn, $user_id);
-$type = normalize_booking_invoice_type($_GET['type'] ?? 'booking', $invoice_types);
+$type = '';
+$display_type = isset($_GET['type']) ? normalize_booking_invoice_type($_GET['type'], $invoice_types) : 'booking';
 
 $message = '';
 $customer_id = (int)($_POST['customer_id'] ?? 0);
@@ -26,34 +27,40 @@ $cash_wallet_id = ensure_default_cash_wallet($conn, $user_id);
 $wallet_id = (int)($_POST['wallet_id'] ?? $cash_wallet_id);
 $invoice_date = trim($_POST['invoice_date'] ?? date('m/d/Y'));
 $amount = trim($_POST['amount'] ?? '');
+$total_price = trim($_POST['total_price'] ?? '');
 $notes = trim($_POST['notes'] ?? '');
 $charge_inputs = $_POST['charge_value'] ?? [];
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $save_action = $_POST['save_action'] ?? 'save';
-    $type = normalize_booking_invoice_type($_POST['invoice_type'] ?? $type, $invoice_types);
+    $type = trim((string)($_POST['invoice_type'] ?? ''));
+    if($type !== ''){
+        $type = normalize_booking_invoice_type($type, $invoice_types);
+    }
+    $display_type = $type !== '' ? $type : 'booking';
 
     $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
     $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
     $numeric_amount = (float)$amount;
+    $numeric_total_price = $type === 'booking' ? (float)$total_price : 0;
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
     $final_amount = $charge_calculation['total'];
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0){
-        $message = 'Customer, Project, Package, Date and valid Price are required.';
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type === 'booking' && $numeric_total_price <= 0)){
+        $message = 'Customer, Project, Package, Payment Type, Date and valid Amount are required.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
 
         $insert_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO booking_invoices
-             (user_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, notes, created_by_user_id)
+             (user_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, total_price, notes, created_by_user_id)
              VALUES
-             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
         mysqli_stmt_bind_param(
             $insert_stmt,
-            'isiiiissdsi',
+            'isiiiissddsi',
             $user_id,
             $invoice_no,
             $customer_id,
@@ -63,6 +70,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $type,
             $normalized_date,
             $final_amount,
+            $numeric_total_price,
             $notes,
             $created_by_user_id
         );
@@ -155,7 +163,7 @@ $recent_stmt = mysqli_prepare(
      ORDER BY bi.id DESC
      LIMIT 50"
 );
-mysqli_stmt_bind_param($recent_stmt, 'is', $user_id, $type);
+mysqli_stmt_bind_param($recent_stmt, 'is', $user_id, $display_type);
 mysqli_stmt_execute($recent_stmt);
 $recent_result = mysqli_stmt_get_result($recent_stmt);
 while($recent_result && $row = mysqli_fetch_assoc($recent_result)){
@@ -171,7 +179,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header">
         <h3 class="card-title">
             <i class="fas fa-file-alt mr-2"></i>
-            <?= htmlspecialchars(booking_invoice_page_title($type, $invoice_types)); ?>
+            <?= htmlspecialchars(booking_invoice_page_title($display_type, $invoice_types)); ?>
         </h3>
     </div>
 
@@ -194,19 +202,6 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Date</label>
                         <input type="text" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="mm/dd/yyyy" required>
-                    </div>
-                </div>
-
-                <div class="col-md-3">
-                    <div class="form-group">
-                        <label>Payment Type</label>
-                        <select name="invoice_type" class="form-control" required>
-                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
-                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
-                                    <?= htmlspecialchars($type_name); ?>
-                                </option>
-                            <?php } ?>
-                        </select>
                     </div>
                 </div>
 
@@ -258,7 +253,28 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-4">
                     <div class="form-group">
-                        <label>Price (BDT)</label>
+                        <label>Payment Type</label>
+                        <select id="invoice_type" name="invoice_type" class="form-control" required>
+                            <option value="">Select Payment Type</option>
+                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
+                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
+                                    <?= htmlspecialchars($type_name); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-md-4" id="total-price-group" style="display:none;">
+                    <div class="form-group">
+                        <label>Total Price (BDT)</label>
+                        <input id="total_price" type="number" step="0.01" min="0" name="total_price" class="form-control" value="<?= htmlspecialchars($total_price); ?>">
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="form-group">
+                        <label>Pay Amount (BDT)</label>
                         <input id="amount" type="number" step="0.01" min="0" name="amount" class="form-control" value="<?= htmlspecialchars($amount); ?>" required>
                     </div>
                 </div>
@@ -298,7 +314,7 @@ require_once '../includes/sidebar.php';
 
 <div class="card">
     <div class="card-header">
-            <h3 class="card-title"><?= htmlspecialchars(booking_invoice_recent_title($type, $invoice_types)); ?></h3>
+            <h3 class="card-title"><?= htmlspecialchars(booking_invoice_recent_title($display_type, $invoice_types)); ?></h3>
     </div>
 
     <div class="card-body">
@@ -347,7 +363,9 @@ require_once '../includes/sidebar.php';
 document.addEventListener('DOMContentLoaded', function () {
     const projectSelect = document.getElementById('project_id');
     const packageSelect = document.getElementById('package_id');
-    const amountInput = document.getElementById('amount');
+    const invoiceTypeSelect = document.getElementById('invoice_type');
+    const totalPriceGroup = document.getElementById('total-price-group');
+    const totalPriceInput = document.getElementById('total_price');
 
     function filterPackages() {
         const selectedProject = projectSelect.value;
@@ -374,13 +392,29 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function syncPackagePrice() {
         const selectedOption = packageSelect.options[packageSelect.selectedIndex];
-        if (selectedOption && selectedOption.dataset.price && !amountInput.value) {
-            amountInput.value = selectedOption.dataset.price;
+        if (selectedOption && selectedOption.dataset.price) {
+            if (!totalPriceInput.value || invoiceTypeSelect.value === 'booking') {
+                totalPriceInput.value = selectedOption.dataset.price;
+            }
+        }
+    }
+
+    function toggleTotalPrice() {
+        const isBooking = invoiceTypeSelect.value === 'booking';
+        totalPriceGroup.style.display = isBooking ? '' : 'none';
+        totalPriceInput.required = isBooking;
+
+        if (isBooking && !totalPriceInput.value) {
+            const selectedOption = packageSelect.options[packageSelect.selectedIndex];
+            if (selectedOption && selectedOption.dataset.price) {
+                totalPriceInput.value = selectedOption.dataset.price;
+            }
         }
     }
 
     projectSelect.addEventListener('change', filterPackages);
     packageSelect.addEventListener('change', syncPackagePrice);
+    invoiceTypeSelect.addEventListener('change', toggleTotalPrice);
 
     document.getElementById('create-invoice-form').addEventListener('submit', function (event) {
         if (event.submitter && event.submitter.value === 'save_print') {
@@ -395,6 +429,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     filterPackages();
+    toggleTotalPrice();
 });
 </script>
 

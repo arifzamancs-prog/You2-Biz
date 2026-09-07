@@ -3,6 +3,8 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/customer_helper.php';
+require_once '../includes/customer_form_helper.php';
+require_once '../includes/customer_portal_helper.php';
 require_once '../includes/lead_management_helper.php';
 
 $user_id = $_SESSION['user_id'];
@@ -25,6 +27,39 @@ if($lead_ref_column && mysqli_num_rows($lead_ref_column) === 0){
 }
 
 ensure_lead_management_table($conn);
+customer_form_ensure_schema($conn);
+ensure_customer_portal_columns($conn);
+
+$customer_form_fields = customer_form_get_fields($conn, $user_id);
+$customer_photo_field_keys = [];
+foreach($customer_form_fields as $field){
+    if(($field['field_type'] ?? '') === 'photo'){
+        $customer_photo_field_keys[] = (string)($field['field_key'] ?? '');
+    }
+}
+
+function customer_index_photo_value($customer, $photo_field_keys)
+{
+    $direct_photo = trim((string)($customer['photo'] ?? ''));
+    if($direct_photo !== ''){
+        return $direct_photo;
+    }
+
+    $extra_data = customer_form_decode_extra($customer['extra_data'] ?? '');
+    foreach($photo_field_keys as $field_key){
+        if($field_key !== '' && !empty($extra_data[$field_key])){
+            return (string)$extra_data[$field_key];
+        }
+    }
+
+    foreach($extra_data as $value){
+        if(is_string($value) && preg_match('/\.(jpe?g|png|webp)$/i', $value)){
+            return $value;
+        }
+    }
+
+    return '';
+}
 
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'cancel_pending_lead'){
     if(manager_can_modify()){
@@ -104,6 +139,35 @@ require_once '../includes/sidebar.php';
 
 ?>
 
+<style>
+    .customer-photo-thumb {
+        width: 58px;
+        height: 58px;
+        object-fit: cover;
+        border-radius: 8px;
+        border: 2px solid #e9ecef;
+        background: #f8f9fa;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, .10);
+    }
+    .customer-photo-fallback {
+        align-items: center;
+        background: linear-gradient(135deg, #e0f2fe, #dbeafe);
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        color: #075985;
+        display: inline-flex;
+        font-size: 18px;
+        font-weight: 700;
+        height: 58px;
+        justify-content: center;
+        width: 58px;
+    }
+    .customer-photo-cell,
+    .customer-photo-header {
+        text-align: center;
+    }
+</style>
+
 <div class="card">
 
     <div class="card-header">
@@ -144,6 +208,7 @@ require_once '../includes/sidebar.php';
 
                 <th>CID</th>
                 <th>Customer Name</th>
+                <th class="customer-photo-header">Photo</th>
                 <th>Ref</th>
                 <th>Phone</th>
                 <th>Address</th>
@@ -161,12 +226,30 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <td>
+                <td class="customer-photo-cell">
                     <?= $is_pending_lead ? '-' : htmlspecialchars($row['customer_code'] ?: '-'); ?>
                 </td>
 
                 <td>
                     <?= htmlspecialchars($row['customer_name']); ?>
+                </td>
+
+                <td>
+                    <?php if($is_pending_lead){ ?>
+                        <span class="text-muted">-</span>
+                    <?php } else { ?>
+                        <?php $photo_url = customer_photo_url(customer_index_photo_value($row, $customer_photo_field_keys)); ?>
+                        <?php if($photo_url !== ''){ ?>
+                            <img
+                                src="<?= htmlspecialchars($photo_url); ?>"
+                                alt="<?= htmlspecialchars($row['customer_name']); ?>"
+                                class="customer-photo-thumb">
+                        <?php } else { ?>
+                            <span class="customer-photo-fallback">
+                                <?= htmlspecialchars(strtoupper(substr(trim((string)$row['customer_name']), 0, 1)) ?: 'C'); ?>
+                            </span>
+                        <?php } ?>
+                    <?php } ?>
                 </td>
 
                 <td>

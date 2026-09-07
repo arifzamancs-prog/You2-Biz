@@ -98,11 +98,6 @@ function customer_form_is_valid_calendar_value($value)
 
 function customer_form_upload_photo($file, $user_id, $field_key, &$message)
 {
-    if(!function_exists('imagecreatetruecolor')){
-        $message = 'Photo upload needs PHP GD extension enabled.';
-        return '';
-    }
-
     if(empty($file) || !isset($file['error']) || (int)$file['error'] === UPLOAD_ERR_NO_FILE){
         return '';
     }
@@ -124,15 +119,43 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message)
     }
 
     $mime = $image_info['mime'] ?? '';
+    $extension = '';
+    if($mime === 'image/jpeg'){
+        $extension = 'jpg';
+    } elseif($mime === 'image/png'){
+        $extension = 'png';
+    } elseif($mime === 'image/webp' && function_exists('imagecreatefromwebp')){
+        $extension = 'webp';
+    } else {
+        $message = 'Only JPG, PNG or WEBP photo is allowed.';
+        return '';
+    }
+
+    $upload_dir = dirname(__DIR__) . '/uploads/customer_form';
+    if(!is_dir($upload_dir)){
+        mkdir($upload_dir, 0775, true);
+    }
+
+    $safe_field_key = preg_replace('/[^a-z0-9_]+/', '_', strtolower($field_key));
+
+    if(!function_exists('imagecreatetruecolor')){
+        $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.' . $extension;
+        $path = $upload_dir . '/' . $file_name;
+
+        if(!move_uploaded_file($file['tmp_name'], $path)){
+            $message = 'Photo could not be saved.';
+            return '';
+        }
+
+        return 'uploads/customer_form/' . $file_name;
+    }
+
     if($mime === 'image/jpeg'){
         $source = @imagecreatefromjpeg($file['tmp_name']);
     } elseif($mime === 'image/png'){
         $source = @imagecreatefrompng($file['tmp_name']);
-    } elseif($mime === 'image/webp' && function_exists('imagecreatefromwebp')){
-        $source = @imagecreatefromwebp($file['tmp_name']);
     } else {
-        $message = 'Only JPG, PNG or WEBP photo is allowed.';
-        return '';
+        $source = @imagecreatefromwebp($file['tmp_name']);
     }
 
     if(!$source){
@@ -149,12 +172,7 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message)
     $target = imagecreatetruecolor(250, 250);
     imagecopyresampled($target, $source, 0, 0, $src_x, $src_y, 250, 250, $side, $side);
 
-    $upload_dir = dirname(__DIR__) . '/uploads/customer_form';
-    if(!is_dir($upload_dir)){
-        mkdir($upload_dir, 0775, true);
-    }
-
-    $file_name = 'customer_' . (int)$user_id . '_' . preg_replace('/[^a-z0-9_]+/', '_', strtolower($field_key)) . '_' . time() . '_' . mt_rand(1000, 9999) . '.jpg';
+    $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.jpg';
     $path = $upload_dir . '/' . $file_name;
 
     if(!imagejpeg($target, $path, 90)){

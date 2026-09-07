@@ -11,10 +11,12 @@ require_once 'includes/signup_message_helper.php';
 require_once 'includes/branding_helper.php';
 require_once 'includes/login_email_otp_helper.php';
 require_once 'includes/login_session_helper.php';
+require_once 'includes/customer_portal_helper.php';
 
 ensure_manager_access_columns($conn);
 ensure_signup_message_settings_table($conn);
 ensure_login_email_otp_columns($conn);
+ensure_customer_portal_columns($conn);
 signup_message_send_trial_warnings($conn);
 
 function start_super_admin_session()
@@ -259,8 +261,42 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
 
     } else {
+        $customer_stmt = mysqli_prepare(
+            $conn,
+            "SELECT c.*, u.status AS company_status, u.subscription_status
+             FROM customers c
+             INNER JOIN users u ON u.id=c.user_id
+             WHERE c.status='active'
+             AND u.status='active'
+             AND (c.email=? OR c.phone=?)
+             LIMIT 1"
+        );
 
-        $message = "User Not Found";
+        if($customer_stmt){
+            mysqli_stmt_bind_param($customer_stmt, 'ss', $login, $login);
+            mysqli_stmt_execute($customer_stmt);
+            $customer_result = mysqli_stmt_get_result($customer_stmt);
+            $customer = $customer_result ? mysqli_fetch_assoc($customer_result) : null;
+
+            if($customer){
+                if(in_array($customer['subscription_status'] ?? 'active', ['blocked','expired'], true)){
+                    $message = $full_version_message;
+                }elseif(password_verify($password, customer_portal_password_hash($customer))){
+                    session_regenerate_id(true);
+                    $_SESSION['customer_portal_id'] = (int)$customer['id'];
+                    $_SESSION['customer_portal_user_id'] = (int)$customer['user_id'];
+                    $_SESSION['customer_portal_name'] = $customer['customer_name'];
+                    header('Location: customer_portal/index.php');
+                    exit;
+                }else{
+                    $message = 'Invalid Password';
+                }
+            }else{
+                $message = "User Not Found";
+            }
+        }else{
+            $message = "User Not Found";
+        }
     }
 }
 ?>
