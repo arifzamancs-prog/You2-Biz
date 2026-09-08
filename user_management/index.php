@@ -3,10 +3,12 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/manager_access_helper.php';
+require_once '../includes/customer_portal_helper.php';
 require_once '../includes/staff_helper.php';
 
 require_admin_user();
 ensure_manager_access_columns($conn);
+ensure_customer_access_table($conn);
 ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
@@ -96,6 +98,11 @@ function user_management_agent_placeholder_phone($username)
     return 'AG' . substr($clean, 0, 18);
 }
 
+function user_management_customer_access_has_history($conn, $access_id)
+{
+    return (int)$access_id <= 0 ? false : true;
+}
+
 function user_management_table_has_column($conn, $table, $column)
 {
     if(!preg_match('/^[A-Za-z0-9_]+$/', (string)$table) || !preg_match('/^[A-Za-z0-9_]+$/', (string)$column)){
@@ -180,7 +187,76 @@ if(isset($_GET['edit'])){
     $edit_manager = $edit_result ? mysqli_fetch_assoc($edit_result) : null;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'delete_manager') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_customer_access') {
+    $customer_id = (int)($_POST['customer_id'] ?? 0);
+    $username_base = normalize_customer_access_username($_POST['customer_username'] ?? '');
+    $username = build_customer_access_username($username_base, $user_id);
+    $password = (string)($_POST['customer_password'] ?? '');
+
+    $customer_stmt = mysqli_prepare(
+        $conn,
+        "SELECT id, customer_name
+         FROM customers
+         WHERE id=?
+         AND user_id=?
+         AND status='active'
+         LIMIT 1"
+    );
+    $selected_customer = null;
+    if($customer_stmt){
+        mysqli_stmt_bind_param($customer_stmt, 'ii', $customer_id, $user_id);
+        mysqli_stmt_execute($customer_stmt);
+        $selected_customer = mysqli_fetch_assoc(mysqli_stmt_get_result($customer_stmt));
+    }
+
+    if(!$selected_customer || $username_base === '' || $password === ''){
+        user_management_flash_and_redirect('Select a customer, then enter username and password.', 'danger');
+    } elseif(strlen($password) < 6) {
+        user_management_flash_and_redirect('Customer password must be at least 6 characters.', 'danger');
+    } else {
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $insert_stmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO customer_access_accounts (user_id, customer_id, username, password, status)
+             VALUES (?, ?, ?, ?, 'active')"
+        );
+
+        if($insert_stmt){
+            mysqli_stmt_bind_param($insert_stmt, 'iiss', $user_id, $customer_id, $username, $hash);
+            try {
+                if(mysqli_stmt_execute($insert_stmt)){
+                    user_management_flash_and_redirect('Customer access created successfully. Login username: ' . $username, 'success');
+                }
+            } catch (mysqli_sql_exception $exception) {
+                user_management_flash_and_redirect('This customer or username already has access.', 'danger');
+            }
+        }
+
+        user_management_flash_and_redirect('Customer access could not be created.', 'danger');
+    }
+}
+
+if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_customer_access'){
+    $access_id = (int)($_POST['access_id'] ?? 0);
+    $delete_stmt = mysqli_prepare(
+        $conn,
+        "DELETE FROM customer_access_accounts
+         WHERE id=?
+         AND user_id=?
+         LIMIT 1"
+    );
+
+    if($delete_stmt){
+        mysqli_stmt_bind_param($delete_stmt, 'ii', $access_id, $user_id);
+        if(mysqli_stmt_execute($delete_stmt) && mysqli_stmt_affected_rows($delete_stmt) > 0){
+            user_management_flash_and_redirect('Customer access deleted successfully.', 'success');
+        }
+    }
+
+    user_management_flash_and_redirect('Customer access could not be deleted.', 'danger');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''), ['delete_manager', 'create_customer_access', 'delete_customer_access'], true)) {
 
     $manager_id = (int)($_POST['manager_id'] ?? 0);
     $staff_id = (int)($_POST['staff_id'] ?? 0);
@@ -478,6 +554,27 @@ if (isset($_GET['status'], $_GET['id'])) {
     exit;
 }
 
+if (isset($_GET['customer_access_status'], $_GET['customer_access_id'])) {
+    $access_id = (int)$_GET['customer_access_id'];
+    $status = $_GET['customer_access_status'] === 'active' ? 'active' : 'inactive';
+
+    $status_stmt = mysqli_prepare(
+        $conn,
+        "UPDATE customer_access_accounts
+         SET status=?
+         WHERE id=?
+         AND user_id=?"
+    );
+
+    if($status_stmt){
+        mysqli_stmt_bind_param($status_stmt, 'sii', $status, $access_id, $user_id);
+        mysqli_stmt_execute($status_stmt);
+    }
+
+    header("Location: index.php");
+    exit;
+}
+
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_manager'){
     $manager_id = (int)($_POST['manager_id'] ?? 0);
 
@@ -559,6 +656,47 @@ $staff_options_stmt = mysqli_prepare($conn, $staff_options_sql);
 mysqli_stmt_bind_param($staff_options_stmt, 'iiii', $user_id, $selected_staff_id, $user_id, $editing_manager_id);
 mysqli_stmt_execute($staff_options_stmt);
 $staff_options = mysqli_stmt_get_result($staff_options_stmt);
+
+$customer_access_options_stmt = mysqli_prepare(
+    $conn,
+    "SELECT c.id, c.customer_name, c.phone
+     FROM customers c
+     WHERE c.user_id=?
+     AND c.status='active'
+     AND NOT EXISTS (
+        SELECT 1
+        FROM customer_access_accounts ca
+        WHERE ca.user_id=c.user_id
+        AND ca.customer_id=c.id
+     )
+     ORDER BY c.customer_name ASC, c.id ASC"
+);
+mysqli_stmt_bind_param($customer_access_options_stmt, 'i', $user_id);
+mysqli_stmt_execute($customer_access_options_stmt);
+$customer_access_options = mysqli_stmt_get_result($customer_access_options_stmt);
+
+$customer_access_stmt = mysqli_prepare(
+    $conn,
+    "SELECT
+        ca.id,
+        ca.username,
+        ca.status,
+        ca.last_login,
+        ca.created_at,
+        c.customer_name,
+        c.customer_code,
+        c.phone,
+        c.email
+     FROM customer_access_accounts ca
+     INNER JOIN customers c
+        ON c.id=ca.customer_id
+        AND c.user_id=ca.user_id
+     WHERE ca.user_id=?
+     ORDER BY ca.id DESC"
+);
+mysqli_stmt_bind_param($customer_access_stmt, 'i', $user_id);
+mysqli_stmt_execute($customer_access_stmt);
+$customer_access_result = mysqli_stmt_get_result($customer_access_stmt);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -679,7 +817,7 @@ require_once '../includes/sidebar.php';
         <div class="card">
 
             <div class="card-header">
-                <h3 class="card-title">Access Management</h3>
+                <h3 class="card-title">Staff Access Management</h3>
             </div>
 
             <div class="card-body">
@@ -774,7 +912,132 @@ require_once '../includes/sidebar.php';
 
 </div>
 
+<div class="row">
+
+    <div class="col-lg-4">
+
+        <div class="card">
+
+            <div class="card-header">
+                <h3 class="card-title">Create Customer Login Access</h3>
+            </div>
+
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" name="action" value="create_customer_access">
+
+                    <div class="form-group">
+                        <label>Customer Name</label>
+                        <select name="customer_id" class="form-control customer-select" required>
+                            <option value="">Search and select customer</option>
+                            <?php while($customer_option = mysqli_fetch_assoc($customer_access_options)){ ?>
+                                <option value="<?= (int)$customer_option['id']; ?>">
+                                    <?= htmlspecialchars($customer_option['customer_name'] . (!empty($customer_option['phone']) ? ' (' . $customer_option['phone'] . ')' : '')); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Username</label>
+                        <div class="input-group" style="max-width: 280px;">
+                            <input type="text" name="customer_username" class="form-control" required>
+                            <div class="input-group-append">
+                                <span class="input-group-text">@c<?= (int)$user_id; ?></span>
+                            </div>
+                        </div>
+                        <small class="text-muted">Customer must login with this username, not email or phone.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" name="customer_password" class="form-control" style="max-width: 280px;" minlength="6" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-user-plus"></i>
+                        Create Customer Access
+                    </button>
+                </form>
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="col-lg-8">
+
+        <div class="card">
+
+            <div class="card-header">
+                <h3 class="card-title">Customer Access Management</h3>
+            </div>
+
+            <div class="card-body">
+                <table class="table table-bordered table-striped">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Contact</th>
+                            <th>Login Username</th>
+                            <th>Status</th>
+                            <th>Last Login</th>
+                            <th>Created</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php while($customer_access = mysqli_fetch_assoc($customer_access_result)){ ?>
+                            <tr>
+                                <td>
+                                    <?= htmlspecialchars($customer_access['customer_name']); ?>
+                                    <small class="text-muted d-block">CID: <?= htmlspecialchars($customer_access['customer_code'] ?: '-'); ?></small>
+                                </td>
+                                <td>
+                                    <?= htmlspecialchars($customer_access['phone'] ?: '-'); ?>
+                                    <small class="text-muted d-block"><?= htmlspecialchars($customer_access['email'] ?: '-'); ?></small>
+                                </td>
+                                <td><?= htmlspecialchars($customer_access['username']); ?></td>
+                                <td>
+                                    <?php if($customer_access['status'] === 'active'){ ?>
+                                        <span class="badge badge-success">Active</span>
+                                    <?php }else{ ?>
+                                        <span class="badge badge-secondary">Inactive</span>
+                                    <?php } ?>
+                                </td>
+                                <td><?= htmlspecialchars(app_datetime($customer_access['last_login'] ?? null)); ?></td>
+                                <td><?= htmlspecialchars(app_datetime($customer_access['created_at'])); ?></td>
+                                <td>
+                                    <?php if($customer_access['status'] === 'active'){ ?>
+                                        <a href="index.php?customer_access_id=<?= (int)$customer_access['id']; ?>&customer_access_status=inactive" class="btn btn-sm btn-warning" title="Deactivate Customer Access" aria-label="Deactivate Customer Access">
+                                            <i class="fas fa-ban"></i>
+                                        </a>
+                                    <?php }else{ ?>
+                                        <a href="index.php?customer_access_id=<?= (int)$customer_access['id']; ?>&customer_access_status=active" class="btn btn-sm btn-success" title="Activate Customer Access" aria-label="Activate Customer Access">
+                                            <i class="fas fa-check"></i>
+                                        </a>
+                                    <?php } ?>
+                                    <form method="post" class="d-inline" onsubmit="return confirm('Delete this customer access?');">
+                                        <input type="hidden" name="action" value="delete_customer_access">
+                                        <input type="hidden" name="access_id" value="<?= (int)$customer_access['id']; ?>">
+                                        <button type="submit" class="btn btn-sm btn-danger" title="Delete Customer Access" aria-label="Delete Customer Access">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php } ?>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
 <?php
-$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); }); document.addEventListener('DOMContentLoaded', function(){ const sensitive = ['dashboard', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const sync = function(){ const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
+$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); $('.customer-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select customer'}); }); document.addEventListener('DOMContentLoaded', function(){ const sensitive = ['dashboard', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const sync = function(){ const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
 require_once '../includes/footer.php';
 ?>

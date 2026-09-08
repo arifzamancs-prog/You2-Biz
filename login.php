@@ -17,6 +17,7 @@ ensure_manager_access_columns($conn);
 ensure_signup_message_settings_table($conn);
 ensure_login_email_otp_columns($conn);
 ensure_customer_portal_columns($conn);
+ensure_customer_access_table($conn);
 signup_message_send_trial_warnings($conn);
 
 function start_super_admin_session()
@@ -280,17 +281,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     } else {
         $customer_stmt = mysqli_prepare(
             $conn,
-            "SELECT c.*, u.status AS company_status, u.subscription_status
-             FROM customers c
-             INNER JOIN users u ON u.id=c.user_id
-             WHERE c.status='active'
+            "SELECT
+                ca.id AS access_id,
+                ca.password AS access_password,
+                ca.status AS access_status,
+                c.*,
+                u.status AS company_status,
+                u.subscription_status
+             FROM customer_access_accounts ca
+             INNER JOIN customers c
+                ON c.id=ca.customer_id
+                AND c.user_id=ca.user_id
+             INNER JOIN users u ON u.id=ca.user_id
+             WHERE ca.username=?
+             AND ca.status='active'
+             AND c.status='active'
              AND u.status='active'
-             AND (c.email=? OR c.phone=?)
              LIMIT 1"
         );
 
         if($customer_stmt){
-            mysqli_stmt_bind_param($customer_stmt, 'ss', $login, $login);
+            mysqli_stmt_bind_param($customer_stmt, 's', $login);
             mysqli_stmt_execute($customer_stmt);
             $customer_result = mysqli_stmt_get_result($customer_stmt);
             $customer = $customer_result ? mysqli_fetch_assoc($customer_result) : null;
@@ -298,7 +309,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if($customer){
                 if(in_array($customer['subscription_status'] ?? 'active', ['blocked','expired'], true)){
                     $message = $full_version_message;
-                }elseif(password_verify($password, customer_portal_password_hash($customer))){
+                }elseif(password_verify($password, $customer['access_password'])){
+                    $access_update_stmt = mysqli_prepare($conn, "UPDATE customer_access_accounts SET last_login=NOW() WHERE id=?");
+                    if($access_update_stmt){
+                        mysqli_stmt_bind_param($access_update_stmt, 'i', $customer['access_id']);
+                        mysqli_stmt_execute($access_update_stmt);
+                    }
                     session_regenerate_id(true);
                     $_SESSION['customer_portal_id'] = (int)$customer['id'];
                     $_SESSION['customer_portal_user_id'] = (int)$customer['user_id'];

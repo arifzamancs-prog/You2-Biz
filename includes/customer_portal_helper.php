@@ -16,22 +16,48 @@ function ensure_customer_portal_columns($conn)
     }
 }
 
-function customer_portal_default_password_hash()
+function ensure_customer_access_table($conn)
 {
-    static $hash = null;
-
-    if($hash === null){
-        $hash = password_hash('123456', PASSWORD_DEFAULT);
-    }
-
-    return $hash;
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS customer_access_accounts (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            customer_id BIGINT UNSIGNED NOT NULL,
+            username VARCHAR(120) NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+            last_login DATETIME NULL,
+            created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_customer_access_username (user_id, username),
+            UNIQUE KEY uniq_customer_access_customer (user_id, customer_id),
+            KEY idx_customer_access_login (username, status)
+        )"
+    );
 }
 
-function customer_portal_password_hash($customer)
+function normalize_customer_access_username($username)
 {
-    $hash = trim((string)($customer['portal_password'] ?? ''));
+    $username = strtolower(trim((string)$username));
+    return preg_replace('/[^a-z0-9._-]/', '', $username);
+}
 
-    return $hash !== '' ? $hash : customer_portal_default_password_hash();
+function build_customer_access_username($username, $owner_id)
+{
+    return normalize_customer_access_username($username) . '@c' . (int)$owner_id;
+}
+
+function display_customer_access_username_base($username, $owner_id)
+{
+    $username = trim((string)$username);
+    $suffix = '@c' . (int)$owner_id;
+
+    if($suffix !== '@c0' && substr($username, -strlen($suffix)) === $suffix){
+        return substr($username, 0, -strlen($suffix));
+    }
+
+    return $username;
 }
 
 function customer_portal_logged_in()

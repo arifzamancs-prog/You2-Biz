@@ -20,6 +20,7 @@ $message = '';
 $message_type = 'success';
 $user_id = (int)$customer['user_id'];
 $customer_id = (int)$customer['id'];
+ensure_customer_access_table($conn);
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
 
@@ -57,10 +58,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $stmt = mysqli_prepare(
                 $conn,
                 "UPDATE customers
-                 SET address=?, photo=?, portal_password=?, portal_password_changed=1
+                 SET address=?, photo=?, portal_password_changed=1
                  WHERE id=? AND user_id=? AND status='active'"
             );
-            mysqli_stmt_bind_param($stmt, 'sssii', $address, $photo, $password_hash, $customer_id, $user_id);
+            mysqli_stmt_bind_param($stmt, 'ssii', $address, $photo, $customer_id, $user_id);
         }else{
             $stmt = mysqli_prepare(
                 $conn,
@@ -72,6 +73,19 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         }
 
         if(mysqli_stmt_execute($stmt)){
+            if($new_password !== ''){
+                $access_password_stmt = mysqli_prepare(
+                    $conn,
+                    "UPDATE customer_access_accounts
+                     SET password=?
+                     WHERE customer_id=?
+                     AND user_id=?"
+                );
+                if($access_password_stmt){
+                    mysqli_stmt_bind_param($access_password_stmt, 'sii', $password_hash, $customer_id, $user_id);
+                    mysqli_stmt_execute($access_password_stmt);
+                }
+            }
             $_SESSION['customer_portal_flash'] = [
                 'message' => 'Profile updated successfully.',
                 'type' => 'success',
