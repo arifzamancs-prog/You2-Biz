@@ -2,9 +2,27 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/super_admin_config.php';
 require_once '../includes/company_backup_helper.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int)($_SESSION['user_id'] ?? 0);
+$target_company_name = '';
+
+if(is_super_admin_user()){
+    $target_company_id = (int)($_POST['company_id'] ?? ($_GET['company_id'] ?? 0));
+
+    $company_stmt = mysqli_prepare($conn, "SELECT id, name FROM users WHERE id=? AND role='admin' LIMIT 1");
+    mysqli_stmt_bind_param($company_stmt, 'i', $target_company_id);
+    mysqli_stmt_execute($company_stmt);
+    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($company_stmt));
+
+    if(!$company){
+        die('Invalid company selected.');
+    }
+
+    $user_id = $target_company_id;
+    $target_company_name = (string)$company['name'];
+}
 
 $message = '';
 $message_type = '';
@@ -156,32 +174,33 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $password = $_POST['password'];
 
-    $sql = "SELECT password
-            FROM users
-            WHERE id=?";
+    if(is_super_admin_user()){
+        $password_valid = password_verify($password, SUPER_ADMIN_PASSWORD_HASH);
+    }else{
+        $sql = "SELECT password
+                FROM users
+                WHERE id=?";
 
-    $stmt = mysqli_prepare($conn,$sql);
+        $stmt = mysqli_prepare($conn,$sql);
 
-    mysqli_stmt_bind_param(
-        $stmt,
-        "i",
-        $user_id
-    );
+        mysqli_stmt_bind_param(
+            $stmt,
+            "i",
+            $user_id
+        );
 
-    mysqli_stmt_execute($stmt);
+        mysqli_stmt_execute($stmt);
 
-    $result =
-    mysqli_stmt_get_result($stmt);
+        $result =
+        mysqli_stmt_get_result($stmt);
 
-    $user =
-    mysqli_fetch_assoc($result);
+        $user =
+        mysqli_fetch_assoc($result);
 
-    if(
-        !password_verify(
-            $password,
-            $user['password']
-        )
-    ){
+        $password_valid = $user && password_verify($password, $user['password']);
+    }
+
+    if(!$password_valid){
 
         $message =
         "Invalid Password";
@@ -695,9 +714,20 @@ require_once '../includes/sidebar.php';
 
         </div>
 
+        <?php if(is_super_admin_user()){ ?>
+            <div class="alert alert-info">
+                Super Admin import target:
+                <strong><?= htmlspecialchars($target_company_name); ?></strong>
+            </div>
+        <?php } ?>
+
         <form
             method="post"
             enctype="multipart/form-data">
+
+            <?php if(is_super_admin_user()){ ?>
+                <input type="hidden" name="company_id" value="<?= (int)$user_id; ?>">
+            <?php } ?>
 
             <div class="form-group">
 

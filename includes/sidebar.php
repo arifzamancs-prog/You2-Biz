@@ -680,27 +680,50 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     <?php } ?>
                     <?php if(is_admin_user()){ ?>
                     <?php
-                    sidebar_tree(
-                        'Tools',
-                        'fas fa-tools',
-                        [
+                    $sidebar_tools_items = is_super_admin_user()
+                        ? [
                             [
-                                'href' => is_super_admin_user() ? '#' : app_path('tools/export.php'),
+                                'href' => '#',
                                 'label' => 'Export Data',
-                                'class' => is_super_admin_user() ? 'disabled text-muted' : '',
+                                'class' => 'disabled text-muted',
                             ],
                             [
-                                'href' => is_super_admin_user() ? '#' : app_path('tools/import.php'),
+                                'href' => '#',
                                 'label' => 'Import Data',
-                                'class' => is_super_admin_user() ? 'disabled text-muted' : '',
+                                'class' => 'disabled text-muted',
                             ],
                             [
-                                'href' => is_super_admin_user() ? '#' : app_path('tools/delete_data.php'),
+                                'href' => '#',
                                 'label' => 'Delete All Data',
-                                'class' => is_super_admin_user() ? 'disabled text-muted' : 'text-danger',
+                                'class' => 'disabled text-muted',
+                            ],
+                            [
+                                'href' => app_path('tools/database_export.php'),
+                                'label' => 'Full DB Export',
+                            ],
+                            [
+                                'href' => app_path('tools/database_import.php'),
+                                'label' => 'Full DB Import',
+                                'class' => 'text-danger',
                             ],
                         ]
-                    );
+                        : [
+                            [
+                                'href' => app_path('tools/export.php'),
+                                'label' => 'Export Data',
+                            ],
+                            [
+                                'href' => app_path('tools/import.php'),
+                                'label' => 'Import Data',
+                            ],
+                            [
+                                'href' => app_path('tools/delete_data.php'),
+                                'label' => 'Delete All Data',
+                                'class' => 'text-danger',
+                            ],
+                        ];
+
+                    sidebar_tree('Tools', 'fas fa-tools', $sidebar_tools_items);
                     ?>
                     <?php } ?>
                 <?php } ?>

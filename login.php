@@ -35,6 +35,12 @@ $auth_logo_url = branding_logo_url($conn);
 $auth_favicon_url = branding_favicon_url($conn);
 $auth_has_custom_logo = branding_has_custom_logo($conn);
 $auth_brand_icon_url = $auth_favicon_url !== '' ? $auth_favicon_url : $auth_logo_url;
+$auth_logo_display_url = branding_versioned_url($auth_logo_url);
+$auth_favicon_display_url = branding_versioned_url($auth_favicon_url);
+$auth_brand_icon_display_url = branding_versioned_url($auth_brand_icon_url);
+$auth_site_title = branding_site_title($conn);
+$auth_slogan = branding_auth_slogan($conn);
+$auth_registration_enabled = branding_registration_enabled($conn);
 
 $message = '';
 $message_type = 'danger';
@@ -169,6 +175,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     }
                 }
 
+                $single_user_company_id = single_user_license_company_id($conn);
+
+                if(
+                    $single_user_company_id > 0 &&
+                    (int)$owner_id !== $single_user_company_id
+                ){
+                    $message = 'This licence is assigned to another company.';
+                    $message_type = 'danger';
+                } else {
+
                 // A manager login is issued to a staff member.  Keep the staff
                 // record as the source of truth, so an inactive staff member
                 // cannot continue to use an otherwise active login account.
@@ -253,6 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     exit;
                 }
                 }
+                }
             }
 
         } else {
@@ -313,12 +330,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         content="width=device-width, initial-scale=1">
 
     <title>
-Login - You2 Biz
+Login - <?= htmlspecialchars($auth_site_title); ?>
     </title>
 
-    <link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($auth_favicon_url); ?>">
-    <link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($auth_favicon_url); ?>">
-    <link rel="apple-touch-icon" href="<?= htmlspecialchars($auth_favicon_url); ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
+    <link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
+    <link rel="apple-touch-icon" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
 
     <link rel="stylesheet"
           href="adminlte/plugins/fontawesome-free/css/all.min.css">
@@ -829,18 +846,18 @@ Login - You2 Biz
             <div>
                     <?php if($auth_has_custom_logo){ ?>
                 <div class="auth-logo auth-logo--image-only">
-<img src="<?= htmlspecialchars($auth_logo_url); ?>" alt="You2 Biz Logo" class="auth-logo-image">
+<img src="<?= htmlspecialchars($auth_logo_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Logo" class="auth-logo-image">
                 </div>
                     <?php }else{ ?>
                 <div class="auth-logo">
                         <span class="auth-logo-mark">
-<img src="<?= htmlspecialchars($auth_brand_icon_url); ?>" alt="You2 Biz Icon" class="auth-brand-icon">
+<img src="<?= htmlspecialchars($auth_brand_icon_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Icon" class="auth-brand-icon">
                         </span>
-<span class="auth-logo-title">You2 Biz</span>
+<span class="auth-logo-title"><?= htmlspecialchars($auth_site_title); ?></span>
                 </div>
                     <?php } ?>
 
-                <h1>Empower your business<br>with smarter financial control !</h1>
+                <h1><?= nl2br(htmlspecialchars($auth_slogan)); ?></h1>
             </div>
         </div>
 
@@ -848,14 +865,14 @@ Login - You2 Biz
             <div class="auth-mobile-hero">
                 <div class="auth-mobile-brand">
                     <?php if($auth_has_custom_logo){ ?>
-<img src="<?= htmlspecialchars($auth_logo_url); ?>" alt="You2 Biz Logo" class="auth-mobile-brand-image">
+<img src="<?= htmlspecialchars($auth_logo_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Logo" class="auth-mobile-brand-image">
                     <?php }else{ ?>
                         <div class="auth-mobile-brand-mark">
-<img src="<?= htmlspecialchars($auth_brand_icon_url); ?>" alt="You2 Biz Icon" class="auth-brand-icon">
+<img src="<?= htmlspecialchars($auth_brand_icon_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Icon" class="auth-brand-icon">
                         </div>
                     <?php } ?>
                     <div>
-<div class="auth-mobile-brand-title">You2 Biz</div>
+<div class="auth-mobile-brand-title"><?= htmlspecialchars($auth_site_title); ?></div>
 <div class="auth-mobile-brand-subtitle">Cafe management workspace</div>
                     </div>
                 </div>
@@ -919,10 +936,12 @@ Login - You2 Biz
                 </button>
             </form>
 
+            <?php if($auth_registration_enabled){ ?>
             <div class="text-center mt-4">
                 <span class="text-muted">New company?</span>
                 <a href="register.php" class="auth-link">Create an account</a>
             </div>
+            <?php } ?>
 
             <div class="auth-footer-note">
                 <strong>Powered by You2 Technologies</strong>

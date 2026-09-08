@@ -506,7 +506,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $company_id = (int)($_POST['company_id'] ?? 0);
     $form_action = $_POST['form_action'] ?? 'update_company';
 
-    if($form_action === 'create_company'){
+    if($form_action === 'update_single_user_license'){
+        $license_status = strtolower(trim((string)($_POST['license_status'] ?? 'inactive'))) === 'active'
+            ? 'active'
+            : 'inactive';
+        $license_company_id = (int)($_POST['license_company_id'] ?? 0);
+        $license_site_title = trim((string)($_POST['license_site_title'] ?? ''));
+        $license_slogan = trim((string)($_POST['license_slogan'] ?? ''));
+
+        if($license_status === 'active'){
+            if($license_company_id <= 0){
+                super_admin_flash_and_redirect('Please select a company for single user licence.', 'danger');
+            }
+
+            $company_check_stmt = mysqli_prepare(
+                $conn,
+                "SELECT id FROM users WHERE id=? AND role='admin' LIMIT 1"
+            );
+
+            mysqli_stmt_bind_param($company_check_stmt, 'i', $license_company_id);
+            mysqli_stmt_execute($company_check_stmt);
+            $company_check = mysqli_fetch_assoc(mysqli_stmt_get_result($company_check_stmt));
+
+            if(!$company_check){
+                super_admin_flash_and_redirect('Selected company was not found.', 'danger');
+            }
+
+            if($license_site_title === ''){
+                super_admin_flash_and_redirect('Site title is required.', 'danger');
+            }
+
+            if($license_slogan === ''){
+                super_admin_flash_and_redirect('Company slogan is required.', 'danger');
+            }
+        }
+
+        [$logo_ok, $logo_file, $logo_uploaded, $logo_error] = branding_upload_file(
+            $conn,
+            'license_logo',
+            'single_user_license_logo_file',
+            'single-user-logo',
+            false
+        );
+
+        if(!$logo_ok){
+            super_admin_flash_and_redirect($logo_error ?: 'Logo could not be uploaded.', 'danger');
+        }
+
+        if($license_status === 'active' && trim((string)$logo_file) === ''){
+            super_admin_flash_and_redirect('Logo is required for single user licence.', 'danger');
+        }
+
+        system_settings_save_many($conn, [
+            'single_user_license_status' => $license_status,
+            'single_user_license_company_id' => (string)$license_company_id,
+            'single_user_license_site_title' => $license_site_title,
+            'single_user_license_slogan' => $license_slogan,
+        ]);
+
+        if($license_status === 'active'){
+            $subscription_plan = 'Basic';
+            $subscription_status = 'active';
+            $company_status = 'active';
+            $subscription_expires_at = null;
+
+            $license_subscription_stmt = mysqli_prepare(
+                $conn,
+                "UPDATE users
+                 SET status=?,
+                     subscription_plan=?,
+                     subscription_status=?,
+                     max_managers=?,
+                     max_products=?,
+                     max_invoices_monthly=?,
+                     subscription_expires_at=?,
+                     table_system_enabled=1
+                 WHERE id=?
+                 AND role='admin'
+                 LIMIT 1"
+            );
+
+            if($license_subscription_stmt){
+                mysqli_stmt_bind_param(
+                    $license_subscription_stmt,
+                    'sssiiisi',
+                    $company_status,
+                    $subscription_plan,
+                    $subscription_status,
+                    $unlimited_limit_value,
+                    $unlimited_limit_value,
+                    $unlimited_limit_value,
+                    $subscription_expires_at,
+                    $license_company_id
+                );
+                mysqli_stmt_execute($license_subscription_stmt);
+            }
+
+            mysqli_query(
+                $conn,
+                "UPDATE pricing_plan_requests
+                 SET request_status='approved'
+                 WHERE admin_user_id={$license_company_id}
+                 AND request_status='waiting'"
+            );
+        }
+
+        super_admin_flash_and_redirect(
+            $license_status === 'active'
+                ? 'Single user licence activated successfully.'
+                : 'Single user licence inactive. Default public branding restored.',
+            'success'
+        );
+    }elseif($form_action === 'create_company'){
         $company_name = trim((string)($_POST['company_name'] ?? ''));
         $company_email = trim((string)($_POST['company_email'] ?? ''));
         $company_phone = trim((string)($_POST['company_phone'] ?? ''));
@@ -982,6 +1093,13 @@ $sql = "SELECT
         ORDER BY u.id DESC";
 
 $companies = mysqli_query($conn, $sql);
+$license_companies = mysqli_query($conn, "SELECT id, name, email FROM users WHERE role='admin' ORDER BY name ASC");
+$single_user_license_status = system_setting($conn, 'single_user_license_status', 'inactive');
+$single_user_license_company_id = (int)system_setting($conn, 'single_user_license_company_id', '0');
+$single_user_license_logo_file = system_setting($conn, 'single_user_license_logo_file', '');
+$single_user_license_site_title = system_setting($conn, 'single_user_license_site_title', '');
+$single_user_license_slogan = system_setting($conn, 'single_user_license_slogan', '');
+$single_user_license_logo_url = branding_file_url($single_user_license_logo_file, '');
 $timezone_options = company_timezone_options();
 $date_format_options = company_date_format_options();
 
@@ -1098,7 +1216,18 @@ require_once '../includes/sidebar.php';
             Super Admin
         </h3>
         <div class="card-tools">
-            <button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#createCompanyModal">
+            <?php if($single_user_license_status === 'active'){ ?>
+                <span class="font-weight-bold text-danger mr-2">Single User Licence Activated</span>
+            <?php } ?>
+            <button type="button" class="btn btn-success btn-sm mr-1" data-toggle="modal" data-target="#singleUserLicenseModal">
+                <i class="fas fa-user-shield"></i> Single User Licence
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-toggle="modal"
+                data-target="#createCompanyModal"
+                <?= $single_user_license_status === 'active' ? 'disabled title="Single user licence active thakle new company create kora jabe na."' : ''; ?>>
                 <i class="fas fa-plus"></i> Create Company
             </button>
         </div>
@@ -1117,10 +1246,27 @@ require_once '../includes/sidebar.php';
                 </tr>
             </thead>
             <tbody>
-                <?php while($row = mysqli_fetch_assoc($companies)){ ?>
+                <?php while($row = mysqli_fetch_assoc($companies)){
+                    $is_single_user_license_company = $single_user_license_status === 'active'
+                        && $single_user_license_company_id === (int)$row['id'];
+
+                    if($single_user_license_status === 'active' && !$is_single_user_license_company){
+                        continue;
+                    }
+                ?>
                     <tr>
                         <td>
-                            <strong><?= htmlspecialchars($row['name']); ?></strong><br>
+                            <strong>
+                                <?= htmlspecialchars($row['name']); ?>
+                                <?php if($is_single_user_license_company){ ?>
+                                    <span class="text-warning ml-1" title="Single User Licence Activated">
+                                        <i class="fas fa-crown"></i>
+                                    </span>
+                                    <span class="text-info ml-1" title="Licensed Company">
+                                        <i class="fas fa-gem"></i>
+                                    </span>
+                                <?php } ?>
+                            </strong><br>
                             <small class="text-muted">
                                 Registered: <?= htmlspecialchars(app_datetime($row['created_at'])); ?>
                             </small><br>
@@ -1396,11 +1542,97 @@ require_once '../includes/sidebar.php';
                                     </button>
                                 </div>
                             </form>
+
+                            <div class="border-top mt-3 pt-3">
+                                <strong class="d-block mb-2">
+                                    <i class="fas fa-tools"></i> Company Tools
+                                </strong>
+                                <a
+                                    href="<?= htmlspecialchars(app_path('tools/export.php?company_id=' . (int)$row['id'])); ?>"
+                                    class="btn btn-outline-success btn-sm mb-1">
+                                    <i class="fas fa-file-export"></i> Export
+                                </a>
+                                <a
+                                    href="<?= htmlspecialchars(app_path('tools/import.php?company_id=' . (int)$row['id'])); ?>"
+                                    class="btn btn-outline-primary btn-sm mb-1">
+                                    <i class="fas fa-file-import"></i> Import
+                                </a>
+                                <a
+                                    href="<?= htmlspecialchars(app_path('tools/delete_data.php?company_id=' . (int)$row['id'])); ?>"
+                                    class="btn btn-outline-danger btn-sm mb-1">
+                                    <i class="fas fa-trash"></i> Delete All Data
+                                </a>
+                            </div>
                         </td>
                     </tr>
                 <?php } ?>
             </tbody>
         </table>
+    </div>
+</div>
+
+<div class="modal fade" id="singleUserLicenseModal" tabindex="-1" role="dialog" aria-labelledby="singleUserLicenseModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <form method="post" enctype="multipart/form-data" class="modal-content">
+            <input type="hidden" name="form_action" value="update_single_user_license">
+            <div class="modal-header">
+                <h5 class="modal-title" id="singleUserLicenseModalLabel">Single User Licence</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    Active korle selected company branding login/forgot page e use hobe, site favicon/title replace hobe, ebong public registration bondho thakbe.
+                </div>
+
+                <div class="form-group">
+                    <label>Status</label>
+                    <select name="license_status" class="form-control">
+                        <option value="active" <?= $single_user_license_status === 'active' ? 'selected' : ''; ?>>Active</option>
+                        <option value="inactive" <?= $single_user_license_status !== 'active' ? 'selected' : ''; ?>>Inactive</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Company</label>
+                    <select name="license_company_id" class="form-control">
+                        <option value="">Select Company</option>
+                        <?php while($license_company = mysqli_fetch_assoc($license_companies)){ ?>
+                            <option value="<?= (int)$license_company['id']; ?>" <?= $single_user_license_company_id === (int)$license_company['id'] ? 'selected' : ''; ?>>
+                                <?= htmlspecialchars($license_company['name'] . ' - ' . $license_company['email']); ?>
+                            </option>
+                        <?php } ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Logo</label>
+                    <?php if($single_user_license_logo_url !== ''){ ?>
+                        <div class="mb-2">
+                            <img src="<?= htmlspecialchars($single_user_license_logo_url); ?>" alt="Single user licence logo" style="max-height:72px;max-width:220px;">
+                        </div>
+                    <?php } ?>
+                    <input type="file" name="license_logo" class="form-control-file" accept=".png,.jpg,.jpeg,.webp">
+                    <small class="text-muted">Max 2MB. Ei logo login/forgot left side main logo ebong full site favicon hisebe use hobe.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Site Title</label>
+                    <input type="text" name="license_site_title" class="form-control" value="<?= htmlspecialchars($single_user_license_site_title); ?>" placeholder="Example: ExploreX ERP">
+                </div>
+
+                <div class="form-group mb-0">
+                    <label>Company Slogan</label>
+                    <textarea name="license_slogan" class="form-control" rows="3" placeholder="Company slogan"><?= htmlspecialchars($single_user_license_slogan); ?></textarea>
+                    <small class="text-muted">Login/Forgot Password page er slogan replace korbe.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> Save Licence</button>
+            </div>
+        </form>
     </div>
 </div>
 

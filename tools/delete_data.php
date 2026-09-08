@@ -6,7 +6,24 @@ require_once '../includes/super_admin_config.php';
 require_once '../includes/branding_helper.php';
 require_once '../includes/company_backup_helper.php';
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int)($_SESSION['user_id'] ?? 0);
+$target_company_name = '';
+
+if(is_super_admin_user()){
+    $target_company_id = (int)($_POST['company_id'] ?? ($_GET['company_id'] ?? 0));
+
+    $company_stmt = mysqli_prepare($conn, "SELECT id, name FROM users WHERE id=? AND role='admin' LIMIT 1");
+    mysqli_stmt_bind_param($company_stmt, 'i', $target_company_id);
+    mysqli_stmt_execute($company_stmt);
+    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($company_stmt));
+
+    if(!$company){
+        die('Invalid company selected.');
+    }
+
+    $user_id = $target_company_id;
+    $target_company_name = (string)$company['name'];
+}
 
 $message = '';
 $message_type = '';
@@ -197,7 +214,7 @@ function delete_company_business_data($conn, $company_id)
     }
 }
 
-if($_SERVER['REQUEST_METHOD']=='POST' && !is_super_admin_user()){
+if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $password = $_POST['password'] ?? '';
 
@@ -210,9 +227,7 @@ if($_SERVER['REQUEST_METHOD']=='POST' && !is_super_admin_user()){
 
         $password_valid = false;
 
-        if(
-            is_super_admin_user()
-        ){
+        if(is_super_admin_user()){
 
             $password_valid =
             password_verify(
@@ -346,13 +361,18 @@ require_once '../includes/sidebar.php';
 
         <?php if(is_super_admin_user()){ ?>
 
-            <div class="alert alert-secondary">
-                This option is inactive for Super Admin.
+            <div class="alert alert-info">
+                Super Admin delete target:
+                <strong><?= htmlspecialchars($target_company_name); ?></strong>
             </div>
 
         <?php } ?>
 
         <form method="post">
+
+            <?php if(is_super_admin_user()){ ?>
+                <input type="hidden" name="company_id" value="<?= (int)$user_id; ?>">
+            <?php } ?>
 
             <div class="form-group">
 
@@ -364,7 +384,6 @@ require_once '../includes/sidebar.php';
                     type="password"
                     name="password"
                     class="form-control"
-                    <?= is_super_admin_user() ? 'disabled' : ''; ?>
                     required>
 
             </div>
@@ -378,8 +397,7 @@ require_once '../includes/sidebar.php';
                         name="confirm"
                         value="1"
                         class="custom-control-input"
-                        id="confirmDelete"
-                        <?= is_super_admin_user() ? 'disabled' : ''; ?>>
+                        id="confirmDelete">
 
                     <label
                         class="custom-control-label"
@@ -395,8 +413,7 @@ require_once '../includes/sidebar.php';
 
             <button
                 type="submit"
-                class="btn btn-danger"
-                <?= is_super_admin_user() ? 'disabled' : ''; ?>>
+                class="btn btn-danger">
 
                 <i class="fas fa-trash"></i>
 

@@ -11,6 +11,11 @@ $auth_logo_url = branding_logo_url($conn);
 $auth_favicon_url = branding_favicon_url($conn);
 $auth_has_custom_logo = branding_has_custom_logo($conn);
 $auth_brand_icon_url = $auth_favicon_url !== '' ? $auth_favicon_url : $auth_logo_url;
+$auth_logo_display_url = branding_versioned_url($auth_logo_url);
+$auth_favicon_display_url = branding_versioned_url($auth_favicon_url);
+$auth_brand_icon_display_url = branding_versioned_url($auth_brand_icon_url);
+$auth_site_title = branding_site_title($conn);
+$auth_slogan = branding_auth_slogan($conn);
 
 $message = '';
 $message_type = '';
@@ -26,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     }else{
 
-        $sql = "SELECT id, name, email, status
+        $sql = "SELECT id, owner_id, role, name, email, status
                 FROM users
                 WHERE username=?
                 OR email=?
@@ -46,6 +51,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_execute($stmt);
         $result = mysqli_stmt_get_result($stmt);
         $user = mysqli_fetch_assoc($result);
+
+        $single_user_company_id = single_user_license_company_id($conn);
+        $user_owner_id = $user
+            ? (int)($user['owner_id'] ?: $user['id'])
+            : 0;
+
+        if(
+            $user &&
+            $single_user_company_id > 0 &&
+            $user_owner_id !== $single_user_company_id
+        ){
+            $user = null;
+        }
 
         if($user && $user['status'] === 'active'){
 
@@ -135,10 +153,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Forgot Password - You2 Biz</title>
-<link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($auth_favicon_url); ?>">
-<link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($auth_favicon_url); ?>">
-<link rel="apple-touch-icon" href="<?= htmlspecialchars($auth_favicon_url); ?>">
+<title>Forgot Password - <?= htmlspecialchars($auth_site_title); ?></title>
+<link rel="icon" type="image/png" sizes="32x32" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
+<link rel="shortcut icon" type="image/png" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
+<link rel="apple-touch-icon" href="<?= htmlspecialchars($auth_favicon_display_url); ?>">
 <link rel="stylesheet" href="adminlte/plugins/fontawesome-free/css/all.min.css">
 <link rel="stylesheet" href="adminlte/dist/css/adminlte.min.css">
 <style>
@@ -543,18 +561,18 @@ body.auth-page{
             <div>
                 <?php if($auth_has_custom_logo){ ?>
                     <div class="auth-logo auth-logo--image-only">
-                        <img src="<?= htmlspecialchars($auth_logo_url); ?>" alt="You2 Biz Logo" class="auth-logo-image">
+                        <img src="<?= htmlspecialchars($auth_logo_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Logo" class="auth-logo-image">
                     </div>
                 <?php }else{ ?>
                     <div class="auth-logo">
                         <span class="auth-logo-mark">
-                            <img src="<?= htmlspecialchars($auth_brand_icon_url); ?>" alt="You2 Biz Icon" class="auth-brand-icon">
+                            <img src="<?= htmlspecialchars($auth_brand_icon_display_url); ?>" alt="<?= htmlspecialchars($auth_site_title); ?> Icon" class="auth-brand-icon">
                         </span>
-                        <span class="auth-logo-title">You2 Biz</span>
+                        <span class="auth-logo-title"><?= htmlspecialchars($auth_site_title); ?></span>
                     </div>
                 <?php } ?>
 
-                <h1>Empower your business<br>with smarter financial control !</h1>
+                <h1><?= nl2br(htmlspecialchars($auth_slogan)); ?></h1>
             </div>
         </div>
 

@@ -23,6 +23,99 @@ function branding_default_favicon_url()
     return app_path('assets/you2biz-favicon.png');
 }
 
+function single_user_license_active($conn = null)
+{
+    if(!($conn instanceof mysqli)){
+        return false;
+    }
+
+    return strtolower(trim((string)system_setting($conn, 'single_user_license_status', 'inactive'))) === 'active';
+}
+
+function single_user_license_logo_file($conn = null)
+{
+    if(!single_user_license_active($conn)){
+        return '';
+    }
+
+    return trim((string)system_setting($conn, 'single_user_license_logo_file', ''));
+}
+
+function single_user_license_company_id($conn = null)
+{
+    if(!single_user_license_active($conn)){
+        return 0;
+    }
+
+    return (int)system_setting($conn, 'single_user_license_company_id', '0');
+}
+
+function single_user_license_company_avatar_url($conn = null)
+{
+    $company_id = single_user_license_company_id($conn);
+
+    if($company_id <= 0 || !($conn instanceof mysqli)){
+        return '';
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "SELECT avatar FROM users WHERE id=? AND role='admin' LIMIT 1"
+    );
+
+    if(!$stmt){
+        return '';
+    }
+
+    mysqli_stmt_bind_param($stmt, 'i', $company_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    $avatar = basename(trim((string)($row['avatar'] ?? '')));
+
+    if($avatar === ''){
+        return '';
+    }
+
+    $path = branding_avatar_upload_dir_path() . '/' . $avatar;
+
+    if(!is_file($path)){
+        return '';
+    }
+
+    return app_path('uploads/avatars/' . rawurlencode($avatar));
+}
+
+function branding_site_title($conn = null)
+{
+    if(single_user_license_active($conn)){
+        $title = trim((string)system_setting($conn, 'single_user_license_site_title', ''));
+
+        if($title !== ''){
+            return $title;
+        }
+    }
+
+    return 'You2 Biz';
+}
+
+function branding_auth_slogan($conn = null)
+{
+    if(single_user_license_active($conn)){
+        $slogan = trim((string)system_setting($conn, 'single_user_license_slogan', ''));
+
+        if($slogan !== ''){
+            return $slogan;
+        }
+    }
+
+    return 'Empower your business with smarter financial control !';
+}
+
+function branding_registration_enabled($conn = null)
+{
+    return !single_user_license_active($conn);
+}
+
 function ensure_branding_upload_dir()
 {
     $dir = branding_upload_dir_path();
@@ -51,12 +144,37 @@ function branding_file_url($filename, $default_url)
     return branding_upload_dir_url() . '/' . rawurlencode(basename($filename));
 }
 
+function branding_versioned_url($url)
+{
+    $url = trim((string)$url);
+
+    if($url === ''){
+        return '';
+    }
+
+    $path = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/\\') . (string)parse_url($url, PHP_URL_PATH);
+    $version = is_file($path) ? (string)filemtime($path) : (string)time();
+    $separator = str_contains($url, '?') ? '&' : '?';
+
+    return $url . $separator . 'v=' . rawurlencode($version);
+}
+
 function branding_logo_url($conn = null)
 {
     $filename = '';
 
     if($conn instanceof mysqli){
-        $filename = system_setting($conn, 'site_logo_file', '');
+        $filename = single_user_license_logo_file($conn);
+
+        if($filename === ''){
+            $company_avatar_url = single_user_license_company_avatar_url($conn);
+
+            if($company_avatar_url !== ''){
+                return $company_avatar_url;
+            }
+
+            $filename = system_setting($conn, 'site_logo_file', '');
+        }
     }
 
     return branding_file_url($filename, branding_default_logo_url());
@@ -67,7 +185,17 @@ function branding_favicon_url($conn = null)
     $filename = '';
 
     if($conn instanceof mysqli){
-        $filename = system_setting($conn, 'site_favicon_file', '');
+        $filename = single_user_license_logo_file($conn);
+
+        if($filename === ''){
+            $company_avatar_url = single_user_license_company_avatar_url($conn);
+
+            if($company_avatar_url !== ''){
+                return $company_avatar_url;
+            }
+
+            $filename = system_setting($conn, 'site_favicon_file', '');
+        }
     }
 
     return branding_file_url($filename, branding_default_favicon_url());
