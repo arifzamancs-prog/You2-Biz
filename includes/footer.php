@@ -153,12 +153,26 @@ if (isset($page_script)) {
 }
 </style>
 
-<?php if(function_exists('can_delete_company_records') && !can_delete_company_records()){ ?>
+<?php if(function_exists('is_manager_user') && is_manager_user()){ ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const deleteSelector = '[title*="Delete" i], [aria-label*="Delete" i], input[type="submit"][value*="Delete" i], button[value*="delete" i]';
+    const restrictedSelector = [
+        '[title*="Edit" i]',
+        '[aria-label*="Edit" i]',
+        'a[href*="edit" i]',
+        '[title*="Delete" i]',
+        '[aria-label*="Delete" i]',
+        'a[href*="delete" i]',
+        'a[href*="del=" i]',
+        'input[type="submit"][value*="Edit" i]',
+        'input[type="submit"][value*="Delete" i]',
+        'button[value*="edit" i]',
+        'button[value*="delete" i]',
+        'button[name="action"][value*="edit" i]',
+        'button[name="action"][value*="delete" i]'
+    ].join(',');
 
-    document.querySelectorAll(deleteSelector).forEach(function (element) {
+    document.querySelectorAll(restrictedSelector).forEach(function (element) {
         element.remove();
     });
 });

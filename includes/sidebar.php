@@ -359,12 +359,6 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
                     ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
                 ];
-                if(is_admin_user()){
-                    array_splice($sidebar_staff_items, 2, 0, [[
-                        'href' => app_path('staff/attendance_settings.php'),
-                        'label' => 'Attendance Settings',
-                    ]]);
-                }
                 if(!is_manager_user() || manager_has_permission('staff')){
                     sidebar_tree('Staff Manage', 'fas fa-user-tie', $sidebar_staff_items);
                 }
@@ -669,6 +663,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 
                     <?php if(is_admin_user()){ ?>
                         <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
+                        <?php sidebar_item(app_path('staff/attendance_settings.php'), 'Attendance Settings', 'fas fa-user-clock'); ?>
                     <?php } ?>
                     <?php if(is_admin_user()){ ?>
                         <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>

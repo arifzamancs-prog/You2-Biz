@@ -266,25 +266,28 @@ function block_manager_restricted_actions()
     $path = $requested_path;
     $file = basename($path);
 
-    // Delete protection is checked before permission routing, because several
-    // modules perform their deletion through an index page or an AJAX action.
-    $delete_action = false;
+    // Edit/delete protection is checked before permission routing, because
+    // several modules perform those changes through an index page or AJAX.
+    $restricted_action = false;
     foreach(['action', 'form_action', 'staff_action'] as $action_key){
         $action_value = strtolower(trim((string)($_POST[$action_key] ?? $_GET[$action_key] ?? '')));
-        if($action_value !== '' && str_contains($action_value, 'delete')){
-            $delete_action = true;
+        if($action_value !== '' && (str_contains($action_value, 'delete') || str_contains($action_value, 'edit'))){
+            $restricted_action = true;
             break;
         }
     }
 
-    // A staff member may remove only their own lead. The lead endpoint applies
-    // the ownership condition; every other delete action remains admin-only.
-    $is_own_lead_delete = $path === 'lead_management/index.php'
-        && isset($_GET['delete'])
-        && manager_has_permission('leads');
-
-    if((isset($_GET['delete']) || isset($_POST['delete']) || str_contains($file, 'delete') || $delete_action) && !$is_own_lead_delete){
-        header("Location: " . app_path('dashboard.php?error=Only the company administrator can delete records'));
+    if(
+        isset($_GET['delete']) ||
+        isset($_POST['delete']) ||
+        isset($_GET['edit']) ||
+        isset($_POST['edit']) ||
+        str_contains($file, 'delete') ||
+        str_contains($file, 'edit') ||
+        str_contains($file, 'update') ||
+        $restricted_action
+    ){
+        header("Location: " . app_path('dashboard.php?error=Only the company administrator can edit or delete records'));
         exit;
     }
 
