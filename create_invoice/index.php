@@ -14,6 +14,7 @@ $created_by_user_id = (int)($_SESSION['login_user_id'] ?? $user_id);
 ensure_project_package_tables($conn);
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
+$project_package_labels = project_package_labels($conn, $user_id);
 
 $invoice_types = booking_invoice_types($conn, $user_id);
 $type = '';
@@ -47,7 +48,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $final_amount = $charge_calculation['total'];
 
     if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type === 'booking' && $numeric_total_price <= 0)){
-        $message = 'Customer, Project, Package, Payment Type, Date and valid Amount are required.';
+        $message = 'Customer, ' . $project_package_labels['project'] . ', ' . $project_package_labels['package'] . ', Payment Type, Date and valid Amount are required.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
 
@@ -221,9 +222,9 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-3">
                     <div class="form-group">
-                        <label>Project</label>
+                        <label><?= htmlspecialchars($project_package_labels['project']); ?></label>
                         <select id="project_id" name="project_id" class="form-control" required>
-                            <option value="">Select Project</option>
+                            <option value=""><?= htmlspecialchars($project_package_labels['project_select']); ?></option>
                             <?php foreach($projects as $project){ ?>
                                 <option value="<?= (int)$project['id']; ?>" <?= $project_id === (int)$project['id'] ? 'selected' : ''; ?>>
                                     <?= htmlspecialchars($project['project_name']); ?>
@@ -235,9 +236,9 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-3">
                     <div class="form-group">
-                        <label>Package</label>
+                        <label><?= htmlspecialchars($project_package_labels['package']); ?></label>
                         <select id="package_id" name="package_id" class="form-control" required>
-                            <option value="">Select Package</option>
+                            <option value="">Select <?= htmlspecialchars($project_package_labels['package']); ?></option>
                             <?php foreach($packages as $package){ ?>
                                 <option
                                     value="<?= (int)$package['id']; ?>"
@@ -324,8 +325,8 @@ require_once '../includes/sidebar.php';
                     <th>Invoice No</th>
                     <th>Date</th>
                     <th>Customer</th>
-                    <th>Project</th>
-                    <th>Package</th>
+                    <th><?= htmlspecialchars($project_package_labels['project']); ?></th>
+                    <th><?= htmlspecialchars($project_package_labels['package']); ?></th>
                     <th>Amount</th>
                     <th>Status</th>
                     <th width="90">Action</th>
@@ -342,8 +343,8 @@ require_once '../includes/sidebar.php';
                             <td><?= htmlspecialchars($invoice['invoice_no']); ?></td>
                             <td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td>
                             <td><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td>
-                            <td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing Project #' . (int)$invoice['project_id'])); ?></td>
-                            <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td>
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
                             <td><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($invoice['status'] ?? 'pending')); ?></span></td>
                             <td>

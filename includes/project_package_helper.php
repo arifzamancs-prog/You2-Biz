@@ -2,6 +2,8 @@
 
 function ensure_project_package_tables($conn)
 {
+    project_package_ensure_company_type_column($conn);
+
     mysqli_query(
         $conn,
         "CREATE TABLE IF NOT EXISTS projects (
@@ -36,6 +38,84 @@ function ensure_project_package_tables($conn)
             INDEX idx_packages_project (project_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+}
+
+function project_package_ensure_company_type_column($conn)
+{
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'company_type'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name");
+    }
+}
+
+function project_package_company_type($conn, $user_id)
+{
+    project_package_ensure_company_type_column($conn);
+
+    $user_id = (int)$user_id;
+    if($user_id <= 0){
+        return 'Housing';
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "SELECT company_type
+         FROM users
+         WHERE id=?
+         LIMIT 1"
+    );
+    if(!$stmt){
+        return 'Housing';
+    }
+
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+    return (($row['company_type'] ?? 'Housing') === 'Others') ? 'Others' : 'Housing';
+}
+
+function project_package_labels($conn, $user_id)
+{
+    if(project_package_company_type($conn, $user_id) === 'Others'){
+        return [
+            'module' => 'Service & Category',
+            'project' => 'Service Category',
+            'project_list' => 'Service Category List',
+            'project_name' => 'Service Category Name',
+            'project_add' => 'Add Service Category',
+            'project_save' => 'Save Service Category',
+            'project_update' => 'Update Service Category',
+            'project_select' => 'Select Service Category',
+            'project_empty' => 'No service category found yet.',
+            'package' => 'Service',
+            'package_list' => 'Service List',
+            'package_name' => 'Service Name',
+            'package_add' => 'Add Service',
+            'package_save' => 'Save Service',
+            'package_update' => 'Update Service',
+            'package_empty' => 'No service found yet.',
+        ];
+    }
+
+    return [
+        'module' => 'Project & Package',
+        'project' => 'Project',
+        'project_list' => 'Project List',
+        'project_name' => 'Project Name',
+        'project_add' => 'Add Project',
+        'project_save' => 'Save Project',
+        'project_update' => 'Update Project',
+        'project_select' => 'Select Project',
+        'project_empty' => 'No project found yet.',
+        'package' => 'Package',
+        'package_list' => 'Package List',
+        'package_name' => 'Package Name',
+        'package_add' => 'Add Package',
+        'package_save' => 'Save Package',
+        'package_update' => 'Update Package',
+        'package_empty' => 'No package found yet.',
+    ];
 }
 
 function project_has_transactions($conn, $project_id, $user_id)

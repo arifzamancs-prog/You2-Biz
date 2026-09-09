@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/manager_access_helper.php';
 require_once '../includes/customer_portal_helper.php';
 require_once '../includes/staff_helper.php';
+require_once '../includes/project_package_helper.php';
 
 require_admin_user();
 ensure_manager_access_columns($conn);
@@ -12,6 +13,7 @@ ensure_customer_access_table($conn);
 ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+$project_package_labels = project_package_labels($conn, $user_id);
 $message = '';
 $message_type = '';
 $edit_manager = null;
@@ -311,7 +313,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
         $admin_row = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_password_stmt));
 
         if(!$admin_row || !password_verify($admin_password, $admin_row['password'])){
-            user_management_flash_and_redirect('Admin Password is required to grant Company Dashboard, Project & Package, or Admin access.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
+            user_management_flash_and_redirect('Admin Password is required to grant Company Dashboard, ' . $project_package_labels['module'] . ', or Admin access.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
         }
     }
 
@@ -743,7 +745,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions() as $permission_key => $permission_label){ ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ ?>
                                 <div class="col-md-6 mb-2">
                                     <div class="custom-control custom-checkbox">
                                         <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>
@@ -757,7 +759,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group" id="sensitive-permission-password" style="display:none;">
                         <label>Admin Password</label>
                         <input type="password" name="admin_password" class="form-control" style="max-width: 280px;" autocomplete="current-password">
-                        <small class="text-muted">Required for Company Dashboard, Project &amp; Package, or Admin access.</small>
+                        <small class="text-muted">Required for Company Dashboard, <?= htmlspecialchars($project_package_labels['module']); ?>, or Admin access.</small>
                     </div>
 
                     <div class="form-group">

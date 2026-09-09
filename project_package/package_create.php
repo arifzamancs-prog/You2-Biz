@@ -8,6 +8,7 @@ require_admin_user();
 ensure_project_package_tables($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+$labels = project_package_labels($conn, $user_id);
 $message = '';
 $project_id = (int)($_POST['project_id'] ?? 0);
 $package_name = trim($_POST['package_name'] ?? '');
@@ -34,7 +35,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $price_value = is_numeric($price) ? (float)$price : -1;
 
     if($project_id <= 0 || $package_name === '' || $price_value < 0){
-        $message = 'Project, Package Name and valid Price are required.';
+        $message = $labels['project'] . ', ' . $labels['package_name'] . ' and valid Price are required.';
     } else {
         if($message === ''){
             $insert_stmt = mysqli_prepare(
@@ -71,7 +72,7 @@ require_once '../includes/sidebar.php';
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Add Package</h3>
+        <h3 class="card-title"><?= htmlspecialchars($labels['package_add']); ?></h3>
     </div>
 
     <div class="card-body">
@@ -81,9 +82,9 @@ require_once '../includes/sidebar.php';
 
         <form method="post">
             <div class="form-group">
-                <label>Project</label>
+                <label><?= htmlspecialchars($labels['project']); ?></label>
                 <select name="project_id" class="form-control" required>
-                    <option value="">Select Project</option>
+                    <option value=""><?= htmlspecialchars($labels['project_select']); ?></option>
                     <?php foreach($projects as $project){ ?>
                         <option value="<?= (int)$project['id']; ?>" <?= $project_id === (int)$project['id'] ? 'selected' : ''; ?>>
                             <?= htmlspecialchars($project['project_name']); ?>
@@ -93,7 +94,7 @@ require_once '../includes/sidebar.php';
             </div>
 
             <div class="form-group">
-                <label>Package Name</label>
+                <label><?= htmlspecialchars($labels['package_name']); ?></label>
                 <input type="text" name="package_name" class="form-control" value="<?= htmlspecialchars($package_name); ?>" required>
             </div>
 
@@ -107,7 +108,7 @@ require_once '../includes/sidebar.php';
                 <textarea name="description" class="form-control" rows="4"><?= htmlspecialchars($description); ?></textarea>
             </div>
 
-            <button type="submit" class="btn btn-primary">Save Package</button>
+            <button type="submit" class="btn btn-primary"><?= htmlspecialchars($labels['package_save']); ?></button>
             <a href="packages.php" class="btn btn-secondary">Back</a>
         </form>
     </div>

@@ -27,6 +27,16 @@ ensure_signup_message_settings_table($conn);
 ensure_restaurant_tables_table($conn);
 printing_ensure_column($conn);
 
+function ensure_super_admin_company_type_column($conn)
+{
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'company_type'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name");
+    }
+}
+
+ensure_super_admin_company_type_column($conn);
+
 function ensure_pricing_plan_request_table($conn)
 {
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS pricing_plan_requests (
@@ -506,7 +516,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $company_id = (int)($_POST['company_id'] ?? 0);
     $form_action = $_POST['form_action'] ?? 'update_company';
 
-    if($form_action === 'update_single_user_license'){
+    if($form_action === 'update_company_type'){
+        $company_type = trim((string)($_POST['company_type'] ?? 'Housing'));
+        $company_type = $company_type === 'Others' ? 'Others' : 'Housing';
+
+        if($company_id <= 0){
+            super_admin_flash_and_redirect('Invalid company selected.', 'danger');
+        }
+
+        $type_stmt = mysqli_prepare(
+            $conn,
+            "UPDATE users
+             SET company_type=?
+             WHERE id=?
+             AND role='admin'
+             LIMIT 1"
+        );
+
+        if(!$type_stmt){
+            super_admin_flash_and_redirect('Company type update failed.', 'danger');
+        }
+
+        mysqli_stmt_bind_param($type_stmt, 'si', $company_type, $company_id);
+
+        if(mysqli_stmt_execute($type_stmt)){
+            super_admin_flash_and_redirect('Company type updated successfully.', 'success');
+        }
+
+        super_admin_flash_and_redirect('Company type update failed.', 'danger');
+    }elseif($form_action === 'update_single_user_license'){
         $license_status = strtolower(trim((string)($_POST['license_status'] ?? 'inactive'))) === 'active'
             ? 'active'
             : 'inactive';
@@ -1039,6 +1077,7 @@ if($waiting_pricing_requests_result){
 $sql = "SELECT
             u.id,
             u.name,
+            u.company_type,
             u.email,
             u.phone,
             u.email_verified,
@@ -1072,6 +1111,7 @@ $sql = "SELECT
         GROUP BY
             u.id,
             u.name,
+            u.company_type,
             u.email,
             u.phone,
             u.email_verified,
@@ -1273,6 +1313,21 @@ require_once '../includes/sidebar.php';
                             <small class="text-muted">
                                 Last login: <?= htmlspecialchars(app_datetime($row['last_login'] ?? null)); ?>
                             </small>
+                            <form method="post" class="mt-2">
+                                <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
+                                <input type="hidden" name="form_action" value="update_company_type">
+                                <label class="small text-muted mb-1">Company Type</label>
+                                <div class="input-group input-group-sm">
+                                    <?php $company_type = ($row['company_type'] ?? 'Housing') === 'Others' ? 'Others' : 'Housing'; ?>
+                                    <select name="company_type" class="form-control">
+                                        <option value="Housing" <?= $company_type === 'Housing' ? 'selected' : ''; ?>>Housing</option>
+                                        <option value="Others" <?= $company_type === 'Others' ? 'selected' : ''; ?>>Others</option>
+                                    </select>
+                                    <div class="input-group-append">
+                                        <button type="submit" class="btn btn-primary">Update</button>
+                                    </div>
+                                </div>
+                            </form>
                         </td>
                         <td>
                             <form method="post" class="contact-edit-form mb-2">

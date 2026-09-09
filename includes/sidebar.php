@@ -4,10 +4,10 @@ require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/restaurant_table_helper.php';
 require_once __DIR__ . '/staff_incentive_helper.php';
+require_once __DIR__ . '/project_package_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
-
 if(is_manager_user() && isset($conn) && $conn instanceof mysqli){
     $company_user_id = (int)($_SESSION['user_id'] ?? 0);
     $login_user_id = (int)($_SESSION['login_user_id'] ?? 0);
@@ -116,6 +116,14 @@ if(is_manager_user() && isset($conn) && $conn instanceof mysqli){
         }
     }
 }
+
+$project_package_labels = !is_super_admin_user() && isset($conn) && $conn instanceof mysqli
+    ? project_package_labels($conn, (int)($_SESSION['user_id'] ?? 0))
+    : [
+        'module' => 'Project & Package',
+        'project' => 'Project',
+        'package_list' => 'Package List',
+    ];
 
 $sidebar_avatar = app_path('uploads/avatars/you2biz.png');
 
@@ -431,7 +439,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                             ['href' => app_path('transactions/index.php'), 'label' => 'Transactions'],
                         ]);
                     }
-                    if(manager_has_permission('projects')){ sidebar_tree('Project & Package', 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>'Project'],['href'=>app_path('project_package/packages.php'),'label'=>'Package List']]); }
+                    if(manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
                     if(manager_has_permission('customers')){
                         $sidebar_customer_items = [
                             ['href'=>app_path('customers/index.php'),'label'=>'Create Customer'],
@@ -577,17 +585,17 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                 );
 
                 sidebar_tree(
-                    'Project & Package',
+                    $project_package_labels['module'],
                     'fas fa-project-diagram',
                     [
                         [
                             'href' => app_path('project_package/projects.php'),
-                            'label' => 'Project',
+                            'label' => $project_package_labels['project'],
                             'icon' => 'far fa-circle',
                         ],
                         [
                             'href' => app_path('project_package/packages.php'),
-                            'label' => 'Package List',
+                            'label' => $project_package_labels['package_list'],
                             'icon' => 'far fa-circle',
                         ],
                     ]
@@ -768,7 +776,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     if (!operationsHeader) return;
 
-    const orderedLabels = ['Sales', 'Wallets', 'Project & Package', 'Customer Manage', 'Lead Management', 'Suppliers'];
+    const orderedLabels = ['Sales', 'Wallets', <?= json_encode($project_package_labels['module']); ?>, 'Customer Manage', 'Lead Management', 'Suppliers'];
     let previousItem = operationsHeader;
 
     orderedLabels.forEach(function (label) {

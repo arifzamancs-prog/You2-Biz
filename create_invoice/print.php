@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/printing_helper.php';
+require_once '../includes/project_package_helper.php';
 
 ensure_booking_invoice_table($conn);
 
@@ -12,6 +13,7 @@ $id = (int)($_GET['id'] ?? 0);
 
 ensure_booking_invoice_type_table($conn, $user_id);
 $invoice_types = booking_invoice_types($conn, $user_id, false);
+$project_package_labels = project_package_labels($conn, $user_id);
 
 $stmt = mysqli_prepare(
     $conn,
@@ -122,8 +124,8 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             </div>
         </div>
 
-        <div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></div><div class="contact"><strong>Phone:</strong> <?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><strong>Address:</strong> <?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong>Project:</strong> <?= htmlspecialchars($invoice['project_name'] ?: ('Missing Project #' . (int)$invoice['project_id'])); ?><br><strong>Package:</strong> <?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?></div></div></div>
-        <table><thead><tr><th>Description</th><th style="width: 160px;">Payment Type</th><th style="width: 150px;">Payment by</th><th style="width: 160px; text-align:right;">Amount</th></tr></thead><tbody><tr><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing Package #' . (int)$invoice['package_id'])); ?></td><td><?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td><?= htmlspecialchars($invoice['wallet_name'] ?: ('Missing Wallet #' . (int)$invoice['wallet_id'])); ?></td><td style="text-align:right;">BDT <?=number_format($base_amount,2)?></td></tr><?php foreach($booking_charges as $charge){ ?><tr><td><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?>)</td><td></td><td></td><td style="text-align:right;"><?= $charge['charge_type']==='less'?'- ':'+ ' ?>BDT <?=number_format((float)$charge['charge_amount'],2)?></td></tr><?php } ?></tbody></table>
+        <div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></div><div class="contact"><strong>Phone:</strong> <?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><strong>Address:</strong> <?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong><?= htmlspecialchars($project_package_labels['project']); ?>:</strong> <?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?><br><strong><?= htmlspecialchars($project_package_labels['package']); ?>:</strong> <?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></div></div></div>
+        <table><thead><tr><th>Description</th><th style="width: 160px;">Payment Type</th><th style="width: 150px;">Payment by</th><th style="width: 160px; text-align:right;">Amount</th></tr></thead><tbody><tr><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td><td><?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td><?= htmlspecialchars($invoice['wallet_name'] ?: ('Missing Wallet #' . (int)$invoice['wallet_id'])); ?></td><td style="text-align:right;">BDT <?=number_format($base_amount,2)?></td></tr><?php foreach($booking_charges as $charge){ ?><tr><td><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?>)</td><td></td><td></td><td style="text-align:right;"><?= $charge['charge_type']==='less'?'- ':'+ ' ?>BDT <?=number_format((float)$charge['charge_amount'],2)?></td></tr><?php } ?></tbody></table>
 
         <div class="total-row">
             <?php if($paid_seal_url !== ''){ ?><div class="paid-total-seal"><img src="<?= htmlspecialchars($paid_seal_url); ?>" alt="Paid seal"></div><?php } ?>

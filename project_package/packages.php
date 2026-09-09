@@ -9,6 +9,7 @@ require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_project_package_tables($conn);
+$labels = project_package_labels($conn, $user_id);
 
 $packages = [];
 $projects = [];
@@ -53,14 +54,14 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
 
         <h3 class="card-title">
             <i class="fas fa-box-open mr-2"></i>
-            Package List
+            <?= htmlspecialchars($labels['package_list']); ?>
         </h3>
 
         <?php if(manager_can_modify()){ ?>
         <div class="card-tools">
             <a href="package_create.php" class="btn btn-primary btn-sm">
                 <i class="fas fa-plus"></i>
-                Add Package
+                <?= htmlspecialchars($labels['package_add']); ?>
             </a>
         </div>
         <?php } ?>
@@ -75,8 +76,8 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
 
             <thead>
                 <tr>
-                    <th>Project</th>
-                    <th>Package Name</th>
+                    <th><?= htmlspecialchars($labels['project']); ?></th>
+                    <th><?= htmlspecialchars($labels['package_name']); ?></th>
                     <th>Price</th>
                     <th>Description</th>
                     <th>Status</th>
@@ -90,7 +91,7 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                 <?php if(empty($packages)): ?>
                     <tr>
                         <td colspan="<?= manager_can_modify() ? '6' : '5'; ?>" class="text-center text-muted">
-                            No package found yet.
+                            <?= htmlspecialchars($labels['package_empty']); ?>
                         </td>
                     </tr>
                 <?php else: ?>
@@ -110,9 +111,9 @@ while($package_result && $row = mysqli_fetch_assoc($package_result)){
                                 <td>
                                     <a href="package_edit.php?id=<?= (int)$package['id']; ?>" class="btn btn-info btn-sm" title="Edit"><i class="fas fa-edit"></i></a>
                                     <?php if(!$used){ ?>
-                                        <a href="package_delete.php?id=<?= (int)$package['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this package?');"><i class="fas fa-trash"></i></a>
+                                        <a href="package_delete.php?id=<?= (int)$package['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this <?= htmlspecialchars(strtolower($labels['package'])); ?>?');"><i class="fas fa-trash"></i></a>
                                     <?php }else{ ?>
-                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This package has transactions and cannot be deleted"><i class="fas fa-trash"></i></button>
+                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This <?= htmlspecialchars(strtolower($labels['package'])); ?> has transactions and cannot be deleted"><i class="fas fa-trash"></i></button>
                                     <?php } ?>
                                 </td>
                             <?php } ?>

@@ -31,14 +31,18 @@ function ensure_manager_access_columns($conn)
     }
 }
 
-function available_manager_permissions()
+function available_manager_permissions($project_package_labels = null)
 {
+    $project_package_label = is_array($project_package_labels)
+        ? ($project_package_labels['module'] ?? 'Project & Package')
+        : 'Project & Package';
+
     return [
         'dashboard' => 'Company Dashboard',
         'staff' => 'Staff Manage',
         'sales' => 'Sales',
         'wallets' => 'Wallets',
-        'projects' => 'Project & Package',
+        'projects' => $project_package_label,
         'customers' => 'Customer Manage',
         'leads' => 'Lead Management',
         'suppliers' => 'Supplier',

@@ -8,6 +8,7 @@ require_admin_user();
 ensure_project_package_tables($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+$labels = project_package_labels($conn, $user_id);
 $message = '';
 $project_name = trim($_POST['project_name'] ?? '');
 $project_code = '';
@@ -15,7 +16,7 @@ $description = trim($_POST['description'] ?? '');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($project_name === ''){
-        $message = 'Project Name is required.';
+        $message = $labels['project_name'] . ' is required.';
     } else {
         $project_code = 'PRJ-' . date('ymdHis') . '-' . random_int(100, 999);
         $check_stmt = mysqli_prepare(
@@ -59,7 +60,7 @@ require_once '../includes/sidebar.php';
 
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Add Project</h3>
+        <h3 class="card-title"><?= htmlspecialchars($labels['project_add']); ?></h3>
     </div>
 
     <div class="card-body">
@@ -69,7 +70,7 @@ require_once '../includes/sidebar.php';
 
         <form method="post">
             <div class="form-group">
-                <label>Project Name</label>
+                <label><?= htmlspecialchars($labels['project_name']); ?></label>
                 <input type="text" name="project_name" class="form-control" value="<?= htmlspecialchars($project_name); ?>" required>
             </div>
 
@@ -78,7 +79,7 @@ require_once '../includes/sidebar.php';
                 <textarea name="description" class="form-control" rows="3"><?= htmlspecialchars($description); ?></textarea>
             </div>
 
-            <button type="submit" class="btn btn-primary">Save Project</button>
+            <button type="submit" class="btn btn-primary"><?= htmlspecialchars($labels['project_save']); ?></button>
             <a href="projects.php" class="btn btn-secondary">Back</a>
         </form>
     </div>

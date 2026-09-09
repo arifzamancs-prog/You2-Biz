@@ -4,11 +4,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/project_package_helper.php';
 
 require_sales_access();
 $user_id = (int)$_SESSION['user_id'];
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
+$project_package_labels = project_package_labels($conn, $user_id);
 
 $invoice_id = (int)($_GET['id'] ?? $_POST['invoice_id'] ?? 0);
 if($invoice_id <= 0){
@@ -128,8 +130,8 @@ require_once '../includes/sidebar.php';
         <div class="row">
             <div class="col-md-3 form-group"><label>Date</label><input type="date" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice['invoice_date']); ?>" required></div>
             <div class="col-md-3 form-group"><label>Customer Name</label><select name="customer_id" class="form-control" required><?php while($customer = mysqli_fetch_assoc($customers)){ ?><option value="<?= (int)$customer['id']; ?>" <?= (int)$invoice['customer_id'] === (int)$customer['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($customer['customer_name'] . (!empty($customer['customer_code']) ? ' (' . $customer['customer_code'] . ')' : '')); ?></option><?php } ?></select></div>
-            <div class="col-md-3 form-group"><label>Project</label><select id="project_id" name="project_id" class="form-control" required><?php while($project = mysqli_fetch_assoc($projects)){ ?><option value="<?= (int)$project['id']; ?>" <?= (int)$invoice['project_id'] === (int)$project['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($project['project_name']); ?></option><?php } ?></select></div>
-            <div class="col-md-3 form-group"><label>Package</label><select id="package_id" name="package_id" class="form-control" required><?php while($package = mysqli_fetch_assoc($packages)){ ?><option value="<?= (int)$package['id']; ?>" data-project-id="<?= (int)$package['project_id']; ?>" data-price="<?= htmlspecialchars(number_format((float)$package['price'], 2, '.', '')); ?>" <?= (int)$invoice['package_id'] === (int)$package['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($package['package_name']); ?></option><?php } ?></select></div>
+            <div class="col-md-3 form-group"><label><?= htmlspecialchars($project_package_labels['project']); ?></label><select id="project_id" name="project_id" class="form-control" required><?php while($project = mysqli_fetch_assoc($projects)){ ?><option value="<?= (int)$project['id']; ?>" <?= (int)$invoice['project_id'] === (int)$project['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($project['project_name']); ?></option><?php } ?></select></div>
+            <div class="col-md-3 form-group"><label><?= htmlspecialchars($project_package_labels['package']); ?></label><select id="package_id" name="package_id" class="form-control" required><?php while($package = mysqli_fetch_assoc($packages)){ ?><option value="<?= (int)$package['id']; ?>" data-project-id="<?= (int)$package['project_id']; ?>" data-price="<?= htmlspecialchars(number_format((float)$package['price'], 2, '.', '')); ?>" <?= (int)$invoice['package_id'] === (int)$package['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($package['package_name']); ?></option><?php } ?></select></div>
             <div class="col-md-4 form-group"><label>Payment Type</label><select id="invoice_type" name="invoice_type" class="form-control" required><?php foreach($invoice_types as $type_key => $type_name){ ?><option value="<?= htmlspecialchars($type_key); ?>" <?= $invoice['invoice_type'] === $type_key ? 'selected' : ''; ?>><?= htmlspecialchars($type_name); ?></option><?php } ?></select></div>
             <div class="col-md-4 form-group" id="total-price-group" style="display:none;"><label>Total Price (BDT)</label><input id="total_price" type="number" min="0.01" step="0.01" name="total_price" class="form-control" value="<?= htmlspecialchars(($invoice['total_price'] ?? 0) > 0 ? $invoice['total_price'] : $invoice['amount']); ?>"></div>
             <div class="col-md-4 form-group"><label>Pay Amount (BDT)</label><input id="amount" type="number" min="0.01" step="0.01" name="amount" class="form-control" value="<?= htmlspecialchars($invoice['amount']); ?>" required></div>

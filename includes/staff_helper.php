@@ -6,6 +6,7 @@ function ensure_staff_table($conn)
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id BIGINT UNSIGNED NOT NULL,
         staff_code VARCHAR(30) NULL,
+        photo VARCHAR(255) NULL,
         name VARCHAR(100) NOT NULL,
         email VARCHAR(150) NULL,
         phone VARCHAR(30) NULL,
@@ -38,10 +39,20 @@ function ensure_staff_table($conn)
         mysqli_query($conn, "ALTER TABLE staff ADD COLUMN staff_code VARCHAR(30) NULL AFTER user_id");
     }
 
-    mysqli_query($conn, "UPDATE staff SET staff_code=CONCAT('STF-', LPAD(id, 3, '0'))");
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'photo'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE staff ADD COLUMN photo VARCHAR(255) NULL AFTER staff_code");
+    }
+
+    mysqli_query($conn, "UPDATE staff SET staff_code=CONCAT('STF-', LPAD(id, 3, '0')) WHERE staff_code IS NULL OR TRIM(staff_code)=''");
     $index = mysqli_query($conn, "SHOW INDEX FROM staff WHERE Key_name='uniq_staff_code'");
+    if($index && mysqli_num_rows($index) > 0){
+        mysqli_query($conn, "ALTER TABLE staff DROP INDEX uniq_staff_code");
+    }
+
+    $index = mysqli_query($conn, "SHOW INDEX FROM staff WHERE Key_name='uniq_staff_code_user'");
     if($index && mysqli_num_rows($index) === 0){
-        mysqli_query($conn, "ALTER TABLE staff ADD UNIQUE INDEX uniq_staff_code (staff_code)");
+        mysqli_query($conn, "ALTER TABLE staff ADD UNIQUE INDEX uniq_staff_code_user (user_id, staff_code)");
     }
 
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_designations (

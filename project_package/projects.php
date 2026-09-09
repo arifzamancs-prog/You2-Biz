@@ -9,6 +9,7 @@ require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_project_package_tables($conn);
+$labels = project_package_labels($conn, $user_id);
 
 $projects = [];
 $stmt = mysqli_prepare(
@@ -33,14 +34,14 @@ while($result && $row = mysqli_fetch_assoc($result)){
 
         <h3 class="card-title">
             <i class="fas fa-project-diagram mr-2"></i>
-            Project List
+            <?= htmlspecialchars($labels['project_list']); ?>
         </h3>
 
         <?php if(manager_can_modify()){ ?>
         <div class="card-tools">
             <a href="project_create.php" class="btn btn-primary btn-sm">
                 <i class="fas fa-plus"></i>
-                Add Project
+                <?= htmlspecialchars($labels['project_add']); ?>
             </a>
         </div>
         <?php } ?>
@@ -55,7 +56,7 @@ while($result && $row = mysqli_fetch_assoc($result)){
 
             <thead>
                 <tr>
-                    <th>Project Name</th>
+                    <th><?= htmlspecialchars($labels['project_name']); ?></th>
                     <th>Description</th>
                     <th>Status</th>
                     <?php if(manager_can_modify()){ ?>
@@ -68,7 +69,7 @@ while($result && $row = mysqli_fetch_assoc($result)){
                 <?php if(empty($projects)): ?>
                     <tr>
                         <td colspan="<?= manager_can_modify() ? '4' : '3'; ?>" class="text-center text-muted">
-                            No project found yet.
+                            <?= htmlspecialchars($labels['project_empty']); ?>
                         </td>
                     </tr>
                 <?php else: ?>
@@ -86,9 +87,9 @@ while($result && $row = mysqli_fetch_assoc($result)){
                                 <td>
                                     <a href="project_edit.php?id=<?= (int)$project['id']; ?>" class="btn btn-info btn-sm" title="Edit"><i class="fas fa-edit"></i></a>
                                     <?php if(!$used){ ?>
-                                        <a href="project_delete.php?id=<?= (int)$project['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this project?');"><i class="fas fa-trash"></i></a>
+                                        <a href="project_delete.php?id=<?= (int)$project['id']; ?>" class="btn btn-danger btn-sm" title="Delete" onclick="return confirm('Delete this <?= htmlspecialchars(strtolower($labels['project'])); ?>?');"><i class="fas fa-trash"></i></a>
                                     <?php }else{ ?>
-                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This project is in use and cannot be deleted"><i class="fas fa-trash"></i></button>
+                                        <button type="button" class="btn btn-secondary btn-sm" disabled title="This <?= htmlspecialchars(strtolower($labels['project'])); ?> is in use and cannot be deleted"><i class="fas fa-trash"></i></button>
                                     <?php } ?>
                                 </td>
                             <?php } ?>

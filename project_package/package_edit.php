@@ -6,6 +6,7 @@ require_once '../includes/project_package_helper.php';
 require_admin_user();
 ensure_project_package_tables($conn);
 $user_id = (int)$_SESSION['user_id'];
+$labels = project_package_labels($conn, $user_id);
 $id = (int)($_GET['id'] ?? 0);
 $message = '';
 
@@ -13,7 +14,7 @@ $stmt = mysqli_prepare($conn, "SELECT * FROM packages WHERE id=? AND user_id=? L
 mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);
 mysqli_stmt_execute($stmt);
 $package = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-if(!$package){ die('Package not found.'); }
+if(!$package){ die($labels['package'] . ' not found.'); }
 
 $project_stmt = mysqli_prepare($conn, "SELECT id, project_name FROM projects WHERE user_id=? ORDER BY project_name");
 mysqli_stmt_bind_param($project_stmt, 'i', $user_id);
@@ -29,18 +30,18 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $status = ($_POST['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
 
     if($project_id <= 0 || $name === '' || $price < 0){
-        $message = 'Project, Package Name and valid Price are required.';
+        $message = $labels['project'] . ', ' . $labels['package_name'] . ' and valid Price are required.';
     }else{
         $project_check = mysqli_prepare($conn, "SELECT id FROM projects WHERE id=? AND user_id=? LIMIT 1");
         mysqli_stmt_bind_param($project_check, 'ii', $project_id, $user_id);
         mysqli_stmt_execute($project_check);
         if(mysqli_num_rows(mysqli_stmt_get_result($project_check)) === 0){
-            $message = 'Selected project was not found.';
+            $message = 'Selected ' . strtolower($labels['project']) . ' was not found.';
         }else{
             $update = mysqli_prepare($conn, "UPDATE packages SET project_id=?, package_name=?, price=?, description=?, status=? WHERE id=? AND user_id=?");
             mysqli_stmt_bind_param($update, 'isdssii', $project_id, $name, $price, $description, $status, $id, $user_id);
             if(mysqli_stmt_execute($update)){ header('Location: packages.php'); exit; }
-            $message = 'Package could not be updated.';
+            $message = $labels['package'] . ' could not be updated.';
         }
     }
     $package = array_merge($package, ['project_id' => $project_id, 'package_name' => $name, 'price' => $price, 'description' => $description, 'status' => $status]);
@@ -48,8 +49,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
-<div class="card"><div class="card-header"><h3 class="card-title">Edit Package</h3></div><div class="card-body">
+<div class="card"><div class="card-header"><h3 class="card-title">Edit <?= htmlspecialchars($labels['package']); ?></h3></div><div class="card-body">
 <?php if($message){ ?><div class="alert alert-danger"><?= htmlspecialchars($message); ?></div><?php } ?>
-<form method="post"><div class="form-group"><label>Project</label><select name="project_id" class="form-control" required><?php while($project = mysqli_fetch_assoc($projects)){ ?><option value="<?= (int)$project['id']; ?>" <?= (int)$package['project_id'] === (int)$project['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($project['project_name']); ?></option><?php } ?></select></div><div class="form-group"><label>Package Name</label><input class="form-control" name="package_name" value="<?= htmlspecialchars($package['package_name']); ?>" required></div><div class="form-group"><label>Price</label><input type="number" min="0" step="0.01" class="form-control" name="price" value="<?= htmlspecialchars($package['price']); ?>" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3"><?= htmlspecialchars($package['description'] ?? ''); ?></textarea></div><div class="form-group"><label>Status</label><select class="form-control" name="status"><option value="active" <?= ($package['status'] ?? 'active') === 'active' ? 'selected' : ''; ?>>Active</option><option value="inactive" <?= ($package['status'] ?? '') === 'inactive' ? 'selected' : ''; ?>>Inactive</option></select></div><button class="btn btn-primary">Update Package</button> <a href="packages.php" class="btn btn-secondary">Back</a></form>
+<form method="post"><div class="form-group"><label><?= htmlspecialchars($labels['project']); ?></label><select name="project_id" class="form-control" required><?php while($project = mysqli_fetch_assoc($projects)){ ?><option value="<?= (int)$project['id']; ?>" <?= (int)$package['project_id'] === (int)$project['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($project['project_name']); ?></option><?php } ?></select></div><div class="form-group"><label><?= htmlspecialchars($labels['package_name']); ?></label><input class="form-control" name="package_name" value="<?= htmlspecialchars($package['package_name']); ?>" required></div><div class="form-group"><label>Price</label><input type="number" min="0" step="0.01" class="form-control" name="price" value="<?= htmlspecialchars($package['price']); ?>" required></div><div class="form-group"><label>Description</label><textarea class="form-control" name="description" rows="3"><?= htmlspecialchars($package['description'] ?? ''); ?></textarea></div><div class="form-group"><label>Status</label><select class="form-control" name="status"><option value="active" <?= ($package['status'] ?? 'active') === 'active' ? 'selected' : ''; ?>>Active</option><option value="inactive" <?= ($package['status'] ?? '') === 'inactive' ? 'selected' : ''; ?>>Inactive</option></select></div><button class="btn btn-primary"><?= htmlspecialchars($labels['package_update']); ?></button> <a href="packages.php" class="btn btn-secondary">Back</a></form>
 </div></div>
 <?php require_once '../includes/footer.php'; ?>
