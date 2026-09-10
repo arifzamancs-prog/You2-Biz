@@ -29,10 +29,7 @@ printing_ensure_column($conn);
 
 function ensure_super_admin_company_type_column($conn)
 {
-    $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'company_type'");
-    if($column && mysqli_num_rows($column) === 0){
-        mysqli_query($conn, "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name");
-    }
+    ensure_company_setting_columns($conn);
 }
 
 ensure_super_admin_company_type_column($conn);
@@ -517,12 +514,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form_action = $_POST['form_action'] ?? 'update_company';
 
     if($form_action === 'update_company_type'){
-        $company_type = trim((string)($_POST['company_type'] ?? 'Housing'));
-        $company_type = $company_type === 'Others' ? 'Others' : 'Housing';
+        $company_type = trim((string)($_POST['company_type'] ?? ''));
 
         if($company_id <= 0){
             super_admin_flash_and_redirect('Invalid company selected.', 'danger');
         }
+
+        if(!valid_company_type($company_type)){
+            super_admin_flash_and_redirect('Please select company type.', 'danger');
+        }
+
+        $company_type = normalize_company_type($company_type);
 
         $type_stmt = mysqli_prepare(
             $conn,
@@ -657,12 +659,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
     }elseif($form_action === 'create_company'){
         $company_name = trim((string)($_POST['company_name'] ?? ''));
+        $company_type = trim((string)($_POST['company_type'] ?? ''));
         $company_email = trim((string)($_POST['company_email'] ?? ''));
         $company_phone = trim((string)($_POST['company_phone'] ?? ''));
         $company_password = (string)($_POST['company_password'] ?? '');
 
         if($company_name === ''){
             super_admin_flash_and_redirect('Company or account name is required.', 'danger');
+        }
+
+        if(!valid_company_type($company_type)){
+            super_admin_flash_and_redirect('Please select company type.', 'danger');
         }
 
         if(!filter_var($company_email, FILTER_VALIDATE_EMAIL)){
@@ -691,8 +698,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $create_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO users
-                (name, email, phone, password, role, status, avatar, email_verified, email_verified_at)
-             VALUES (?, ?, ?, ?, 'admin', 'active', ?, 1, NOW())"
+                (name, company_type, email, phone, password, role, status, avatar, email_verified, email_verified_at)
+             VALUES (?, ?, ?, ?, ?, 'admin', 'active', ?, 1, NOW())"
         );
 
         if(!$create_stmt){
@@ -701,8 +708,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         mysqli_stmt_bind_param(
             $create_stmt,
-            'sssss',
+            'ssssss',
             $company_name,
+            normalize_company_type($company_type),
             $company_email,
             $company_phone,
             $password_hash,
@@ -868,6 +876,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         super_admin_flash_and_redirect('Contact update failed.', 'danger');
+    }elseif($form_action === 'force_verify_company'){
+        if($company_id <= 0){
+            super_admin_flash_and_redirect('Invalid company selected.', 'danger');
+        }
+
+        $verify_stmt = mysqli_prepare(
+            $conn,
+            "UPDATE users
+             SET email_verified=1,
+                 email_verified_at=NOW(),
+                 email_verification_token_hash=NULL,
+                 email_verification_expires_at=NULL,
+                 status='active'
+             WHERE id=?
+             AND role='admin'
+             LIMIT 1"
+        );
+
+        if(!$verify_stmt){
+            super_admin_flash_and_redirect('Forced verification failed.', 'danger');
+        }
+
+        mysqli_stmt_bind_param($verify_stmt, 'i', $company_id);
+
+        if(mysqli_stmt_execute($verify_stmt) && mysqli_stmt_affected_rows($verify_stmt) > 0){
+            super_admin_flash_and_redirect('Company forced verified successfully.', 'success');
+        }
+
+        super_admin_flash_and_redirect('Company forced verification failed.', 'danger');
     }elseif($form_action === 'send_verify_link'){
         if($company_id <= 0){
             super_admin_flash_and_redirect('Invalid company selected.', 'danger');
@@ -1374,6 +1411,16 @@ require_once '../includes/sidebar.php';
                                         class="btn btn-warning btn-sm ml-1">
                                         Send Verify Link
                                     </button>
+                                    <?php if((int)($row['email_verified'] ?? 0) !== 1){ ?>
+                                        <button
+                                            type="submit"
+                                            name="form_action"
+                                            value="force_verify_company"
+                                            class="btn btn-success btn-sm ml-1"
+                                            onclick="return confirm('Force verify this company without email confirmation?');">
+                                            Force Verify
+                                        </button>
+                                    <?php } ?>
                                 </div>
                             </form>
                         </td>
@@ -1705,6 +1752,17 @@ require_once '../includes/sidebar.php';
                 <div class="form-group">
                     <label for="company_name">Company or Account Name</label>
                     <input type="text" id="company_name" name="company_name" class="form-control" required autocomplete="organization">
+                </div>
+                <div class="form-group">
+                    <label>Company Type</label>
+                    <div class="custom-control custom-radio">
+                        <input type="radio" id="create_company_type_housing" name="company_type" value="Housing" class="custom-control-input" required>
+                        <label class="custom-control-label" for="create_company_type_housing">Housing</label>
+                    </div>
+                    <div class="custom-control custom-radio">
+                        <input type="radio" id="create_company_type_others" name="company_type" value="Others" class="custom-control-input" required>
+                        <label class="custom-control-label" for="create_company_type_others">Others</label>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="company_email">Email</label>

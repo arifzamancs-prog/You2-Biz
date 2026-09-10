@@ -52,12 +52,18 @@ $message_type = '';
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     $name             = trim($_POST['name']);
+    $company_type     = trim((string)($_POST['company_type'] ?? ''));
     $email            = trim($_POST['email']);
     $phone            = trim($_POST['phone']);
     $password         = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
-    if($password != $confirm_password){
+    if(!valid_company_type($company_type)){
+
+        $message = "Please select company type";
+        $message_type = "danger";
+
+    }elseif($password != $confirm_password){
 
         $message = "Password and Confirm Password do not match";
         $message_type = "danger";
@@ -96,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $sql = "INSERT INTO users
                     (
                         name,
+                        company_type,
                         email,
                         phone,
                         password,
@@ -106,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     )
                     VALUES
                     (
+                        ?,
                         ?,
                         ?,
                         ?,
@@ -124,8 +132,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             mysqli_stmt_bind_param(
                 $stmt,
-                "sssssiss",
+                "ssssssiss",
                 $name,
+                normalize_company_type($company_type),
                 $email,
                 $phone,
                 $hash,
@@ -284,9 +293,12 @@ if(($signup_settings['sms_status'] ?? 'active') === 'active' && $system_sms_toke
     );
 }
                 
-                header(
-                    "Location: login.php?registered=" . ($email_verification_active ? "verify_email" : "active")
-                );
+                $_SESSION['verification_message'] = $email_verification_active
+                    ? 'Registration successful. Please verify your email to activate your account.'
+                    : 'Registration successful. Your account is active. You can login now.';
+                $_SESSION['verification_message_type'] = 'success';
+
+                header("Location: login.php");
 
                 exit;
 
@@ -843,6 +855,32 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
                             <div class="input-group-text auth-icon">
                                 <span class="fas fa-building"></span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Company Type</label>
+                    <div class="d-flex flex-wrap" style="gap: 16px;">
+                        <div class="custom-control custom-radio">
+                            <input
+                                type="radio"
+                                id="company_type_housing"
+                                name="company_type"
+                                value="Housing"
+                                class="custom-control-input"
+                                required>
+                            <label class="custom-control-label" for="company_type_housing">Housing</label>
+                        </div>
+                        <div class="custom-control custom-radio">
+                            <input
+                                type="radio"
+                                id="company_type_others"
+                                name="company_type"
+                                value="Others"
+                                class="custom-control-input"
+                                required>
+                            <label class="custom-control-label" for="company_type_others">Others</label>
                         </div>
                     </div>
                 </div>

@@ -3,6 +3,7 @@
 function ensure_company_setting_columns($conn)
 {
     $columns = [
+        'company_type' => "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name",
         'currency_code' => "ALTER TABLE users ADD COLUMN currency_code VARCHAR(10) NOT NULL DEFAULT 'BDT'",
         'timezone_name' => "ALTER TABLE users ADD COLUMN timezone_name VARCHAR(64) NOT NULL DEFAULT 'Asia/Dhaka'",
         'date_format' => "ALTER TABLE users ADD COLUMN date_format VARCHAR(20) NOT NULL DEFAULT 'd-m-Y'",
@@ -14,6 +15,16 @@ function ensure_company_setting_columns($conn)
             mysqli_query($conn, $alter_sql);
         }
     }
+}
+
+function normalize_company_type($company_type)
+{
+    return trim((string)$company_type) === 'Others' ? 'Others' : 'Housing';
+}
+
+function valid_company_type($company_type)
+{
+    return in_array(trim((string)$company_type), ['Housing', 'Others'], true);
 }
 
 function normalize_company_currency($currency)

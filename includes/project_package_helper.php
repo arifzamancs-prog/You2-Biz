@@ -42,6 +42,11 @@ function ensure_project_package_tables($conn)
 
 function project_package_ensure_company_type_column($conn)
 {
+    if(function_exists('ensure_company_setting_columns')){
+        ensure_company_setting_columns($conn);
+        return;
+    }
+
     $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'company_type'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name");
@@ -71,6 +76,10 @@ function project_package_company_type($conn, $user_id)
     mysqli_stmt_bind_param($stmt, 'i', $user_id);
     mysqli_stmt_execute($stmt);
     $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+    if(function_exists('normalize_company_type')){
+        return normalize_company_type($row['company_type'] ?? 'Housing');
+    }
 
     return (($row['company_type'] ?? 'Housing') === 'Others') ? 'Others' : 'Housing';
 }

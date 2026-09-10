@@ -47,14 +47,13 @@ $message = '';
 $message_type = 'danger';
 $full_version_message = 'Please call +8801977592783 for subscription.';
 
-if(isset($_GET['registered']) && $_GET['registered'] === 'verify_email'){
-    $message = 'Registration successful. Please verify your email to activate your account.';
-    $message_type = 'success';
-}
-
-if(isset($_GET['registered']) && $_GET['registered'] === 'active'){
-    $message = 'Registration successful. Your account is active. You can login now.';
-    $message_type = 'success';
+if(isset($_GET['registered']) && in_array($_GET['registered'], ['verify_email', 'active'], true)){
+    $_SESSION['verification_message'] = $_GET['registered'] === 'verify_email'
+        ? 'Registration successful. Please verify your email to activate your account.'
+        : 'Registration successful. Your account is active. You can login now.';
+    $_SESSION['verification_message_type'] = 'success';
+    header('Location: login.php');
+    exit;
 }
 
 if(isset($_SESSION['verification_message'])){
