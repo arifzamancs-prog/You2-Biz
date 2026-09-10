@@ -5,6 +5,7 @@ require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/restaurant_table_helper.php';
 require_once __DIR__ . '/staff_incentive_helper.php';
 require_once __DIR__ . '/project_package_helper.php';
+require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -740,10 +741,13 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     ],
                 ];
                 if(is_admin_user()){
-                    $sidebar_help_items[] = [
-                        'href' => app_path('help/pricing_plan.php'),
-                        'label' => 'Pricing Plan',
-                    ];
+                    $sidebar_company_id = (int)($_SESSION['user_id'] ?? 0);
+                    if(is_super_admin_user() || company_pricing_plan_visible($conn, $sidebar_company_id)){
+                        $sidebar_help_items[] = [
+                            'href' => app_path('help/pricing_plan.php'),
+                            'label' => 'Pricing Plan',
+                        ];
+                    }
                     $sidebar_help_items[] = [
                         'href' => app_path('help/support.php'),
                         'label' => 'Support',

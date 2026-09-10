@@ -16,6 +16,7 @@ require_once '../includes/contact_unique_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/printing_helper.php';
+require_once '../includes/pricing_plan_visibility_helper.php';
 require_once '../includes/product_category_helper.php';
 
 require_super_admin_user();
@@ -26,6 +27,7 @@ ensure_email_verification_columns($conn);
 ensure_signup_message_settings_table($conn);
 ensure_restaurant_tables_table($conn);
 printing_ensure_column($conn);
+ensure_pricing_plan_visibility_column($conn);
 
 function ensure_super_admin_company_type_column($conn)
 {
@@ -546,6 +548,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         super_admin_flash_and_redirect('Company type update failed.', 'danger');
+    }elseif($form_action === 'update_pricing_plan_visibility'){
+        $visible = (int)($_POST['pricing_plan_visible'] ?? 1) === 1 ? 1 : 0;
+        if($company_id <= 0){
+            super_admin_flash_and_redirect('Invalid company selected.', 'danger');
+        }
+        $stmt = mysqli_prepare($conn, "UPDATE users SET show_pricing_plan=? WHERE id=? AND role='admin' LIMIT 1");
+        if($stmt){
+            mysqli_stmt_bind_param($stmt, 'ii', $visible, $company_id);
+            if(mysqli_stmt_execute($stmt)){
+                super_admin_flash_and_redirect('Pricing Plan visibility updated.', 'success');
+            }
+        }
+        super_admin_flash_and_redirect('Pricing Plan visibility update failed.', 'danger');
     }elseif($form_action === 'update_single_user_license'){
         $license_status = strtolower(trim((string)($_POST['license_status'] ?? 'inactive'))) === 'active'
             ? 'active'
@@ -1131,6 +1146,7 @@ $sql = "SELECT
             u.timezone_name,
             u.date_format,
             u.table_system_enabled,
+            u.show_pricing_plan,
             u.created_at,
             u.last_login,
             COUNT(DISTINCT m.id) AS manager_count,
@@ -1165,6 +1181,7 @@ $sql = "SELECT
             u.timezone_name,
             u.date_format,
             u.table_system_enabled,
+            u.show_pricing_plan,
             u.created_at,
             u.last_login
         ORDER BY u.id DESC";
@@ -1411,16 +1428,14 @@ require_once '../includes/sidebar.php';
                                         class="btn btn-warning btn-sm ml-1">
                                         Send Verify Link
                                     </button>
-                                    <?php if((int)($row['email_verified'] ?? 0) !== 1){ ?>
-                                        <button
-                                            type="submit"
-                                            name="form_action"
-                                            value="force_verify_company"
-                                            class="btn btn-success btn-sm ml-1"
-                                            onclick="return confirm('Force verify this company without email confirmation?');">
-                                            Force Verify
-                                        </button>
-                                    <?php } ?>
+                                    <button
+                                        type="submit"
+                                        name="form_action"
+                                        value="force_verify_company"
+                                        class="btn btn-success btn-sm ml-1"
+                                        onclick="return confirm('Force verify this company without email confirmation?');">
+                                        Force Verify
+                                    </button>
                                 </div>
                             </form>
                         </td>
@@ -1465,6 +1480,19 @@ require_once '../includes/sidebar.php';
                         <td>
                             <form method="post">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
+
+                                <div class="form-group mb-2">
+                                    <label>Pricing Plan (Help sidebar)</label>
+                                    <div class="input-group input-group-sm">
+                                        <select name="pricing_plan_visible" class="form-control">
+                                            <option value="1" <?= (int)($row['show_pricing_plan'] ?? 1) === 1 ? 'selected' : ''; ?>>Show</option>
+                                            <option value="0" <?= (int)($row['show_pricing_plan'] ?? 1) === 0 ? 'selected' : ''; ?>>Hide</option>
+                                        </select>
+                                        <div class="input-group-append">
+                                            <button type="submit" name="form_action" value="update_pricing_plan_visibility" class="btn btn-info">Update</button>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <div class="form-row">
                                     <div class="form-group col-md-12">

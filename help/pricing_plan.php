@@ -7,6 +7,12 @@ require_once '../includes/app_config.php';
 require_once '../includes/smtp_mailer.php';
 require_once '../includes/super_admin_config.php';
 require_once '../includes/signup_message_helper.php';
+require_once '../includes/pricing_plan_visibility_helper.php';
+
+if(!is_super_admin_user() && !company_pricing_plan_visible($conn, (int)($_SESSION['user_id'] ?? 0))){
+    header('Location: ' . app_path('dashboard.php?error=Pricing Plan is hidden by administrator'));
+    exit;
+}
 
 function ensure_pricing_plan_table($conn)
 {
