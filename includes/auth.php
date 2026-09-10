@@ -94,7 +94,7 @@ function refresh_current_manager_permissions($conn)
 
     $login_user_id = (int)($_SESSION['login_user_id'] ?? 0);
     if($login_user_id <= 0){ return; }
-    $stmt = mysqli_prepare($conn, 'SELECT manager_type, access_permissions, status FROM users WHERE id=? AND role=\'manager\' LIMIT 1');
+    $stmt = mysqli_prepare($conn, 'SELECT manager_type, staff_id, access_permissions, status FROM users WHERE id=? AND role=\'manager\' LIMIT 1');
     mysqli_stmt_bind_param($stmt, 'i', $login_user_id);
     mysqli_stmt_execute($stmt);
     $manager = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
@@ -103,8 +103,39 @@ function refresh_current_manager_permissions($conn)
     }
 
     $_SESSION['manager_type'] = normalize_manager_type($manager['manager_type'] ?? 'agent');
+    $_SESSION['staff_id'] = (int)($manager['staff_id'] ?? 0);
     $_SESSION['access_permissions'] = normalize_manager_permissions(json_decode($manager['access_permissions'] ?? '[]', true));
     $_SESSION['permissions_configured'] = $manager['access_permissions'] !== null;
+}
+
+function current_manager_staff_id($conn = null)
+{
+    if(!is_manager_user()){
+        return 0;
+    }
+
+    $staff_id = (int)($_SESSION['staff_id'] ?? 0);
+    if($staff_id > 0 || !($conn instanceof mysqli)){
+        return $staff_id;
+    }
+
+    $login_user_id = (int)($_SESSION['login_user_id'] ?? 0);
+    if($login_user_id <= 0){
+        return 0;
+    }
+
+    $stmt = mysqli_prepare($conn, "SELECT staff_id FROM users WHERE id=? AND role='manager' LIMIT 1");
+    if(!$stmt){
+        return 0;
+    }
+
+    mysqli_stmt_bind_param($stmt, 'i', $login_user_id);
+    mysqli_stmt_execute($stmt);
+    $manager = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    $staff_id = (int)($manager['staff_id'] ?? 0);
+    $_SESSION['staff_id'] = $staff_id;
+
+    return $staff_id;
 }
 
 function role_power_includes($role)
@@ -294,7 +325,7 @@ function block_manager_restricted_actions()
     if (is_manager_user()) {
         $permissions = $_SESSION['access_permissions'] ?? [];
         if(!empty($_SESSION['permissions_configured'])){
-            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'help/video_tutorial.php', 'logout.php'];
+            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'help/video_tutorial.php', 'logout.php'];
             $permission_paths = [
                 'staff' => ['staff/'],
                 'sales' => ['sales/', 'create_invoice/'],
@@ -335,6 +366,7 @@ function block_manager_restricted_actions()
             'sales/get_product.php',
             'profile/index.php',
             'profile/change_password.php',
+            'staff/profile.php',
             'logout.php',
         ];
 

@@ -6,7 +6,15 @@ require_once '../includes/staff_ledger_helper.php';
 require_once '../includes/staff_attendance_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
+$current_staff_id = current_manager_staff_id($conn);
 $staff_id = (int)($_GET['id'] ?? 0);
+if(is_manager_user() && $staff_id <= 0){
+    $staff_id = $current_staff_id;
+}
+if(is_manager_user() && !manager_has_permission('staff') && ($staff_id <= 0 || $staff_id !== $current_staff_id)){
+    header('Location: ' . app_path('dashboard.php?error=Permission denied'));
+    exit;
+}
 ensure_staff_table($conn);
 ensure_staff_ledger_table($conn);
 ensure_staff_attendance_tables($conn);

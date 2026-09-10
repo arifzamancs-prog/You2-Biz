@@ -18,6 +18,9 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
     $_SESSION['manager_type'] = $role === 'manager'
         ? normalize_manager_type($user['manager_type'] ?? 'manager')
         : 'admin';
+    $_SESSION['staff_id'] = $role === 'manager'
+        ? (int)($user['staff_id'] ?? 0)
+        : 0;
     $_SESSION['access_permissions'] = $role === 'manager'
         ? normalize_manager_permissions(json_decode($user['access_permissions'] ?? '[]', true))
         : [];

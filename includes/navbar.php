@@ -32,6 +32,8 @@ if (is_manager_user()) {
     $avatar_file = $_SESSION['login_avatar'] ?? $avatar_file;
 }
 
+$navbar_staff_id = isset($conn) ? current_manager_staff_id($conn) : current_manager_staff_id();
+
 $avatar = app_path('uploads/avatars/you2biz.png');
 
 if (
@@ -117,6 +119,19 @@ if (
                     My Profile
 
                 </a>
+
+                <?php if ($navbar_staff_id > 0) { ?>
+                    <div class="dropdown-divider"></div>
+
+                    <a href="<?= htmlspecialchars(app_path('staff/profile.php')); ?>"
+                       class="dropdown-item">
+
+                        <i class="fas fa-history mr-2"></i>
+
+                        My History
+
+                    </a>
+                <?php } ?>
 
                 <div class="dropdown-divider"></div>
 
