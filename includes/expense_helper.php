@@ -17,29 +17,52 @@ function expense_category_is_reserved($category_name)
 
 function ensure_expense_support_tables($conn, $user_id)
 {
-    $staff_column = mysqli_query($conn, "SHOW COLUMNS FROM expenses LIKE 'staff_id'");
-    if($staff_column && mysqli_num_rows($staff_column) === 0){
-        mysqli_query($conn, "ALTER TABLE expenses ADD COLUMN staff_id BIGINT UNSIGNED NULL AFTER category_id");
-        mysqli_query($conn, "ALTER TABLE expenses ADD INDEX idx_expenses_staff (staff_id)");
-    }
-
-    $source_type_column = mysqli_query($conn, "SHOW COLUMNS FROM expenses LIKE 'source_type'");
-    if($source_type_column && mysqli_num_rows($source_type_column) === 0){
-        mysqli_query($conn, "ALTER TABLE expenses ADD COLUMN source_type VARCHAR(40) NULL AFTER note");
-    }
-
-    $source_id_column = mysqli_query($conn, "SHOW COLUMNS FROM expenses LIKE 'source_id'");
-    if($source_id_column && mysqli_num_rows($source_id_column) === 0){
-        mysqli_query($conn, "ALTER TABLE expenses ADD COLUMN source_id BIGINT UNSIGNED NULL AFTER source_type");
-        mysqli_query($conn, "ALTER TABLE expenses ADD INDEX idx_expenses_source (user_id, source_type, source_id)");
-    }
-
-    $hidden_column = mysqli_query($conn, "SHOW COLUMNS FROM categories LIKE 'is_hidden'");
-    if($hidden_column && mysqli_num_rows($hidden_column) === 0){
-        mysqli_query($conn, "ALTER TABLE categories ADD COLUMN is_hidden TINYINT(1) NOT NULL DEFAULT 0 AFTER category_name");
-    }
+    ensure_expense_column($conn, 'staff_id', "ALTER TABLE expenses ADD COLUMN staff_id BIGINT UNSIGNED NULL AFTER category_id");
+    ensure_expense_index($conn, 'idx_expenses_staff', "ALTER TABLE expenses ADD INDEX idx_expenses_staff (staff_id)");
+    ensure_expense_column($conn, 'source_type', "ALTER TABLE expenses ADD COLUMN source_type VARCHAR(40) NULL AFTER note");
+    ensure_expense_column($conn, 'source_id', "ALTER TABLE expenses ADD COLUMN source_id BIGINT UNSIGNED NULL AFTER source_type");
+    ensure_expense_index($conn, 'idx_expenses_source', "ALTER TABLE expenses ADD INDEX idx_expenses_source (user_id, source_type, source_id)");
+    ensure_expense_column($conn, 'approval_status', "ALTER TABLE expenses ADD COLUMN approval_status VARCHAR(20) NOT NULL DEFAULT 'approved' AFTER source_id");
+    ensure_expense_column($conn, 'created_by', "ALTER TABLE expenses ADD COLUMN created_by BIGINT UNSIGNED NULL AFTER approval_status");
+    ensure_expense_column($conn, 'approved_by', "ALTER TABLE expenses ADD COLUMN approved_by BIGINT UNSIGNED NULL AFTER created_by");
+    ensure_expense_column($conn, 'approved_at', "ALTER TABLE expenses ADD COLUMN approved_at DATETIME NULL AFTER approved_by");
+    ensure_category_column($conn, 'is_hidden', "ALTER TABLE categories ADD COLUMN is_hidden TINYINT(1) NOT NULL DEFAULT 0 AFTER category_name");
 
     ensure_reserved_expense_categories($conn, $user_id);
+}
+
+function ensure_expense_column($conn, $column, $alter_sql)
+{
+    ensure_table_column($conn, 'expenses', $column, $alter_sql);
+}
+
+function ensure_category_column($conn, $column, $alter_sql)
+{
+    ensure_table_column($conn, 'categories', $column, $alter_sql);
+}
+
+function ensure_table_column($conn, $table, $column, $alter_sql)
+{
+    $result = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE '" . mysqli_real_escape_string($conn, $column) . "'");
+    if($result && mysqli_num_rows($result) > 0){
+        return;
+    }
+
+    if(!mysqli_query($conn, $alter_sql)){
+        throw new Exception("Database update failed for {$table}.{$column}: " . mysqli_error($conn));
+    }
+}
+
+function ensure_expense_index($conn, $index_name, $alter_sql)
+{
+    $result = mysqli_query($conn, "SHOW INDEX FROM expenses WHERE Key_name='" . mysqli_real_escape_string($conn, $index_name) . "'");
+    if($result && mysqli_num_rows($result) > 0){
+        return;
+    }
+
+    if(!mysqli_query($conn, $alter_sql)){
+        throw new Exception("Database index update failed for expenses.{$index_name}: " . mysqli_error($conn));
+    }
 }
 
 function ensure_reserved_expense_categories($conn, $user_id)
@@ -110,7 +133,15 @@ function reserved_expense_category_name_from_entry_type($entry_type)
         'incentive' => 'Incentive',
     ];
 
-    return $map[strtolower(trim((string)$entry_type))] ?? '';
+    $entry_type = strtolower(trim((string)$entry_type));
+
+    if(isset($map[$entry_type])){
+        return $map[$entry_type];
+    }
+
+    return function_exists('staff_ledger_type_label')
+        ? staff_ledger_type_label($entry_type)
+        : ucwords(str_replace('_', ' ', $entry_type));
 }
 
 /**

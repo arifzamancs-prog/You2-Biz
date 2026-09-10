@@ -62,6 +62,10 @@ function record_wallet_transaction(
     $note,
     $txn_date
 ){
+    if($transaction_type === 'staff_payment'){
+        $transaction_type = 'expense';
+    }
+
     $base_txn_no = (string)$txn_no;
 
     for($attempt = 0; $attempt < 5; $attempt++){
@@ -104,12 +108,25 @@ function record_wallet_transaction(
             $txn_date
         );
 
-        if(mysqli_stmt_execute($stmt)){
-            return;
+        try {
+            if(mysqli_stmt_execute($stmt)){
+                return;
+            }
+
+            $error_no = mysqli_stmt_errno($stmt);
+            $error = mysqli_stmt_error($stmt);
+        } catch (mysqli_sql_exception $exception) {
+            $error_no = (int)$exception->getCode();
+            $error = $exception->getMessage();
         }
 
-        $error_no = mysqli_stmt_errno($stmt);
-        $error = mysqli_stmt_error($stmt);
+        if(
+            $transaction_type === 'staff_payment' &&
+            ($error_no === 1265 || stripos($error, 'transaction_type') !== false)
+        ){
+            $transaction_type = 'expense';
+            continue;
+        }
 
         if($error_no !== 1062){
             throw new Exception($error);
