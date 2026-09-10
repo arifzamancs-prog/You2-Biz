@@ -72,6 +72,50 @@ function staff_code_from_id($staff_id)
     return 'STF-' . str_pad((string)(int)$staff_id, 3, '0', STR_PAD_LEFT);
 }
 
+function staff_photo_public_url($photo)
+{
+    $photo = trim((string)$photo);
+
+    if($photo === ''){
+        return '';
+    }
+
+    $photo = str_replace('\\', '/', $photo);
+
+    if(str_starts_with($photo, 'uploads/')){
+        return '../' . implode('/', array_map('rawurlencode', explode('/', $photo)));
+    }
+
+    return '../uploads/avatars/' . rawurlencode(basename($photo));
+}
+
+function staff_sync_linked_manager_photo($conn, $owner_user_id, $staff_id, $photo)
+{
+    $owner_user_id = (int)$owner_user_id;
+    $staff_id = (int)$staff_id;
+    $photo = trim((string)$photo);
+
+    if($owner_user_id <= 0 || $staff_id <= 0 || $photo === ''){
+        return false;
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "UPDATE staff
+         SET photo=?
+         WHERE id=?
+         AND user_id=?
+         LIMIT 1"
+    );
+
+    if(!$stmt){
+        return false;
+    }
+
+    mysqli_stmt_bind_param($stmt, 'sii', $photo, $staff_id, $owner_user_id);
+    return mysqli_stmt_execute($stmt);
+}
+
 function staff_designations($conn, $user_id)
 {
     ensure_default_staff_designations($conn, $user_id);

@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/login_email_otp_helper.php';
+require_once '../includes/staff_helper.php';
 
 ensure_login_email_otp_columns($conn);
 
@@ -117,6 +118,26 @@ if($is_super_admin){
     $user = mysqli_fetch_assoc($result);
 
     if($is_manager && $user){
+        $staff_photo_stmt = mysqli_prepare(
+            $conn,
+            "SELECT photo
+             FROM staff
+             WHERE id=?
+             AND user_id=?
+             LIMIT 1"
+        );
+
+        if($staff_photo_stmt){
+            $manager_staff_id = (int)($user['staff_id'] ?? 0);
+            $manager_owner_id = (int)($_SESSION['user_id'] ?? 0);
+            mysqli_stmt_bind_param($staff_photo_stmt, 'ii', $manager_staff_id, $manager_owner_id);
+            mysqli_stmt_execute($staff_photo_stmt);
+            $staff_photo_row = mysqli_fetch_assoc(mysqli_stmt_get_result($staff_photo_stmt));
+            if(!empty($staff_photo_row['photo'])){
+                $user['staff_photo'] = $staff_photo_row['photo'];
+            }
+        }
+
         if(
             preg_match('/\.manager\.\d+@you2-wallet\.local$/', (string)($user['email'] ?? '')) ||
             trim((string)($user['email'] ?? '')) === ''
@@ -300,6 +321,12 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
         if($is_manager){
             $_SESSION['login_avatar'] = $avatar;
+            staff_sync_linked_manager_photo(
+                $conn,
+                (int)($_SESSION['user_id'] ?? 0),
+                (int)($user['staff_id'] ?? 0),
+                'uploads/avatars/' . $avatar
+            );
         }else{
             $_SESSION['login_name'] = $name;
             $_SESSION['user_name'] = $name;
@@ -329,6 +356,16 @@ if(!empty($user['avatar'])){
     $avatar_image =
         app_path('uploads/avatars/') .
     $user['avatar'];
+}
+
+if($is_manager && !empty($user['staff_photo'])){
+    $staff_photo = str_replace('\\', '/', $user['staff_photo']);
+
+    if(str_starts_with($staff_photo, 'uploads/')){
+        $avatar_image = app_path($staff_photo);
+    }else{
+        $avatar_image = app_path('uploads/avatars/' . basename($staff_photo));
+    }
 }
 
 ?>
