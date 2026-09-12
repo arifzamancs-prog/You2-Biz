@@ -12,11 +12,12 @@ $id = (int)($_GET['id'] ?? 0);
 $message = '';
 $today = date('Y-m-d');
 $lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);
-$lead_scope_sql = is_manager_user() ? ' AND created_by_user_id=?' : '';
+$lead_owner_name = trim((string)($_SESSION['login_name'] ?? ''));
+$lead_scope_sql = is_manager_user() ? ' AND (created_by_user_id=? OR created_by_name=?)' : '';
 
 $lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql} LIMIT 1");
 if(is_manager_user()){
-    mysqli_stmt_bind_param($lead_stmt, 'iii', $id, $user_id, $lead_owner_id);
+    mysqli_stmt_bind_param($lead_stmt, 'iiis', $id, $user_id, $lead_owner_id, $lead_owner_name);
 }else{
     mysqli_stmt_bind_param($lead_stmt, 'ii', $id, $user_id);
 }
@@ -48,7 +49,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
              WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql}"
         );
         if(is_manager_user()){
-            mysqli_stmt_bind_param($update_stmt, 'sssssiii', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id);
+            mysqli_stmt_bind_param($update_stmt, 'sssssiiis', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id, $lead_owner_name);
         }else{
             mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
         }

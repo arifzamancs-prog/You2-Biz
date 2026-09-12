@@ -9,7 +9,8 @@ require_lead_management_access();
 
 $user_id = (int)$_SESSION['user_id'];
 $lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);
-$lead_scope_sql = is_manager_user() ? ' AND created_by_user_id=?' : '';
+$lead_owner_name = trim((string)($_SESSION['login_name'] ?? ''));
+$lead_scope_sql = is_manager_user() ? ' AND (created_by_user_id=? OR created_by_name=?)' : '';
 $can_manage_leads = is_admin_user() || is_manager_user();
 $show_lead_reference = is_admin_user();
 $filter = normalize_lead_filter($_GET['filter'] ?? 'lead');
@@ -120,7 +121,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline
         : 'UPDATE leads SET note=? WHERE id=? AND user_id=?' . $lead_scope_sql;
     $update_stmt = mysqli_prepare($conn, $sql);
     if(is_manager_user()){
-        mysqli_stmt_bind_param($update_stmt, 'siii', $value, $lead_id, $user_id, $lead_owner_id);
+        mysqli_stmt_bind_param($update_stmt, 'siiis', $value, $lead_id, $user_id, $lead_owner_id, $lead_owner_name);
     }else{
         mysqli_stmt_bind_param($update_stmt, 'sii', $value, $lead_id, $user_id);
     }
@@ -145,7 +146,7 @@ if($can_manage_leads && isset($_GET['set_status'], $_GET['id'])){
          AND user_id=?{$lead_scope_sql}"
     );
     if(is_manager_user()){
-        mysqli_stmt_bind_param($update_stmt, 'siii', $set_status, $id, $user_id, $lead_owner_id);
+        mysqli_stmt_bind_param($update_stmt, 'siiis', $set_status, $id, $user_id, $lead_owner_id, $lead_owner_name);
     }else{
         mysqli_stmt_bind_param($update_stmt, 'sii', $set_status, $id, $user_id);
     }
@@ -165,7 +166,7 @@ if($can_manage_leads && isset($_GET['delete'])){
          AND user_id=?{$lead_scope_sql}"
     );
     if(is_manager_user()){
-        mysqli_stmt_bind_param($delete_stmt, 'iii', $id, $user_id, $lead_owner_id);
+        mysqli_stmt_bind_param($delete_stmt, 'iiis', $id, $user_id, $lead_owner_id, $lead_owner_name);
     }else{
         mysqli_stmt_bind_param($delete_stmt, 'ii', $id, $user_id);
     }
@@ -173,6 +174,21 @@ if($can_manage_leads && isset($_GET['delete'])){
 
     header('Location: index.php?filter=' . urlencode($filter));
     exit;
+}
+
+if(is_manager_user() && $lead_owner_id > 0 && $lead_owner_name !== ''){
+    $repair_lead_owner_stmt = mysqli_prepare(
+        $conn,
+        "UPDATE leads
+         SET created_by_user_id=?
+         WHERE user_id=?
+         AND created_by_name=?
+         AND (created_by_user_id IS NULL OR created_by_user_id<>?)"
+    );
+    if($repair_lead_owner_stmt){
+        mysqli_stmt_bind_param($repair_lead_owner_stmt, 'iisi', $lead_owner_id, $user_id, $lead_owner_name, $lead_owner_id);
+        mysqli_stmt_execute($repair_lead_owner_stmt);
+    }
 }
 
 $leads = [];
@@ -189,7 +205,7 @@ $stmt = mysqli_prepare(
      ORDER BY COALESCE(l.followup_date, DATE(l.created_at)) ASC, l.id DESC"
 );
 if(is_manager_user()){
-    mysqli_stmt_bind_param($stmt, 'isi', $user_id, $filter, $lead_owner_id);
+    mysqli_stmt_bind_param($stmt, 'isis', $user_id, $filter, $lead_owner_id, $lead_owner_name);
 }else{
     mysqli_stmt_bind_param($stmt, 'is', $user_id, $filter);
 }

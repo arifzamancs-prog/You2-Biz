@@ -12,6 +12,7 @@ require_once 'includes/branding_helper.php';
 require_once 'includes/login_email_otp_helper.php';
 require_once 'includes/login_session_helper.php';
 require_once 'includes/customer_portal_helper.php';
+require_once 'includes/staff_helper.php';
 
 ensure_manager_access_columns($conn);
 ensure_signup_message_settings_table($conn);
@@ -19,6 +20,124 @@ ensure_login_email_otp_columns($conn);
 ensure_customer_portal_columns($conn);
 ensure_customer_access_table($conn);
 signup_message_send_trial_warnings($conn);
+
+function repair_manager_staff_link_after_import($conn, $user, $owner_id)
+{
+    $owner_id = (int)$owner_id;
+    $manager_id = (int)($user['id'] ?? 0);
+    $current_staff_id = (int)($user['staff_id'] ?? 0);
+
+    if($owner_id <= 0 || $manager_id <= 0){
+        return $user;
+    }
+
+    ensure_staff_table($conn);
+
+    if($current_staff_id > 0){
+        $stmt = mysqli_prepare($conn, "SELECT id, status FROM staff WHERE id=? AND user_id=? LIMIT 1");
+        if($stmt){
+            mysqli_stmt_bind_param($stmt, 'ii', $current_staff_id, $owner_id);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+            $staff = mysqli_fetch_assoc($result) ?: null;
+            if($staff && strtolower((string)($staff['status'] ?? '')) === 'active'){
+                $user['staff_status'] = $staff['status'] ?? '';
+                return $user;
+            }
+        }
+    }
+
+    $email = trim((string)($user['email'] ?? ''));
+    $phone = trim((string)($user['phone'] ?? ''));
+    $username = trim((string)($user['username'] ?? ''));
+    $username_base = strtolower($username);
+    if(preg_match('/^(.+)@\d+$/', $username_base, $matches)){
+        $username_base = $matches[1];
+    }
+    $username_base = preg_replace('/[^a-z0-9]+/', ' ', $username_base);
+    $username_base = trim((string)$username_base);
+    $username_like = $username_base !== '' ? '%' . $username_base . '%' : '';
+
+    if($email === '' && $phone === '' && $username_like === ''){
+        return $user;
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "SELECT id, status
+         FROM staff
+         WHERE user_id=?
+         AND status='active'
+         AND (
+            (?<>'' AND email=?)
+            OR (?<>'' AND phone=?)
+            OR (?<>'' AND LOWER(name) LIKE ?)
+            OR (?<>'' AND LOWER(staff_code) LIKE ?)
+            OR (?<>'' AND LOWER(email) LIKE ?)
+            OR (?<>'' AND phone LIKE ?)
+         )
+         ORDER BY
+            CASE
+                WHEN ?<>'' AND email=? THEN 1
+                WHEN ?<>'' AND phone=? THEN 2
+                WHEN ?<>'' AND LOWER(name) LIKE ? THEN 3
+                WHEN ?<>'' AND LOWER(staff_code) LIKE ? THEN 4
+                ELSE 5
+            END,
+            id DESC
+         LIMIT 1"
+    );
+
+    if(!$stmt){
+        return $user;
+    }
+
+    $staff_link_types = 'i' . str_repeat('s', 20);
+    mysqli_stmt_bind_param(
+        $stmt,
+        $staff_link_types,
+        $owner_id,
+        $email,
+        $email,
+        $phone,
+        $phone,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like,
+        $email,
+        $email,
+        $phone,
+        $phone,
+        $username_like,
+        $username_like,
+        $username_like,
+        $username_like
+    );
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $staff = mysqli_fetch_assoc($result) ?: null;
+
+    if(!$staff){
+        return $user;
+    }
+
+    $new_staff_id = (int)$staff['id'];
+    $update = mysqli_prepare($conn, "UPDATE users SET staff_id=? WHERE id=? AND role='manager' LIMIT 1");
+    if($update){
+        mysqli_stmt_bind_param($update, 'ii', $new_staff_id, $manager_id);
+        mysqli_stmt_execute($update);
+    }
+
+    $user['staff_id'] = $new_staff_id;
+    $user['staff_status'] = $staff['status'] ?? 'active';
+
+    return $user;
+}
 
 function start_super_admin_session()
 {
@@ -185,35 +304,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $message_type = 'danger';
                 } else {
 
-                // A manager login is issued to a staff member.  Keep the staff
-                // record as the source of truth, so an inactive staff member
-                // cannot continue to use an otherwise active login account.
+                // A manager login is issued to a staff member. Keep the staff
+                // record as the source of truth, and repair old staff_id links
+                // after a database export/import rebuilds staff IDs.
                 $staff_login_blocked = false;
+                $user = $role === 'manager'
+                    ? repair_manager_staff_link_after_import($conn, $user, $owner_id)
+                    : $user;
 
                 if ($role === 'manager' && (int)($user['staff_id'] ?? 0) > 0) {
-                    $staff_login_stmt = mysqli_prepare(
-                        $conn,
-                        "SELECT status FROM staff WHERE id=? AND user_id=? LIMIT 1"
-                    );
-
-                    if ($staff_login_stmt) {
-                        $staff_id = (int)$user['staff_id'];
-                        $staff_owner_id = (int)$owner_id;
-
-                        mysqli_stmt_bind_param(
-                            $staff_login_stmt,
-                            "ii",
-                            $staff_id,
-                            $staff_owner_id
-                        );
-                        mysqli_stmt_execute($staff_login_stmt);
-
-                        $staff_login_result = mysqli_stmt_get_result($staff_login_stmt);
-                        $linked_staff = mysqli_fetch_assoc($staff_login_result) ?: null;
-
-                        $staff_login_blocked = !$linked_staff
-                            || strtolower((string)($linked_staff['status'] ?? '')) !== 'active';
-                    }
+                    $staff_login_blocked = strtolower((string)($user['staff_status'] ?? '')) !== 'active';
+                } elseif ($role === 'manager') {
+                    $staff_login_blocked = true;
                 }
 
                 $account = $user;
