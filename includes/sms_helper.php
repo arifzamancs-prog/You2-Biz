@@ -31,8 +31,27 @@ function ensure_sms_marketing_columns($conn)
             message TEXT NOT NULL,
             response LONGTEXT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )"
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+
+    $table_status = mysqli_query($conn, "SHOW TABLE STATUS LIKE 'sms_history'");
+    $table_info = $table_status ? mysqli_fetch_assoc($table_status) : null;
+    if($table_info && stripos((string)($table_info['Collation'] ?? ''), 'utf8mb4') === false){
+        mysqli_query($conn, "ALTER TABLE sms_history CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    }
+
+    $history_columns = [
+        'message' => "ALTER TABLE sms_history MODIFY message TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+        'response' => "ALTER TABLE sms_history MODIFY response LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+    ];
+
+    foreach($history_columns as $column => $sql){
+        $check = mysqli_query($conn, "SHOW COLUMNS FROM sms_history LIKE '" . mysqli_real_escape_string($conn, $column) . "'");
+        $column_info = $check ? mysqli_fetch_assoc($check) : null;
+        if($column_info && stripos((string)($column_info['Collation'] ?? ''), 'utf8mb4') === false){
+            mysqli_query($conn, $sql);
+        }
+    }
 }
 
 function sms_get_user_quota($conn, $user_id)
@@ -94,7 +113,11 @@ function sms_consume_user_quota($conn, $user_id, $count)
 
     mysqli_stmt_bind_param($stmt, "ii", $count, $user_id);
 
-    return mysqli_stmt_execute($stmt);
+    try{
+        return mysqli_stmt_execute($stmt);
+    }catch(Throwable $exception){
+        return false;
+    }
 }
 
 function sms_get_api_token($conn, $user_id)

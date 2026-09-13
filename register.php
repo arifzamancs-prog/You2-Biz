@@ -130,11 +130,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $sql
             );
 
+            $normalized_company_type = normalize_company_type($company_type);
+
             mysqli_stmt_bind_param(
                 $stmt,
                 "ssssssiss",
                 $name,
-                normalize_company_type($company_type),
+                $normalized_company_type,
                 $email,
                 $phone,
                 $hash,
