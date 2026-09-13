@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/project_package_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -15,6 +16,7 @@ ensure_customer_opening_due_tables($conn);
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, (int)$_SESSION['user_id']);
 $invoice_types = booking_invoice_types($conn, (int)$_SESSION['user_id'], false);
+$project_package_labels = project_package_labels($conn, (int)$user_id);
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -308,11 +310,12 @@ while(
 /* Confirmed Invoice Wallet Transactions */
 
 $wallet_transaction_sql = "SELECT
-        t.id,
+        COALESCE(t.id, bi.id) AS ledger_reference_id,
+        t.id AS transaction_id,
         t.txn_no,
-        t.txn_date,
+        COALESCE(t.txn_date, bi.invoice_date) AS ledger_date,
         t.transaction_type,
-        t.amount,
+        COALESCE(t.amount, bi.amount) AS ledger_amount,
         t.note,
         bi.invoice_no,
         bi.invoice_type,
@@ -323,10 +326,11 @@ $wallet_transaction_sql = "SELECT
         p.project_name,
         pk.package_name,
         w.wallet_name
-    FROM transactions t
-    INNER JOIN booking_invoices bi
-        ON bi.id=t.reference_id
-        AND bi.user_id=t.user_id
+    FROM booking_invoices bi
+    LEFT JOIN transactions t
+        ON t.reference_id=bi.id
+        AND t.user_id=bi.user_id
+        AND t.transaction_type IN ('invoice_income', 'invoice_expense')
     LEFT JOIN projects p
         ON p.id=bi.project_id
         AND p.user_id=bi.user_id
@@ -334,13 +338,12 @@ $wallet_transaction_sql = "SELECT
         ON pk.id=bi.package_id
         AND pk.user_id=bi.user_id
     LEFT JOIN wallets w
-        ON w.id=t.wallet_id
-        AND w.user_id=t.user_id
+        ON w.id=COALESCE(t.wallet_id, bi.wallet_id)
+        AND w.user_id=bi.user_id
     WHERE bi.customer_id=?
     AND bi.user_id=?
     AND bi.status='confirmed'
-    AND t.transaction_type IN ('invoice_income', 'invoice_expense')
-    ORDER BY t.txn_date, t.id";
+    ORDER BY COALESCE(t.txn_date, bi.invoice_date), COALESCE(t.id, bi.id)";
 
 $wallet_transaction_stmt = mysqli_prepare($conn, $wallet_transaction_sql);
 mysqli_stmt_bind_param($wallet_transaction_stmt, 'ii', $customer_id, $user_id);
@@ -348,16 +351,20 @@ mysqli_stmt_execute($wallet_transaction_stmt);
 $wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
 
 while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
-    $is_refund = $row['transaction_type'] === 'invoice_expense';
+    $invoice_type_key = normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types);
+    $transaction_type = trim((string)($row['transaction_type'] ?? ''));
+    $is_refund = $transaction_type !== ''
+        ? $transaction_type === 'invoice_expense'
+        : booking_invoice_behavior($conn, $user_id, $invoice_type_key) === 'expense';
 
     $ledger[] = [
-        'trx_date' => $row['txn_date'],
+        'trx_date' => $row['ledger_date'],
         'type' => $is_refund ? 'Wallet Refund' : 'Wallet Received',
         'reference' => trim((string)$row['invoice_no']),
         'invoice_no' => trim((string)$row['invoice_no']),
         'wallet_name' => (string)($row['wallet_name'] ?? ''),
         'payment_type' => booking_invoice_type_label($row['invoice_type'] ?? '', $invoice_types),
-        'invoice_type_key' => normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types),
+        'invoice_type_key' => $invoice_type_key,
         'note' => trim((string)($row['invoice_note'] ?? '')) !== '' ? (string)$row['invoice_note'] : 'confirmed',
         'project_details' => trim(
             (string)($row['project_name'] ?? '') .
@@ -365,13 +372,13 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
             (string)($row['package_name'] ?? '')
         ),
         'booking_date' => $row['invoice_date'],
-        // Only Booking/Full Payment establish a new package total. Installment
-        // and Cancel/Return are adjustments to an existing package segment.
-        'total_amount' => (!$is_refund && in_array(normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types), ['booking', 'full_payment'], true)) ? (float)$row['package_price'] : 0,
+        // Booking, Full Payment, and custom income types establish a new
+        // package/service total. Installment/refund types adjust an existing segment.
+        'total_amount' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
         'sort_order' => $is_refund ? 3 : 2,
-        'reference_id' => (int)$row['id'],
-        'debit' => $is_refund ? (float)$row['amount'] : 0,
-        'credit' => $is_refund ? 0 : (float)$row['amount'],
+        'reference_id' => (int)$row['ledger_reference_id'],
+        'debit' => $is_refund ? (float)$row['ledger_amount'] : 0,
+        'credit' => $is_refund ? 0 : (float)$row['ledger_amount'],
     ];
 }
 
@@ -527,14 +534,18 @@ if($total_due < 0 && abs($total_due) < 0.01){
 
 $ledger_groups = [];
 
-// Map each purchased package to its originating Booking/Full Payment segment
+$package_label = $project_package_labels['package'] ?? 'Package';
+$package_count_label = $package_label === 'Service' ? 'Total Service' : 'Total Package';
+$package_details_label = $package_label === 'Service' ? 'Service Details' : 'Package Details';
+
+// Map each purchased package/service to its originating purchase segment
 // so later Installment/Cancel transactions update that same segment.
 $package_origin_groups = [];
 foreach($ledger as $origin_row){
     $origin_details = trim((string)($origin_row['project_details'] ?? ''));
     $origin_no = trim((string)($origin_row['invoice_no'] ?? ''));
     $origin_type = normalize_booking_invoice_type($origin_row['invoice_type_key'] ?? '', $invoice_types);
-    if($origin_details !== '' && $origin_no !== '' && in_array($origin_type, ['booking','full_payment'], true)){
+    if($origin_details !== '' && $origin_no !== '' && booking_invoice_establishes_total($conn, $user_id, $origin_type)){
         $package_origin_groups[$origin_details] = 'invoice-' . md5($origin_no);
     }
 }
@@ -544,9 +555,9 @@ foreach($ledger as $row){
     $row_booking_date = trim((string)($row['booking_date'] ?? ''));
     $row_invoice_no = trim((string)($row['invoice_no'] ?? ''));
     $row_type_key = normalize_booking_invoice_type($row['invoice_type_key'] ?? '', $invoice_types);
-    $is_package_adjustment = in_array($row_type_key, ['cancel_return', 'installment'], true);
+    $is_package_adjustment = booking_invoice_is_adjustment_type($conn, $user_id, $row_type_key);
     // Adjustments belong to the customer's existing project/package segment;
-    // Booking and Full Payment always start their own segment by invoice.
+    // total-establishing payment types always start their own segment by invoice.
     $group_key = (!$is_package_adjustment && $row_invoice_no !== '')
         ? 'invoice-' . md5($row_invoice_no)
         : '';
@@ -747,7 +758,7 @@ $show_grand_summary = $purchased_package_count > 1;
 <table class="table table-bordered">
 
 <tr>
-<th>Total Package</th>
+<th><?php echo htmlspecialchars($package_count_label); ?></th>
 <td><?php echo (int)$purchased_package_count; ?></td>
 </tr>
 
@@ -818,7 +829,7 @@ No ledger entries found.
 <table class="table table-bordered">
 
 <tr>
-<th>Package Details</th>
+<th><?php echo htmlspecialchars($package_details_label); ?></th>
 <td><?php echo htmlspecialchars($group['project_details']); ?></td>
 </tr>
 

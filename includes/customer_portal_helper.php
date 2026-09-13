@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/booking_invoice_helper.php';
+
 function ensure_customer_portal_columns($conn)
 {
     $columns = [
@@ -208,6 +210,7 @@ function customer_portal_upload_photo($file, &$message = '')
 function customer_portal_ledger_rows($conn, $user_id, $customer_id)
 {
     $ledger = [];
+    $invoice_types = booking_invoice_types($conn, $user_id, false);
 
     $stmt = mysqli_prepare($conn, "SELECT invoice_date, invoice_no, total_amount FROM invoices WHERE customer_id=? AND user_id=? AND accounting_status='posted'");
     mysqli_stmt_bind_param($stmt, 'ii', $customer_id, $user_id);
@@ -273,11 +276,13 @@ function customer_portal_ledger_rows($conn, $user_id, $customer_id)
         mysqli_stmt_execute($stmt);
         $result = mysqli_stmt_get_result($stmt);
         while($result && $row = mysqli_fetch_assoc($result)){
+            $invoice_type_key = normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types);
+            $is_refund = booking_invoice_behavior($conn, $user_id, $invoice_type_key) === 'expense';
             $ledger[] = [
                 'date' => $row['invoice_date'],
                 'type' => $row['invoice_type'] ?: 'Booking Invoice',
                 'reference' => $row['invoice_no'],
-                'debit' => (float)$row['package_price'],
+                'debit' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
                 'credit' => 0,
             ];
         }
@@ -336,6 +341,7 @@ function customer_portal_admin_style_ledger_rows($conn, $user_id, $customer_id, 
 
         while($result && $row = mysqli_fetch_assoc($result)){
             $is_refund = $row['transaction_type'] === 'invoice_expense';
+            $invoice_type_key = normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types);
             $project_details = trim(
                 (string)($row['project_name'] ?? '') .
                 (($row['project_name'] ?? '') !== '' && ($row['package_name'] ?? '') !== '' ? ' - ' : '') .
@@ -352,7 +358,7 @@ function customer_portal_admin_style_ledger_rows($conn, $user_id, $customer_id, 
                 'note' => trim((string)($row['invoice_note'] ?? '')) !== '' ? (string)$row['invoice_note'] : 'confirmed',
                 'project_details' => $project_details,
                 'booking_date' => $row['invoice_date'],
-                'total_amount' => $is_refund ? 0 : (float)$row['package_price'],
+                'total_amount' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
                 'sort_order' => $is_refund ? 3 : 2,
                 'reference_id' => (int)$row['id'],
                 'debit' => $is_refund ? (float)$row['amount'] : 0,

@@ -265,6 +265,62 @@ function booking_invoice_behavior($conn, $user_id, $type)
     return ($row['behavior'] ?? 'income') === 'expense' ? 'expense' : 'income';
 }
 
+function booking_invoice_establishes_total($conn, $user_id, $type)
+{
+    $type = trim((string)$type);
+    if($type === ''){
+        return false;
+    }
+
+    if(in_array($type, ['booking', 'full_payment'], true)){
+        return true;
+    }
+
+    if(in_array($type, ['installment', 'cancel_return', 'profit_return'], true)){
+        return false;
+    }
+
+    return booking_invoice_behavior($conn, $user_id, $type) === 'income';
+}
+
+function booking_invoice_is_adjustment_type($conn, $user_id, $type)
+{
+    $type = trim((string)$type);
+    if($type === ''){
+        return false;
+    }
+
+    if(in_array($type, ['installment', 'cancel_return', 'profit_return'], true)){
+        return true;
+    }
+
+    return !booking_invoice_establishes_total($conn, $user_id, $type);
+}
+
+function booking_invoice_total_type_keys($conn, $user_id, $types = null)
+{
+    $types = is_array($types) ? $types : booking_invoice_types($conn, $user_id, false);
+    $keys = [];
+    foreach(array_keys($types) as $type_key){
+        if(booking_invoice_establishes_total($conn, $user_id, $type_key)){
+            $keys[] = $type_key;
+        }
+    }
+    return $keys;
+}
+
+function booking_invoice_adjustment_type_keys($conn, $user_id, $types = null)
+{
+    $types = is_array($types) ? $types : booking_invoice_types($conn, $user_id, false);
+    $keys = [];
+    foreach(array_keys($types) as $type_key){
+        if(booking_invoice_is_adjustment_type($conn, $user_id, $type_key)){
+            $keys[] = $type_key;
+        }
+    }
+    return $keys;
+}
+
 function confirm_booking_invoice($conn, $invoice_id, $user_id)
 {
     require_once __DIR__ . '/wallet_helper.php';

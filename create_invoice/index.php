@@ -17,12 +17,17 @@ ensure_booking_invoice_type_table($conn, $user_id);
 $project_package_labels = project_package_labels($conn, $user_id);
 
 $invoice_types = booking_invoice_types($conn, $user_id);
+$total_invoice_type_keys = booking_invoice_total_type_keys($conn, $user_id, $invoice_types);
+$adjustment_invoice_type_keys = booking_invoice_adjustment_type_keys($conn, $user_id, $invoice_types);
+$total_invoice_type_sql = "'" . implode("','", array_map(static function($type_key) use ($conn){
+    return mysqli_real_escape_string($conn, $type_key);
+}, $total_invoice_type_keys)) . "'";
 $payment_type_customers = [];
 $customer_projects = [];
 $customer_packages = [];
 $ptc = mysqli_query($conn, "SELECT DISTINCT customer_id, invoice_type FROM booking_invoices WHERE user_id={$user_id} AND status='confirmed'");
 while($ptc && $pr = mysqli_fetch_assoc($ptc)){ $payment_type_customers[$pr['invoice_type']][] = (int)$pr['customer_id']; }
-$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed' AND bi.invoice_type IN ('booking','full_payment') ORDER BY bi.invoice_date DESC");
+$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed' AND bi.invoice_type IN ({$total_invoice_type_sql}) ORDER BY bi.invoice_date DESC");
 while($purchase_map && $pm = mysqli_fetch_assoc($purchase_map)){ $c=(int)$pm['customer_id']; $p=(int)$pm['project_id']; $customer_projects[$c][]=$p; $customer_packages[$c][$p][]=['id'=>(int)$pm['package_id'],'date'=>date('d-m-Y',strtotime($pm['invoice_date'])),'name'=>(string)($pm['package_name'] ?? ''),'total'=>(float)$pm['total_amount'],'paid'=>(float)$pm['paid_amount']]; }
 $type = '';
 $display_type = isset($_GET['type']) ? normalize_booking_invoice_type($_GET['type'], $invoice_types) : 'booking';
@@ -50,11 +55,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
     $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
     $numeric_amount = (float)$amount;
-    $numeric_total_price = in_array($type, ['booking', 'full_payment'], true) ? (float)$total_price : 0;
+    $type_establishes_total = booking_invoice_establishes_total($conn, $user_id, $type);
+    $numeric_total_price = $type_establishes_total ? (float)$total_price : 0;
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
     $final_amount = $charge_calculation['total'];
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || (in_array($type, ['booking', 'full_payment'], true) && $numeric_total_price <= 0)){
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type_establishes_total && $numeric_total_price <= 0)){
         $message = 'Customer, ' . $project_package_labels['project'] . ', ' . $project_package_labels['package'] . ', Payment Type, Date and valid Amount are required.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
@@ -371,6 +377,8 @@ require_once '../includes/sidebar.php';
 document.addEventListener('DOMContentLoaded', function () {
     const customerProjects = <?= json_encode($customer_projects); ?>;
     const customerPackages = <?= json_encode($customer_packages); ?>;
+    const totalInvoiceTypes = <?= json_encode(array_values($total_invoice_type_keys)); ?>;
+    const adjustmentInvoiceTypes = <?= json_encode(array_values($adjustment_invoice_type_keys)); ?>;
     const projectSelect = document.getElementById('project_id');
     const packageSelect = document.getElementById('package_id');
     const invoiceTypeSelect = document.getElementById('invoice_type');
@@ -389,7 +397,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function filterPackages() {
         const selectedProject = projectSelect.value;
         const customerId = document.querySelector('[name="customer_id"]').value;
-        const adjustmentMode = ['cancel_return','installment'].includes(invoiceTypeSelect.value);
+        const adjustmentMode = adjustmentInvoiceTypes.includes(invoiceTypeSelect.value);
         const purchased = (customerPackages[customerId] && customerPackages[customerId][selectedProject]) || [];
         let hasVisibleSelected = false;
 
@@ -450,14 +458,14 @@ document.addEventListener('DOMContentLoaded', function () {
     function syncPackagePrice() {
         const selectedOption = packageSelect.options[packageSelect.selectedIndex];
         if (selectedOption && selectedOption.dataset.price) {
-            if (!totalPriceInput.value || ['booking', 'full_payment'].includes(invoiceTypeSelect.value)) {
+            if (!totalPriceInput.value || totalInvoiceTypes.includes(invoiceTypeSelect.value)) {
                 totalPriceInput.value = selectedOption.dataset.price;
             }
         }
     }
 
     function toggleTotalPrice() {
-        const needsTotalPrice = ['booking', 'full_payment'].includes(invoiceTypeSelect.value);
+        const needsTotalPrice = totalInvoiceTypes.includes(invoiceTypeSelect.value);
         totalPriceGroup.style.display = needsTotalPrice ? '' : 'none';
         totalPriceInput.required = needsTotalPrice;
 
@@ -474,13 +482,13 @@ document.addEventListener('DOMContentLoaded', function () {
         syncPackagePrice();
         const selected = packageSelect.options[packageSelect.selectedIndex];
         const balance = document.getElementById('selected-package-balance');
-        if (balance) balance.textContent = ['cancel_return','installment'].includes(invoiceTypeSelect.value) && selected && selected.dataset.total
+        if (balance) balance.textContent = adjustmentInvoiceTypes.includes(invoiceTypeSelect.value) && selected && selected.dataset.total
             ? 'Total Amount: ' + Number(selected.dataset.total).toFixed(2) + ' | Total Paid: ' + Number(selected.dataset.paid).toFixed(2) + ' | Total Due: ' + Number(selected.dataset.due).toFixed(2) : '';
     });
     invoiceTypeSelect.addEventListener('change', toggleTotalPrice);
     walletSelect.addEventListener('change', updateWalletBalance);
     invoiceTypeSelect.addEventListener('change', function(){
-        const restrictProjects=['cancel_return','installment'].includes(this.value), c=document.querySelector('[name="customer_id"]').value;
+        const restrictProjects=adjustmentInvoiceTypes.includes(this.value), c=document.querySelector('[name="customer_id"]').value;
         const balance = document.getElementById('selected-package-balance');
         if (balance && !restrictProjects) balance.textContent = '';
         projectSelect.value = '';
@@ -490,7 +498,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     projectSelect.addEventListener('change', function(){
         const c=document.querySelector('[name="customer_id"]').value;
-        if(['cancel_return','installment'].includes(invoiceTypeSelect.value)) filterPackages();
+        if(adjustmentInvoiceTypes.includes(invoiceTypeSelect.value)) filterPackages();
         updateWalletBalance();
     });
     packageSelect.addEventListener('change', updateWalletBalance);
@@ -502,7 +510,7 @@ document.addEventListener('DOMContentLoaded', function () {
         Array.from(packageSelect.options).forEach(function(o,i){ if(i) o.hidden = true; });
         const balance = document.getElementById('selected-package-balance');
         if (balance) balance.textContent = '';
-        const restrictProjects = ['cancel_return','installment'].includes(invoiceTypeSelect.value);
+        const restrictProjects = adjustmentInvoiceTypes.includes(invoiceTypeSelect.value);
         Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden=restrictProjects && !!this.value && !((customerProjects[this.value]||[]).includes(Number(o.value))); }, this);
         if(!this.value){ invoiceTypeSelect.value = ''; toggleTotalPrice(); }
         updateWalletBalance();
