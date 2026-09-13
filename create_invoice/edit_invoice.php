@@ -48,10 +48,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $preserved_charge_rows[] = ['charge'=>['id'=>(int)$saved_charge['charge_type_id'], 'charge_name'=>$saved_charge['charge_name'], 'charge_type'=>$saved_charge['charge_type'], 'charge_value_type'=>$saved_charge['charge_value_type']], 'input_value'=>(float)$saved_charge['input_value'], 'amount'=>(float)$saved_charge['charge_amount']];
     }
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $amount, $charge_inputs, $preserved_charge_rows); $final_amount = $charge_calculation['total'];
-    $numeric_total_price = $invoice_type === 'booking' ? (float)$total_price : 0;
+    $numeric_total_price = in_array($invoice_type, ['booking', 'full_payment'], true) ? (float)$total_price : 0;
     $notes = trim((string)($_POST['notes'] ?? ''));
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $amount <= 0 || $final_amount <= 0 || ($invoice_type === 'booking' && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $invoice_date)){
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $amount <= 0 || $final_amount <= 0 || (in_array($invoice_type, ['booking', 'full_payment'], true) && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $invoice_date)){
         $message = 'Please complete all invoice fields correctly.';
     }else{
         mysqli_begin_transaction($conn);
@@ -173,18 +173,18 @@ document.addEventListener('DOMContentLoaded', function () {
     function syncPackagePrice() {
         const selectedOption = packageSelect.options[packageSelect.selectedIndex];
         if (selectedOption && selectedOption.dataset.price) {
-            if (!totalPriceInput.value || invoiceTypeSelect.value === 'booking') {
+            if (!totalPriceInput.value || ['booking', 'full_payment'].includes(invoiceTypeSelect.value)) {
                 totalPriceInput.value = selectedOption.dataset.price;
             }
         }
     }
 
     function toggleTotalPrice() {
-        const isBooking = invoiceTypeSelect.value === 'booking';
-        totalPriceGroup.style.display = isBooking ? '' : 'none';
-        totalPriceInput.required = isBooking;
+        const needsTotalPrice = ['booking', 'full_payment'].includes(invoiceTypeSelect.value);
+        totalPriceGroup.style.display = needsTotalPrice ? '' : 'none';
+        totalPriceInput.required = needsTotalPrice;
 
-        if (isBooking && !totalPriceInput.value) {
+        if (needsTotalPrice && !totalPriceInput.value) {
             const selectedOption = packageSelect.options[packageSelect.selectedIndex];
             if (selectedOption && selectedOption.dataset.price) {
                 totalPriceInput.value = selectedOption.dataset.price;

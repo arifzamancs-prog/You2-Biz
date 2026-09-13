@@ -60,7 +60,7 @@ require_once '../includes/sidebar.php';
 <div class="card">
     <div class="card-header"><h3 class="card-title">Invoice List</h3><div class="card-tools"><a href="index.php" class="btn btn-primary btn-sm"><i class="fas fa-plus"></i> Create Invoice</a></div></div>
     <div class="card-body">
-        <?php if(isset($_GET['deleted'])){ ?><div class="alert alert-success">Invoice deleted successfully.</div><?php } ?>
+        <?php if(isset($_GET['deleted'])){ ?><div class="alert alert-success">Invoice deleted successfully.</div><script>if(window.history && window.history.replaceState){ window.history.replaceState({}, document.title, window.location.pathname); }</script><?php } ?>
         <?php if(isset($_GET['confirmed'])){ ?><div class="alert alert-success">Invoice confirmed and wallet balance updated.</div><?php } ?>
         <?php if(isset($_GET['updated'])){ ?><div class="alert alert-success">Invoice updated and wallet balance adjusted.</div><?php } ?>
         <?php if(isset($_GET['error'])){ ?><div class="alert alert-danger"><?= htmlspecialchars($_GET['error']); ?></div><?php } ?>

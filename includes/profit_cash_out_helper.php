@@ -27,14 +27,9 @@ function ensure_profit_cash_out_transaction_type($conn)
 {
     $transaction_type = mysqli_query($conn, "SHOW COLUMNS FROM transactions LIKE 'transaction_type'");
     $transaction_type_row = $transaction_type ? mysqli_fetch_assoc($transaction_type) : null;
-    if($transaction_type_row && strpos((string)($transaction_type_row['Type'] ?? ''), "'profit_cash_out'") === false){
-        mysqli_query(
-            $conn,
-                "ALTER TABLE transactions MODIFY transaction_type ENUM(
-                'money_in','expense','transfer','transfer_in','transfer_out',
-                'sales_invoice','receive_payment','purchase','supplier_payment',
-                'profit_cash_out','staff_payment'
-            ) NOT NULL"
-        );
+    if($transaction_type_row && stripos((string)($transaction_type_row['Type'] ?? ''), 'enum(') === 0){
+        // Preserve all existing transaction values on live databases; the
+        // previous narrow ENUM caused data-truncation during ALTER TABLE.
+        mysqli_query($conn, "ALTER TABLE transactions MODIFY transaction_type VARCHAR(50) NOT NULL");
     }
 }

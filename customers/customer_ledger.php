@@ -357,6 +357,7 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
         'invoice_no' => trim((string)$row['invoice_no']),
         'wallet_name' => (string)($row['wallet_name'] ?? ''),
         'payment_type' => booking_invoice_type_label($row['invoice_type'] ?? '', $invoice_types),
+        'invoice_type_key' => normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types),
         'note' => trim((string)($row['invoice_note'] ?? '')) !== '' ? (string)$row['invoice_note'] : 'confirmed',
         'project_details' => trim(
             (string)($row['project_name'] ?? '') .
@@ -364,7 +365,9 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
             (string)($row['package_name'] ?? '')
         ),
         'booking_date' => $row['invoice_date'],
-        'total_amount' => $is_refund ? 0 : (float)$row['package_price'],
+        // Only Booking/Full Payment establish a new package total. Installment
+        // and Cancel/Return are adjustments to an existing package segment.
+        'total_amount' => (!$is_refund && in_array(normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types), ['booking', 'full_payment'], true)) ? (float)$row['package_price'] : 0,
         'sort_order' => $is_refund ? 3 : 2,
         'reference_id' => (int)$row['id'],
         'debit' => $is_refund ? (float)$row['amount'] : 0,
@@ -524,16 +527,34 @@ if($total_due < 0 && abs($total_due) < 0.01){
 
 $ledger_groups = [];
 
+// Map each purchased package to its originating Booking/Full Payment segment
+// so later Installment/Cancel transactions update that same segment.
+$package_origin_groups = [];
+foreach($ledger as $origin_row){
+    $origin_details = trim((string)($origin_row['project_details'] ?? ''));
+    $origin_no = trim((string)($origin_row['invoice_no'] ?? ''));
+    $origin_type = normalize_booking_invoice_type($origin_row['invoice_type_key'] ?? '', $invoice_types);
+    if($origin_details !== '' && $origin_no !== '' && in_array($origin_type, ['booking','full_payment'], true)){
+        $package_origin_groups[$origin_details] = 'invoice-' . md5($origin_no);
+    }
+}
+
 foreach($ledger as $row){
     $row_project_details = trim((string)($row['project_details'] ?? ''));
     $row_booking_date = trim((string)($row['booking_date'] ?? ''));
     $row_invoice_no = trim((string)($row['invoice_no'] ?? ''));
-    $group_key = $row_invoice_no !== ''
+    $row_type_key = normalize_booking_invoice_type($row['invoice_type_key'] ?? '', $invoice_types);
+    $is_package_adjustment = in_array($row_type_key, ['cancel_return', 'installment'], true);
+    // Adjustments belong to the customer's existing project/package segment;
+    // Booking and Full Payment always start their own segment by invoice.
+    $group_key = (!$is_package_adjustment && $row_invoice_no !== '')
         ? 'invoice-' . md5($row_invoice_no)
         : '';
 
     if($group_key === '' && $row_project_details !== ''){
-        $group_key = 'project-package-' . md5($row_project_details . '|' . $row_booking_date . '|' . ($row['reference_id'] ?? count($ledger_groups)));
+        $group_key = $is_package_adjustment && isset($package_origin_groups[$row_project_details])
+            ? $package_origin_groups[$row_project_details]
+            : 'project-package-' . md5($row_project_details);
     }
 
     if($group_key === ''){
@@ -797,7 +818,7 @@ No ledger entries found.
 <table class="table table-bordered">
 
 <tr>
-<th>Project Details</th>
+<th>Package Details</th>
 <td><?php echo htmlspecialchars($group['project_details']); ?></td>
 </tr>
 

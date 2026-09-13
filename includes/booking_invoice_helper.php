@@ -125,6 +125,7 @@ function booking_default_invoice_types()
         'booking' => 'Booking',
         'installment' => 'Installment',
         'cancel_return' => 'Cancel/Return',
+        'full_payment' => 'Full Payment',
     ];
 }
 
@@ -134,6 +135,7 @@ function booking_default_invoice_type_behaviors()
         'booking' => 'income',
         'installment' => 'income',
         'cancel_return' => 'expense',
+        'full_payment' => 'income',
     ];
 }
 
@@ -180,6 +182,9 @@ function ensure_booking_invoice_type_table($conn, $user_id)
         );
         mysqli_stmt_bind_param($seed_stmt, 'isss', $user_id, $type_key, $type_name, $behavior);
         mysqli_stmt_execute($seed_stmt);
+        $restore_stmt = mysqli_prepare($conn, "UPDATE booking_invoice_types SET type_name=?, behavior=?, status='active' WHERE user_id=? AND type_key=?");
+        mysqli_stmt_bind_param($restore_stmt, 'ssis', $type_name, $behavior, $user_id, $type_key);
+        mysqli_stmt_execute($restore_stmt);
     }
 
     $default_behaviors = booking_default_invoice_type_behaviors();

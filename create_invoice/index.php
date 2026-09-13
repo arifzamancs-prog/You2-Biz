@@ -17,6 +17,13 @@ ensure_booking_invoice_type_table($conn, $user_id);
 $project_package_labels = project_package_labels($conn, $user_id);
 
 $invoice_types = booking_invoice_types($conn, $user_id);
+$payment_type_customers = [];
+$customer_projects = [];
+$customer_packages = [];
+$ptc = mysqli_query($conn, "SELECT DISTINCT customer_id, invoice_type FROM booking_invoices WHERE user_id={$user_id} AND status='confirmed'");
+while($ptc && $pr = mysqli_fetch_assoc($ptc)){ $payment_type_customers[$pr['invoice_type']][] = (int)$pr['customer_id']; }
+$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed' AND bi.invoice_type IN ('booking','full_payment') ORDER BY bi.invoice_date DESC");
+while($purchase_map && $pm = mysqli_fetch_assoc($purchase_map)){ $c=(int)$pm['customer_id']; $p=(int)$pm['project_id']; $customer_projects[$c][]=$p; $customer_packages[$c][$p][]=['id'=>(int)$pm['package_id'],'date'=>date('d-m-Y',strtotime($pm['invoice_date'])),'name'=>(string)($pm['package_name'] ?? ''),'total'=>(float)$pm['total_amount'],'paid'=>(float)$pm['paid_amount']]; }
 $type = '';
 $display_type = isset($_GET['type']) ? normalize_booking_invoice_type($_GET['type'], $invoice_types) : 'booking';
 
@@ -43,11 +50,11 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
     $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
     $numeric_amount = (float)$amount;
-    $numeric_total_price = $type === 'booking' ? (float)$total_price : 0;
+    $numeric_total_price = in_array($type, ['booking', 'full_payment'], true) ? (float)$total_price : 0;
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
     $final_amount = $charge_calculation['total'];
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type === 'booking' && $numeric_total_price <= 0)){
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || (in_array($type, ['booking', 'full_payment'], true) && $numeric_total_price <= 0)){
         $message = 'Customer, ' . $project_package_labels['project'] . ', ' . $project_package_labels['package'] . ', Payment Type, Date and valid Amount are required.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
@@ -226,7 +233,7 @@ require_once '../includes/sidebar.php';
                         <select id="project_id" name="project_id" class="form-control" required>
                             <option value=""><?= htmlspecialchars($project_package_labels['project_select']); ?></option>
                             <?php foreach($projects as $project){ ?>
-                                <option value="<?= (int)$project['id']; ?>" <?= $project_id === (int)$project['id'] ? 'selected' : ''; ?>>
+                                <option value="<?= (int)$project['id']; ?>" data-purchased-customers="<?= htmlspecialchars(implode(',', array_keys(array_filter($customer_projects, function($ps) use ($project){ return in_array((int)$project['id'], $ps, true); })))); ?>" <?= $project_id === (int)$project['id'] ? 'selected' : ''; ?>>
                                     <?= htmlspecialchars($project['project_name']); ?>
                                 </option>
                             <?php } ?>
@@ -255,10 +262,10 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-4">
                     <div class="form-group">
                         <label>Payment Type</label>
-                        <select id="invoice_type" name="invoice_type" class="form-control" required>
+                        <select id="invoice_type" name="invoice_type" class="form-control" required <?= $customer_id > 0 ? '' : 'disabled'; ?> >
                             <option value="">Select Payment Type</option>
                             <?php foreach($invoice_types as $type_key => $type_name){ ?>
-                                <option value="<?= htmlspecialchars($type_key); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
+                                <option value="<?= htmlspecialchars($type_key); ?>" data-customer-ids="<?= htmlspecialchars(implode(',', $payment_type_customers[$type_key] ?? [])); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
                                     <?= htmlspecialchars($type_name); ?>
                                 </option>
                             <?php } ?>
@@ -283,9 +290,9 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-4">
                     <div class="form-group">
                         <label>Wallet</label>
-                        <select name="wallet_id" class="form-control" required>
+                        <select id="wallet_id" name="wallet_id" class="form-control" required>
                             <?php foreach($wallets as $wallet){ ?>
-                                <option value="<?= (int)$wallet['id']; ?>" <?= $wallet_id === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option>
+                                <option value="<?= (int)$wallet['id']; ?>" data-balance="<?= htmlspecialchars(number_format((float)($wallet['balance'] ?? 0), 2, '.', '')); ?>" <?= $wallet_id === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option>
                             <?php } ?>
                         </select>
                     </div>
@@ -362,15 +369,47 @@ require_once '../includes/sidebar.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const customerProjects = <?= json_encode($customer_projects); ?>;
+    const customerPackages = <?= json_encode($customer_packages); ?>;
     const projectSelect = document.getElementById('project_id');
     const packageSelect = document.getElementById('package_id');
     const invoiceTypeSelect = document.getElementById('invoice_type');
     const totalPriceGroup = document.getElementById('total-price-group');
     const totalPriceInput = document.getElementById('total_price');
+    const walletSelect = document.getElementById('wallet_id');
+
+    function updateWalletBalance(){
+        let el = document.getElementById('selected-wallet-balance');
+        if(!el){ el=document.createElement('small'); el.id='selected-wallet-balance'; el.className='form-text text-muted'; walletSelect.parentNode.appendChild(el); }
+        const show = invoiceTypeSelect.value === 'cancel_return' && projectSelect.value && packageSelect.value;
+        const opt = walletSelect.options[walletSelect.selectedIndex];
+        el.textContent = show && opt ? 'Selected wallet balance: ' + Number(opt.dataset.balance || 0).toFixed(2) : '';
+    }
 
     function filterPackages() {
         const selectedProject = projectSelect.value;
+        const customerId = document.querySelector('[name="customer_id"]').value;
+        const adjustmentMode = ['cancel_return','installment'].includes(invoiceTypeSelect.value);
+        const purchased = (customerPackages[customerId] && customerPackages[customerId][selectedProject]) || [];
         let hasVisibleSelected = false;
+
+        // For adjustments, show every ledger purchase (including repeated
+        // purchases of the same package on different dates) as its own option.
+        Array.from(packageSelect.querySelectorAll('.purchased-package-option')).forEach(function(option){ option.remove(); });
+        if (adjustmentMode && selectedProject) {
+            purchased.forEach(function(item){
+                const base = Array.from(packageSelect.options).find(function(option){ return Number(option.value) === Number(item.id) && !option.classList.contains('purchased-package-option'); });
+                if (!base) return;
+                const option = base.cloneNode(true);
+                option.className = 'purchased-package-option';
+                option.textContent = (item.name || base.textContent.trim()) + ' (' + item.date + ')';
+                option.dataset.total = item.total;
+                option.dataset.paid = item.paid;
+                option.dataset.due = Math.max(0, item.total - item.paid);
+                option.hidden = false;
+                packageSelect.appendChild(option);
+            });
+        }
 
         Array.from(packageSelect.options).forEach(function (option, index) {
             if (index === 0) {
@@ -378,8 +417,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
 
-            const matches = !selectedProject || option.dataset.projectId === selectedProject;
+            const purchasedMatch = purchased.some(function(item){ return Number(item.id) === Number(option.value); });
+            const matches = !!selectedProject && option.dataset.projectId === selectedProject && (!adjustmentMode || (purchasedMatch && option.classList.contains('purchased-package-option')));
             option.hidden = !matches;
+            if (matches && adjustmentMode) {
+                const item = purchased.find(function(entry){ return Number(entry.id) === Number(option.value); });
+                if (item) option.textContent = item.name + ' (' + item.date + ')';
+            }
 
             if (option.selected && matches) {
                 hasVisibleSelected = true;
@@ -389,23 +433,35 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!hasVisibleSelected) {
             packageSelect.value = '';
         }
+
+        let balance = document.getElementById('selected-package-balance');
+        if (!balance) {
+            balance = document.createElement('small');
+            balance.id = 'selected-package-balance';
+            balance.className = 'form-text text-muted';
+            packageSelect.parentNode.appendChild(balance);
+        }
+        const selected = packageSelect.options[packageSelect.selectedIndex];
+        balance.textContent = adjustmentMode && selected && selected.dataset.total
+            ? 'Total Amount: ' + Number(selected.dataset.total).toFixed(2) + ' | Total Paid: ' + Number(selected.dataset.paid).toFixed(2) + ' | Total Due: ' + Number(selected.dataset.due).toFixed(2)
+            : '';
     }
 
     function syncPackagePrice() {
         const selectedOption = packageSelect.options[packageSelect.selectedIndex];
         if (selectedOption && selectedOption.dataset.price) {
-            if (!totalPriceInput.value || invoiceTypeSelect.value === 'booking') {
+            if (!totalPriceInput.value || ['booking', 'full_payment'].includes(invoiceTypeSelect.value)) {
                 totalPriceInput.value = selectedOption.dataset.price;
             }
         }
     }
 
     function toggleTotalPrice() {
-        const isBooking = invoiceTypeSelect.value === 'booking';
-        totalPriceGroup.style.display = isBooking ? '' : 'none';
-        totalPriceInput.required = isBooking;
+        const needsTotalPrice = ['booking', 'full_payment'].includes(invoiceTypeSelect.value);
+        totalPriceGroup.style.display = needsTotalPrice ? '' : 'none';
+        totalPriceInput.required = needsTotalPrice;
 
-        if (isBooking && !totalPriceInput.value) {
+        if (needsTotalPrice && !totalPriceInput.value) {
             const selectedOption = packageSelect.options[packageSelect.selectedIndex];
             if (selectedOption && selectedOption.dataset.price) {
                 totalPriceInput.value = selectedOption.dataset.price;
@@ -414,8 +470,43 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     projectSelect.addEventListener('change', filterPackages);
-    packageSelect.addEventListener('change', syncPackagePrice);
+    packageSelect.addEventListener('change', function(){
+        syncPackagePrice();
+        const selected = packageSelect.options[packageSelect.selectedIndex];
+        const balance = document.getElementById('selected-package-balance');
+        if (balance) balance.textContent = ['cancel_return','installment'].includes(invoiceTypeSelect.value) && selected && selected.dataset.total
+            ? 'Total Amount: ' + Number(selected.dataset.total).toFixed(2) + ' | Total Paid: ' + Number(selected.dataset.paid).toFixed(2) + ' | Total Due: ' + Number(selected.dataset.due).toFixed(2) : '';
+    });
     invoiceTypeSelect.addEventListener('change', toggleTotalPrice);
+    walletSelect.addEventListener('change', updateWalletBalance);
+    invoiceTypeSelect.addEventListener('change', function(){
+        const restrictProjects=['cancel_return','installment'].includes(this.value), c=document.querySelector('[name="customer_id"]').value;
+        const balance = document.getElementById('selected-package-balance');
+        if (balance && !restrictProjects) balance.textContent = '';
+        projectSelect.value = '';
+        packageSelect.value = '';
+        Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden=restrictProjects && !!c && !((customerProjects[c]||[]).includes(Number(o.value))); });
+        Array.from(packageSelect.options).forEach(function(o,i){ if(i) o.hidden = i > 0; });
+    });
+    projectSelect.addEventListener('change', function(){
+        const c=document.querySelector('[name="customer_id"]').value;
+        if(['cancel_return','installment'].includes(invoiceTypeSelect.value)) filterPackages();
+        updateWalletBalance();
+    });
+    packageSelect.addEventListener('change', updateWalletBalance);
+    document.querySelector('[name="customer_id"]').addEventListener('change', function(){
+        invoiceTypeSelect.disabled = !this.value;
+        projectSelect.value = '';
+        packageSelect.value = '';
+        Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden = false; });
+        Array.from(packageSelect.options).forEach(function(o,i){ if(i) o.hidden = true; });
+        const balance = document.getElementById('selected-package-balance');
+        if (balance) balance.textContent = '';
+        const restrictProjects = ['cancel_return','installment'].includes(invoiceTypeSelect.value);
+        Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden=restrictProjects && !!this.value && !((customerProjects[this.value]||[]).includes(Number(o.value))); }, this);
+        if(!this.value){ invoiceTypeSelect.value = ''; toggleTotalPrice(); }
+        updateWalletBalance();
+    });
 
     document.getElementById('create-invoice-form').addEventListener('submit', function (event) {
         if (event.submitter && event.submitter.value === 'save_print') {
@@ -431,8 +522,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     filterPackages();
     toggleTotalPrice();
+    updateWalletBalance();
 });
 </script>
+<style>
+#create-invoice-form > .row > div { order: 6; }
+#create-invoice-form > .row > div:nth-child(1) { order: 1; }
+#create-invoice-form > .row > div:nth-child(2) { order: 2; }
+#create-invoice-form > .row > div:nth-child(5) { order: 3; }
+#create-invoice-form > .row > div:nth-child(3) { order: 4; }
+#create-invoice-form > .row > div:nth-child(4) { order: 5; }
+</style>
 
 <?php
 require_once '../includes/footer.php';
