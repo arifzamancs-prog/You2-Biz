@@ -179,6 +179,21 @@ function require_staff_manage_access()
     exit;
 }
 
+function can_create_staff()
+{
+    return is_admin_user() || (is_manager_user() && manager_has_permission('staff'));
+}
+
+function require_create_staff_access()
+{
+    if(can_create_staff()){
+        return;
+    }
+
+    header("Location: " . app_path('dashboard.php?error=Permission denied'));
+    exit;
+}
+
 function require_sales_access()
 {
     if(is_admin_user() || (is_manager_user() && manager_has_permission('sales'))){

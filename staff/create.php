@@ -4,7 +4,7 @@ require_once '../includes/db.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/customer_form_helper.php';
 
-require_admin_user();
+require_create_staff_access();
 ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];

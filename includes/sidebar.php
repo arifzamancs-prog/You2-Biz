@@ -6,6 +6,7 @@ require_once __DIR__ . '/restaurant_table_helper.php';
 require_once __DIR__ . '/staff_incentive_helper.php';
 require_once __DIR__ . '/project_package_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
+require_once __DIR__ . '/sidebar_settings_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -326,6 +327,10 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
         'label' => 'Expired Product',
     ];
 }
+
+$sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_user() && sidebar_saved_layout_exists($conn, (int)($_SESSION['user_id'] ?? 0)))
+    ? sidebar_layout_items_for_current_user(sidebar_load_layout($conn, (int)($_SESSION['user_id'] ?? 0), $project_package_labels ?? []))
+    : [];
 
 ?>
 
@@ -682,6 +687,7 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
                     <?php if(!is_manager_user()){ ?>
                         <?php sidebar_item(app_path('profit_cash_out/index.php'), 'Profit Cash Out', 'fas fa-coins'); ?>
                     <?php } ?>
+                    <?php sidebar_item(app_path('user_management/sidebar_settings.php'), 'Slidebar Settings', 'fas fa-sliders-h'); ?>
                     <?php if(is_admin_user()){ ?>
                     <?php
                     $sidebar_tools_items = is_super_admin_user()
@@ -774,10 +780,106 @@ if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
 document.addEventListener('DOMContentLoaded', function () {
     const navigation = document.querySelector('.nav-sidebar');
     if (!navigation) return;
+    const sidebarLayout = <?= json_encode($sidebar_layout_items); ?>;
+    const itemMap = new Map();
+
+    function itemIdentity(item) {
+        const link = item.querySelector(':scope > .nav-link');
+        const label = link ? (link.querySelector('p') ? link.querySelector('p').textContent.trim().replace(/\s+/g, ' ') : '') : '';
+        const href = link ? link.getAttribute('href') : '';
+        return { label, href: href || '' };
+    }
+
+    function matchesLayout(identity, layout) {
+        return (layout.href && identity.href === layout.href) || identity.label === layout.label;
+    }
+
+    function ensureTree(item) {
+        if (!item.classList.contains('has-treeview')) {
+            item.classList.add('has-treeview');
+            const link = item.querySelector(':scope > .nav-link');
+            if (link && link.getAttribute('href') !== '#') {
+                link.setAttribute('href', '#');
+            }
+            let text = link ? link.querySelector('p') : null;
+            if (text && !text.querySelector('.right')) {
+                const arrow = document.createElement('i');
+                arrow.className = 'right fas fa-angle-left';
+                text.appendChild(arrow);
+            }
+        }
+
+        let list = item.querySelector(':scope > ul.nav-treeview');
+        if (!list) {
+            list = document.createElement('ul');
+            list.className = 'nav nav-treeview';
+            item.appendChild(list);
+        }
+        return list;
+    }
+
+    Array.from(navigation.querySelectorAll('li.nav-item')).forEach(function (item) {
+        const identity = itemIdentity(item);
+        const layout = sidebarLayout.find(function (entry) { return matchesLayout(identity, entry); });
+        if (layout) itemMap.set(layout.id, item);
+    });
+
+    sidebarLayout.forEach(function (entry) {
+        const item = itemMap.get(entry.id);
+        if (item && Number(entry.visible) === 0) {
+            item.remove();
+            itemMap.delete(entry.id);
+        }
+    });
+
+    sidebarLayout.forEach(function (entry) {
+        const item = itemMap.get(entry.id);
+        if (!item || !entry.parent) return;
+        const parent = itemMap.get(entry.parent);
+        if (!parent || parent === item || item.contains(parent)) return;
+        ensureTree(parent).appendChild(item);
+    });
+
+    const sectionHeaders = {};
+    Array.from(navigation.children).forEach(function (item) {
+        if (item.classList && item.classList.contains('nav-header')) {
+            sectionHeaders[item.textContent.trim()] = item;
+        }
+    });
+
+    ['MAIN', 'OPERATIONS', 'INSIGHTS', 'ADMIN', 'HELP', 'SESSION'].forEach(function (section) {
+        let previousItem = sectionHeaders[section] || null;
+        if (!previousItem) return;
+
+        sidebarLayout
+            .filter(function (entry) { return !entry.parent && entry.section === section && itemMap.has(entry.id); })
+            .sort(function (a, b) { return Number(a.sort || 0) - Number(b.sort || 0); })
+            .forEach(function (entry) {
+                const item = itemMap.get(entry.id);
+                if (!item || item.classList.contains('sidebar-bottom-break')) return;
+                previousItem.insertAdjacentElement('afterend', item);
+                previousItem = item;
+            });
+    });
+
+    sidebarLayout.forEach(function (parentEntry) {
+        const parent = itemMap.get(parentEntry.id);
+        if (!parent) return;
+        const list = parent.querySelector(':scope > ul.nav-treeview');
+        if (!list) return;
+        sidebarLayout
+            .filter(function (entry) { return entry.parent === parentEntry.id && itemMap.has(entry.id); })
+            .sort(function (a, b) { return Number(a.sort || 0) - Number(b.sort || 0); })
+            .forEach(function (entry) {
+                const child = itemMap.get(entry.id);
+                if (child) list.appendChild(child);
+            });
+    });
 
     const operationsHeader = Array.from(navigation.children).find(function (item) {
         return item.classList.contains('nav-header') && item.textContent.trim() === 'OPERATIONS';
     });
+    if (sidebarLayout.length) return;
     if (!operationsHeader) return;
 
     const orderedLabels = ['Sales', 'Wallets', <?= json_encode($project_package_labels['module']); ?>, 'Customer Manage', 'Lead Management', 'Suppliers'];
