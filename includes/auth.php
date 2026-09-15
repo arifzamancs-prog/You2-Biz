@@ -346,6 +346,7 @@ function block_manager_restricted_actions()
                 'sales' => ['sales/', 'create_invoice/'],
                 'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
                 'projects' => ['project_package/'],
+                'land_ledger' => ['land/'],
                 'customers' => ['customers/'],
                 'suppliers' => ['suppliers/', 'purchases/'],
                 'leads' => ['lead_management/'],

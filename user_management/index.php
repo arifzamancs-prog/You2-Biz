@@ -745,7 +745,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if($permission_key === 'land_ledger' && project_package_company_type($conn, $user_id) !== 'Housing') continue; ?>
                                 <div class="col-md-6 mb-2">
                                     <div class="custom-control custom-checkbox">
                                         <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>

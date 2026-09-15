@@ -418,7 +418,14 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 <?php } ?>
 
                 <?php if(is_manager_user()){ ?>
-                    <?php
+                <?php
+                    if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing' && manager_has_permission('land_ledger')){
+                        sidebar_tree('Land Ledger', 'fas fa-map-marked-alt', [
+                            ['href'=>app_path('land/land_manage.php'),'label'=>'Land Manage'],
+                            ['href'=>app_path('land/plot_manage.php'),'label'=>'Plot Manage'],
+                            ['href'=>app_path('land/land_summary.php'),'label'=>'Land Summary'],
+                        ]);
+                    }
                     if(manager_has_permission('sales')){
                     sidebar_tree(
                         'Sales',
@@ -464,6 +471,13 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 <?php }else{ ?>
 
                 <?php
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing'){
+                    sidebar_tree('Land Ledger', 'fas fa-map-marked-alt', [
+                        ['href'=>app_path('land/land_manage.php'),'label'=>'Land Manage'],
+                        ['href'=>app_path('land/plot_manage.php'),'label'=>'Plot Manage'],
+                        ['href'=>app_path('land/land_summary.php'),'label'=>'Land Summary'],
+                    ]);
+                }
                 if(sales_module_enabled()){
                 sidebar_tree(
                     'Sales',

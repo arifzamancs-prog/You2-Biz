@@ -43,6 +43,7 @@ function available_manager_permissions($project_package_labels = null)
         'sales' => 'Sales',
         'wallets' => 'Wallets',
         'projects' => $project_package_label,
+        'land_ledger' => 'Land Ledger',
         'customers' => 'Customer Manage',
         'leads' => 'Lead Management',
         'suppliers' => 'Supplier',

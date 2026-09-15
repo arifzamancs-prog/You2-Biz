@@ -96,7 +96,7 @@ require_once '../includes/sidebar.php';
                                     <small><?= htmlspecialchars($item['href'] ?: 'Main menu group'); ?></small>
                                 </div>
                                 <span class="badge badge-secondary level-badge">Menu</span>
-                                <button type="button" class="btn btn-sm visibility-toggle" title="Hide or show">
+                                <button type="button" class="btn btn-sm visibility-toggle" title="Hide or show" <?= ($item['id'] ?? '') === 'sidebar_settings' ? 'disabled aria-disabled="true"' : ''; ?>>
                                     <i class="fas fa-eye"></i>
                                 </button>
                             </div>
@@ -256,6 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
         event.preventDefault();
         const item = button.closest('.builder-item');
         if (!item) return;
+        if (item.dataset.id === 'sidebar_settings') return;
         item.dataset.visible = item.dataset.visible === '0' ? '1' : '0';
         updateBadges();
     });

@@ -417,6 +417,11 @@ if($is_manager && !empty($user['staff_photo'])){
                             accept="image/*"
                             class="form-control">
 
+                        <div class="mt-2 text-left">
+                            <strong>Company Type:</strong>
+                            <span><?= htmlspecialchars((string)($user['company_type'] ?? '')); ?></span>
+                        </div>
+
                 </div>
 
                 <div class="col-md-9">
