@@ -101,6 +101,10 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('qualified_list', 'Qualified List', app_path('lead_management/index.php?filter=successful'), 'lead_management', 112),
         sidebar_setting_item('not_qualified_list', 'Not Qualified List', app_path('lead_management/index.php?filter=not_qualified'), 'lead_management', 113),
         sidebar_setting_item('successful_list', 'Successful List', app_path('lead_management/index.php?filter=customer'), 'lead_management', 114),
+        sidebar_setting_item('land_ledger', 'Land Ledger', '', '', 115),
+        sidebar_setting_item('land_manage', 'Land Manage', app_path('land/land_manage.php'), 'land_ledger', 116),
+        sidebar_setting_item('plot_manage', 'Plot Manage', app_path('land/plot_manage.php'), 'land_ledger', 117),
+        sidebar_setting_item('land_summary', 'Land Summary', app_path('land/land_summary.php'), 'land_ledger', 118),
         sidebar_setting_item('reports', 'Reports', '', '', 120),
         sidebar_setting_item('sales_report', 'Sales Report', app_path('reports/sales_report.php'), 'reports', 121),
         sidebar_setting_item('expense_report', 'Expense Report', app_path('reports/category_expense.php'), 'reports', 122),
@@ -200,6 +204,12 @@ function sidebar_layout_items_for_current_user($items)
         'import_data',
         'delete_all_data',
     ];
+    $land_ledger_items = ['land_ledger', 'land_manage', 'plot_manage', 'land_summary'];
+    $conn = $GLOBALS['conn'] ?? null;
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    $is_housing_company = $conn instanceof mysqli
+        && function_exists('project_package_company_type')
+        && project_package_company_type($conn, $company_id) === 'Housing';
 
     foreach($items as $item){
         $id = (string)($item['id'] ?? '');
@@ -209,6 +219,10 @@ function sidebar_layout_items_for_current_user($items)
         }
 
         if(in_array($id, $admin_only, true) && is_super_admin_user()){
+            continue;
+        }
+
+        if(in_array($id, $land_ledger_items, true) && !$is_housing_company){
             continue;
         }
 
