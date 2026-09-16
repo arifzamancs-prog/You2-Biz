@@ -44,7 +44,7 @@ if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
     $notification_user_id = (int)($_SESSION['login_user_id'] ?? $notification_company_id);
     $notification_user_name = trim((string)($_SESSION['login_name'] ?? ''));
     $notification_scope = is_manager_user() ? ' AND (l.created_by_user_id=? OR l.created_by_name=?)' : '';
-    $notification_sql = "SELECT l.id, l.name, l.phone, l.status
+    $notification_sql = "SELECT l.id, l.name, l.phone, l.status, l.created_by_name
         FROM leads l
         LEFT JOIN lead_followup_notification_reads n
             ON n.lead_id=l.id AND n.user_id=? AND n.followup_date=l.followup_date
@@ -84,6 +84,19 @@ if (
 
 ?>
 
+<style>
+    .navbar-followup-dropdown { width: 320px; max-width: calc(100vw - 24px); padding: 0; border: 0; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 28px rgba(18, 38, 63, .18); }
+    .navbar-followup-heading { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #f8fafc; color: #26364a; font-weight: 600; }
+    .navbar-followup-heading .badge { font-size: 11px; }
+    .lead-followup-item { display: flex !important; align-items: flex-start; gap: 11px; padding: 14px 16px !important; white-space: normal; transition: background-color .15s ease; }
+    .lead-followup-item:hover { background: #f1f7ff; }
+    .lead-followup-icon { width: 34px; height: 34px; min-width: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: #1683ff; }
+    .lead-followup-content { min-width: 0; flex: 1; }
+    .lead-followup-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1f2d3d; font-weight: 600; }
+    .lead-followup-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6c7a89; font-size: 12px; margin-top: 3px; }
+    .lead-followup-due { display: block; color: #d97706; font-size: 12px; font-weight: 600; margin-top: 5px; }
+</style>
+
 <nav class="main-header navbar navbar-expand navbar-white navbar-light">
 
     <ul class="navbar-nav">
@@ -112,20 +125,27 @@ if (
                     <span class="badge badge-danger navbar-badge"><?= count($followup_notifications); ?></span>
                 <?php } ?>
             </a>
-            <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
-                <span class="dropdown-item dropdown-header"><?= count($followup_notifications); ?> Follow-up Notification<?= count($followup_notifications) === 1 ? '' : 's'; ?></span>
-                <div class="dropdown-divider"></div>
+            <div class="dropdown-menu dropdown-menu-right navbar-followup-dropdown">
+                <div class="navbar-followup-heading">
+                    <span><i class="far fa-bell mr-2"></i>Follow-up Notifications</span>
+                    <span class="badge badge-primary badge-pill"><?= count($followup_notifications); ?></span>
+                </div>
                 <?php if($followup_notifications){ ?>
                     <?php foreach($followup_notifications as $notification){ ?>
-                        <a href="<?= htmlspecialchars(app_path('lead_management/read_followup_notification.php?id=' . (int)$notification['id'])); ?>" class="dropdown-item">
-                            <i class="fas fa-calendar-day text-primary mr-2"></i>
-                            <span><?= htmlspecialchars(lead_code_from_id((int)$notification['id'])); ?> — <?= htmlspecialchars($notification['name']); ?></span>
-                            <small class="text-muted d-block ml-4"><?= htmlspecialchars(lead_management_title($notification['status'])); ?> · Follow-up today</small>
+                        <a href="<?= htmlspecialchars(app_path('lead_management/read_followup_notification.php?id=' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
+                            <span class="lead-followup-icon"><i class="fas fa-calendar-day"></i></span>
+                            <span class="lead-followup-content">
+                                <span class="lead-followup-title" title="<?= htmlspecialchars($notification['name']); ?>"><?= htmlspecialchars(lead_code_from_id((int)$notification['id'])); ?> · <?= htmlspecialchars($notification['name']); ?></span>
+                                <span class="lead-followup-meta">
+                                    <?= htmlspecialchars(lead_management_title($notification['status'])); ?>
+                                    <?php if(is_admin_user() && trim((string)$notification['created_by_name']) !== ''){ ?> · Ref. <?= htmlspecialchars($notification['created_by_name']); ?><?php } ?>
+                                </span>
+                                <span class="lead-followup-due">Follow-up due today</span>
+                            </span>
                         </a>
-                        <div class="dropdown-divider"></div>
                     <?php } ?>
                 <?php }else{ ?>
-                    <span class="dropdown-item text-muted"><i class="far fa-bell-slash mr-2"></i>No follow-up for today.</span>
+                    <span class="dropdown-item text-muted py-3"><i class="far fa-bell-slash mr-2"></i>No follow-up for today.</span>
                 <?php } ?>
             </div>
         </li>

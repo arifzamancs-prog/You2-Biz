@@ -29,24 +29,36 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     } elseif($followup_date < $today){
         $message = 'Followup Date cannot be earlier than today.';
     } else {
-        $note = $note ?: 'General';
-        $date_value = $followup_date;
+        $existing_lead_stmt = mysqli_prepare($conn, 'SELECT id FROM leads WHERE user_id=? AND phone=? LIMIT 1');
+        mysqli_stmt_bind_param($existing_lead_stmt, 'is', $user_id, $phone);
+        mysqli_stmt_execute($existing_lead_stmt);
+        $existing_lead = mysqli_fetch_assoc(mysqli_stmt_get_result($existing_lead_stmt));
+        mysqli_stmt_close($existing_lead_stmt);
 
-        $stmt = mysqli_prepare(
-            $conn,
-            "INSERT INTO leads
-             (user_id, name, phone, email, note, followup_date, status, created_by_user_id, created_by_name)
-             VALUES
-             (?, ?, ?, ?, ?, ?, 'lead', ?, ?)"
-        );
-        mysqli_stmt_bind_param($stmt, 'isssssis', $user_id, $name, $phone, $email, $note, $date_value, $creator_user_id, $creator_name);
+        if($existing_lead){
+            $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$existing_lead['id']) . '.';
+        }else{
+            $note = $note ?: 'General';
+            $date_value = $followup_date;
 
-        if(mysqli_stmt_execute($stmt)){
-            header('Location: index.php?filter=lead');
-            exit;
+            $stmt = mysqli_prepare(
+                $conn,
+                "INSERT INTO leads
+                 (user_id, name, phone, email, note, followup_date, status, created_by_user_id, created_by_name)
+                 VALUES
+                 (?, ?, ?, ?, ?, ?, 'lead', ?, ?)"
+            );
+            mysqli_stmt_bind_param($stmt, 'isssssis', $user_id, $name, $phone, $email, $note, $date_value, $creator_user_id, $creator_name);
+
+            if(mysqli_stmt_execute($stmt)){
+                header('Location: index.php?filter=lead');
+                exit;
+            }
+
+            $message = mysqli_stmt_errno($stmt) === 1062
+                ? 'This phone number is already used by another lead.'
+                : 'Failed to save lead.';
         }
-
-        $message = 'Failed to save lead.';
     }
 }
 

@@ -52,6 +52,17 @@ function ensure_lead_management_table($conn)
         mysqli_query($conn, "ALTER TABLE leads ADD INDEX idx_leads_converted_customer (converted_customer_id)");
     }
 
+    $phone_index = mysqli_query($conn, "SHOW INDEX FROM leads WHERE Key_name='uniq_leads_user_phone'");
+    if($phone_index && mysqli_num_rows($phone_index) === 0){
+        $duplicate_phone = mysqli_query(
+            $conn,
+            'SELECT user_id, phone FROM leads GROUP BY user_id, phone HAVING COUNT(*) > 1 LIMIT 1'
+        );
+        if($duplicate_phone && mysqli_num_rows($duplicate_phone) === 0){
+            mysqli_query($conn, 'ALTER TABLE leads ADD UNIQUE KEY uniq_leads_user_phone (user_id, phone)');
+        }
+    }
+
     mysqli_query(
         $conn,
         "UPDATE leads l
@@ -105,5 +116,5 @@ function lead_management_title($filter)
 
 function lead_code_from_id($id)
 {
-    return 'LD-' . str_pad((string)$id, 4, '0', STR_PAD_LEFT);
+    return str_pad((string)$id, 4, '0', STR_PAD_LEFT);
 }

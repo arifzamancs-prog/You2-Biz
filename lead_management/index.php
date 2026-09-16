@@ -536,5 +536,25 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
+if($focus_lead_id > 0){
+    $page_script = '<script>
+        $(function () {
+            var table = $("#example1").DataTable();
+            var row = table.row("#lead-row-' . (int)$focus_lead_id . '");
+            var rowIndex = row.index();
+
+            if(typeof rowIndex !== "undefined") {
+                table.page(Math.floor(rowIndex / table.page.len())).draw("page");
+                setTimeout(function () {
+                    var target = document.getElementById("lead-row-' . (int)$focus_lead_id . '");
+                    if(target) {
+                        target.classList.add("table-warning");
+                        target.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                }, 150);
+            }
+        });
+    </script>';
+}
 require_once '../includes/footer.php';
 ?>
