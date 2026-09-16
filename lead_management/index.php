@@ -14,6 +14,7 @@ $lead_scope_sql = is_manager_user() ? ' AND (created_by_user_id=? OR created_by_
 $can_manage_leads = is_admin_user() || is_manager_user();
 $show_lead_reference = is_admin_user();
 $filter = normalize_lead_filter($_GET['filter'] ?? 'lead');
+$focus_lead_id = (int)($_GET['focus_lead'] ?? 0);
 $message = $_SESSION['lead_management_flash_message'] ?? '';
 $message_type = $_SESSION['lead_management_flash_type'] ?? 'success';
 unset($_SESSION['lead_management_flash_message'], $_SESSION['lead_management_flash_type']);
@@ -286,7 +287,7 @@ require_once '../includes/sidebar.php';
                     </tr>
                 <?php } else { ?>
                     <?php foreach($leads as $lead){ ?>
-                        <tr>
+                        <tr id="lead-row-<?= (int)$lead['id']; ?>" class="<?= $focus_lead_id === (int)$lead['id'] ? 'table-warning' : ''; ?>">
                             <td><?= htmlspecialchars(lead_code_from_id((int)$lead['id'])); ?></td>
                             <td>
                                 <?php if($filter === 'customer' && !empty($lead['converted_customer_name'])){ ?>
@@ -348,6 +349,18 @@ require_once '../includes/sidebar.php';
                                     <?php if($lead['status'] !== 'successful'){ ?>
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=successful&id=<?= (int)$lead['id']; ?>" class="btn btn-success btn-sm" title="Mark Qualified">
                                             <i class="fas fa-check"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($lead['status'] !== 'visited'){ ?>
+                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=visited&id=<?= (int)$lead['id']; ?>" class="btn btn-primary btn-sm" title="Move to Visited List">
+                                            <i class="fas fa-map-marker-alt"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($lead['status'] !== 'indecision'){ ?>
+                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=indecision&id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Move to Indecision List">
+                                            <i class="fas fa-question"></i>
                                         </a>
                                     <?php } ?>
 

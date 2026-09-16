@@ -466,7 +466,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                         sidebar_tree('Customer Manage', 'fas fa-users', $sidebar_customer_items);
                     }
                     if(manager_has_permission('suppliers')){ sidebar_tree('Suppliers', 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>'Suppliers'],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>'Supplier Due Payment']]); }
-                    if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
+                    if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
                 <?php }else{ ?>
 
@@ -638,6 +638,16 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                         [
                             'href' => app_path('lead_management/index.php?filter=not_qualified'),
                             'label' => 'Not Qualified List',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('lead_management/index.php?filter=visited'),
+                            'label' => 'Visited List',
+                            'icon' => 'far fa-circle',
+                        ],
+                        [
+                            'href' => app_path('lead_management/index.php?filter=indecision'),
+                            'label' => 'Indecision List',
                             'icon' => 'far fa-circle',
                         ],
                         [

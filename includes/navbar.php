@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/app_config.php';
+require_once __DIR__ . '/lead_management_helper.php';
 
 $avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $has_active_subscription = false;
@@ -33,6 +34,37 @@ if (is_manager_user()) {
 }
 
 $navbar_staff_id = isset($conn) ? current_manager_staff_id($conn) : current_manager_staff_id();
+$followup_notifications = [];
+
+if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
+    ensure_lead_management_table($conn);
+    ensure_lead_followup_notification_table($conn);
+
+    $notification_company_id = (int)($_SESSION['user_id'] ?? 0);
+    $notification_user_id = (int)($_SESSION['login_user_id'] ?? $notification_company_id);
+    $notification_user_name = trim((string)($_SESSION['login_name'] ?? ''));
+    $notification_scope = is_manager_user() ? ' AND (l.created_by_user_id=? OR l.created_by_name=?)' : '';
+    $notification_sql = "SELECT l.id, l.name, l.phone, l.status
+        FROM leads l
+        LEFT JOIN lead_followup_notification_reads n
+            ON n.lead_id=l.id AND n.user_id=? AND n.followup_date=l.followup_date
+        WHERE l.user_id=? AND l.followup_date=CURDATE() AND n.id IS NULL" . $notification_scope .
+        ' ORDER BY l.name ASC';
+    $notification_stmt = mysqli_prepare($conn, $notification_sql);
+    if($notification_stmt){
+        if(is_manager_user()){
+            mysqli_stmt_bind_param($notification_stmt, 'iiis', $notification_user_id, $notification_company_id, $notification_user_id, $notification_user_name);
+        }else{
+            mysqli_stmt_bind_param($notification_stmt, 'ii', $notification_user_id, $notification_company_id);
+        }
+        mysqli_stmt_execute($notification_stmt);
+        $notification_result = mysqli_stmt_get_result($notification_stmt);
+        while($notification_result && ($notification = mysqli_fetch_assoc($notification_result))){
+            $followup_notifications[] = $notification;
+        }
+        mysqli_stmt_close($notification_stmt);
+    }
+}
 
 $avatar = app_path('uploads/avatars/you2biz.png');
 
@@ -72,6 +104,31 @@ if (
     </ul>
 
     <ul class="navbar-nav ml-auto">
+
+        <li class="nav-item dropdown">
+            <a class="nav-link position-relative" data-toggle="dropdown" href="#" title="Notifications" aria-label="Notifications">
+                <i class="far fa-bell"></i>
+                <?php if(count($followup_notifications) > 0){ ?>
+                    <span class="badge badge-danger navbar-badge"><?= count($followup_notifications); ?></span>
+                <?php } ?>
+            </a>
+            <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
+                <span class="dropdown-item dropdown-header"><?= count($followup_notifications); ?> Follow-up Notification<?= count($followup_notifications) === 1 ? '' : 's'; ?></span>
+                <div class="dropdown-divider"></div>
+                <?php if($followup_notifications){ ?>
+                    <?php foreach($followup_notifications as $notification){ ?>
+                        <a href="<?= htmlspecialchars(app_path('lead_management/read_followup_notification.php?id=' . (int)$notification['id'])); ?>" class="dropdown-item">
+                            <i class="fas fa-calendar-day text-primary mr-2"></i>
+                            <span><?= htmlspecialchars(lead_code_from_id((int)$notification['id'])); ?> — <?= htmlspecialchars($notification['name']); ?></span>
+                            <small class="text-muted d-block ml-4"><?= htmlspecialchars(lead_management_title($notification['status'])); ?> · Follow-up today</small>
+                        </a>
+                        <div class="dropdown-divider"></div>
+                    <?php } ?>
+                <?php }else{ ?>
+                    <span class="dropdown-item text-muted"><i class="far fa-bell-slash mr-2"></i>No follow-up for today.</span>
+                <?php } ?>
+            </div>
+        </li>
 
         <li class="nav-item dropdown">
 

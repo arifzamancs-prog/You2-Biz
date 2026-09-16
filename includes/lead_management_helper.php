@@ -12,7 +12,7 @@ function ensure_lead_management_table($conn)
             email VARCHAR(150) NULL,
             note TEXT NULL,
             followup_date DATE NULL,
-            status ENUM('lead','successful','customer','not_qualified') NOT NULL DEFAULT 'lead',
+            status ENUM('lead','successful','customer','not_qualified','visited','indecision') NOT NULL DEFAULT 'lead',
             created_by_user_id BIGINT UNSIGNED NULL,
             created_by_name VARCHAR(150) NULL,
             converted_customer_id BIGINT UNSIGNED NULL,
@@ -31,8 +31,8 @@ function ensure_lead_management_table($conn)
          AND COLUMN_NAME='status'"
     );
     $status_info = $status_column ? mysqli_fetch_assoc($status_column) : null;
-    if($status_info && stripos((string)$status_info['COLUMN_TYPE'], "'not_qualified'") === false){
-        mysqli_query($conn, "ALTER TABLE leads MODIFY status ENUM('lead','successful','customer','not_qualified') NOT NULL DEFAULT 'lead'");
+    if($status_info && (stripos((string)$status_info['COLUMN_TYPE'], "'visited'") === false || stripos((string)$status_info['COLUMN_TYPE'], "'indecision'") === false)){
+        mysqli_query($conn, "ALTER TABLE leads MODIFY status ENUM('lead','successful','customer','not_qualified','visited','indecision') NOT NULL DEFAULT 'lead'");
     }
 
     $creator_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'created_by_name'");
@@ -61,12 +61,30 @@ function ensure_lead_management_table($conn)
     );
 }
 
+function ensure_lead_followup_notification_table($conn)
+{
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS lead_followup_notification_reads (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            lead_id BIGINT UNSIGNED NOT NULL,
+            followup_date DATE NOT NULL,
+            read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_lead_followup_notification (user_id, lead_id, followup_date),
+            INDEX idx_lead_followup_notification_lead (lead_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
+}
+
 function lead_management_filters()
 {
     return [
         'lead' => 'New Lead',
         'successful' => 'Qualified List',
         'not_qualified' => 'Not Qualified List',
+        'visited' => 'Visited List',
+        'indecision' => 'Indecision List',
         'customer' => 'Successful List',
     ];
 }
