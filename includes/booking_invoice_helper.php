@@ -1,6 +1,25 @@
 <?php
 require_once __DIR__ . '/invoice_charge_helper.php';
 
+function booking_invoice_normalize_date($value)
+{
+    $value = trim((string)$value);
+    foreach(['d-m-Y', 'Y-m-d'] as $format){
+        $date = DateTime::createFromFormat('!' . $format, $value);
+        $errors = DateTime::getLastErrors();
+        if($date && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))){
+            return $date->format('Y-m-d');
+        }
+    }
+    return '';
+}
+
+function booking_invoice_display_date($value)
+{
+    $normalized = booking_invoice_normalize_date($value);
+    return $normalized === '' ? '' : date('d-m-Y', strtotime($normalized));
+}
+
 function ensure_booking_invoice_table($conn)
 {
     $transaction_type_column = mysqli_query($conn, "SHOW COLUMNS FROM transactions LIKE 'transaction_type'");

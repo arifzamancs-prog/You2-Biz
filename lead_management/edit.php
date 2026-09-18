@@ -15,7 +15,7 @@ $lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);
 $lead_owner_name = trim((string)($_SESSION['login_name'] ?? ''));
 $lead_scope_sql = is_manager_user() ? ' AND (created_by_user_id=? OR created_by_name=?)' : '';
 
-$lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql} LIMIT 1");
+$lead_stmt = mysqli_prepare($conn, "SELECT * FROM leads WHERE id=? AND user_id=?{$lead_scope_sql} LIMIT 1");
 if(is_manager_user()){
     mysqli_stmt_bind_param($lead_stmt, 'iiis', $id, $user_id, $lead_owner_id, $lead_owner_name);
 }else{
@@ -41,25 +41,37 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }elseif($followup_date < $today){
         $message = 'Followup Date cannot be earlier than today.';
     }else{
-        $note = $note ?: 'General';
-        $update_stmt = mysqli_prepare(
-            $conn,
-            "UPDATE leads
-             SET name=?, phone=?, email=?, note=?, followup_date=?
-             WHERE id=? AND user_id=? AND status='lead'{$lead_scope_sql}"
-        );
-        if(is_manager_user()){
-            mysqli_stmt_bind_param($update_stmt, 'sssssiiis', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id, $lead_owner_name);
+        $duplicate_phone_stmt = mysqli_prepare($conn, 'SELECT id FROM leads WHERE user_id=? AND phone=? AND id<>? LIMIT 1');
+        mysqli_stmt_bind_param($duplicate_phone_stmt, 'isi', $user_id, $phone, $id);
+        mysqli_stmt_execute($duplicate_phone_stmt);
+        $duplicate_phone_lead = mysqli_fetch_assoc(mysqli_stmt_get_result($duplicate_phone_stmt));
+        mysqli_stmt_close($duplicate_phone_stmt);
+
+        if($duplicate_phone_lead){
+            $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$duplicate_phone_lead['id']) . '.';
         }else{
-            mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
-        }
+            $note = $note ?: 'General';
+            $update_stmt = mysqli_prepare(
+                $conn,
+                "UPDATE leads
+                 SET name=?, phone=?, email=?, note=?, followup_date=?
+                 WHERE id=? AND user_id=?{$lead_scope_sql}"
+            );
+            if(is_manager_user()){
+                mysqli_stmt_bind_param($update_stmt, 'sssssiiis', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id, $lead_owner_name);
+            }else{
+                mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
+            }
 
-        if(mysqli_stmt_execute($update_stmt)){
-            header('Location: index.php?filter=lead');
-            exit;
-        }
+            if(mysqli_stmt_execute($update_stmt)){
+                header('Location: index.php?filter=' . urlencode($lead['status'] ?? 'lead'));
+                exit;
+            }
 
-        $message = 'Failed to update lead.';
+            $message = mysqli_stmt_errno($update_stmt) === 1062
+                ? 'This phone number is already used by another lead.'
+                : 'Failed to update lead.';
+        }
     }
 }
 

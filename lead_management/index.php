@@ -157,7 +157,7 @@ if($can_manage_leads && isset($_GET['set_status'], $_GET['id'])){
     exit;
 }
 
-if($can_manage_leads && isset($_GET['delete'])){
+if(is_admin_user() && isset($_GET['delete'])){
     $id = (int)$_GET['delete'];
 
     $delete_stmt = mysqli_prepare(
@@ -334,33 +334,57 @@ require_once '../includes/sidebar.php';
                                     <?php } elseif($filter === 'customer'){ ?>
                                         <strong class="text-warning">Waiting for Customer</strong>
                                     <?php } else { ?>
-                                    <?php if($filter === 'lead'){ ?>
+                                    <?php if(in_array($filter, ['lead', 'successful', 'not_qualified'], true)){ ?>
                                         <a href="edit.php?id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Edit Lead">
                                             <i class="fas fa-edit"></i>
                                         </a>
                                     <?php } ?>
 
-                                    <?php if($lead['status'] !== 'lead'){ ?>
+                                    <?php if(!in_array($filter, ['successful', 'not_qualified', 'visited', 'indecision'], true) && $lead['status'] !== 'lead'){ ?>
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=lead&id=<?= (int)$lead['id']; ?>" class="btn btn-secondary btn-sm" title="Back to New Lead">
                                             <i class="fas fa-arrow-left"></i>
                                         </a>
                                     <?php } ?>
 
-                                    <?php if($lead['status'] !== 'successful'){ ?>
+                                    <?php if(!in_array($filter, ['visited', 'indecision'], true) && $lead['status'] !== 'successful'){ ?>
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=successful&id=<?= (int)$lead['id']; ?>" class="btn btn-success btn-sm" title="Mark Qualified">
                                             <i class="fas fa-check"></i>
                                         </a>
                                     <?php } ?>
 
-                                    <?php if($lead['status'] !== 'visited'){ ?>
+                                    <?php if(!in_array($filter, ['lead', 'indecision'], true) && $lead['status'] !== 'visited'){ ?>
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=visited&id=<?= (int)$lead['id']; ?>" class="btn btn-primary btn-sm" title="Move to Visited List">
                                             <i class="fas fa-map-marker-alt"></i>
                                         </a>
                                     <?php } ?>
 
-                                    <?php if($lead['status'] !== 'indecision'){ ?>
+                                    <?php if(!in_array($filter, ['lead', 'successful', 'not_qualified'], true) && $lead['status'] !== 'indecision'){ ?>
                                         <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=indecision&id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Move to Indecision List">
                                             <i class="fas fa-question"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($filter === 'visited' && $lead['status'] !== 'customer'){ ?>
+                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=customer&id=<?= (int)$lead['id']; ?>" class="btn btn-info btn-sm" title="Move to Successful List">
+                                            <i class="fas fa-exchange-alt"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($filter === 'visited'){ ?>
+                                        <a href="edit.php?id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Edit Lead">
+                                            <i class="fas fa-edit"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($filter === 'indecision' && $lead['status'] !== 'customer'){ ?>
+                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=customer&id=<?= (int)$lead['id']; ?>" class="btn btn-info btn-sm" title="Move to Successful List">
+                                            <i class="fas fa-exchange-alt"></i>
+                                        </a>
+                                    <?php } ?>
+
+                                    <?php if($filter === 'indecision'){ ?>
+                                        <a href="edit.php?id=<?= (int)$lead['id']; ?>" class="btn btn-warning btn-sm" title="Edit Lead">
+                                            <i class="fas fa-edit"></i>
                                         </a>
                                     <?php } ?>
 
@@ -376,19 +400,15 @@ require_once '../includes/sidebar.php';
                                         </a>
                                     <?php } ?>
 
-                                    <?php if(in_array($filter, ['lead', 'successful', 'not_qualified'], true) && $lead['status'] !== 'customer'){ ?>
-                                        <a href="index.php?filter=<?= urlencode($filter); ?>&set_status=customer&id=<?= (int)$lead['id']; ?>" class="btn btn-info btn-sm" title="Move to Successful List">
-                                            <i class="fas fa-exchange-alt"></i>
+                                    <?php if(is_admin_user()){ ?>
+                                        <a
+                                            href="index.php?filter=<?= urlencode($filter); ?>&delete=<?= (int)$lead['id']; ?>"
+                                            class="btn btn-danger btn-sm"
+                                            title="Delete Lead"
+                                            onclick="return confirm('Delete this lead?')">
+                                            <i class="fas fa-trash"></i>
                                         </a>
                                     <?php } ?>
-
-                                    <a
-                                        href="index.php?filter=<?= urlencode($filter); ?>&delete=<?= (int)$lead['id']; ?>"
-                                        class="btn btn-danger btn-sm"
-                                        title="Delete Lead"
-                                        onclick="return confirm('Delete this lead?')">
-                                        <i class="fas fa-trash"></i>
-                                    </a>
 
                                     <?php } ?>
                                 <?php } else { ?>

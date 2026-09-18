@@ -38,7 +38,7 @@ $project_id = (int)($_POST['project_id'] ?? 0);
 $package_id = (int)($_POST['package_id'] ?? 0);
 $cash_wallet_id = ensure_default_cash_wallet($conn, $user_id);
 $wallet_id = (int)($_POST['wallet_id'] ?? $cash_wallet_id);
-$invoice_date = trim($_POST['invoice_date'] ?? date('m/d/Y'));
+$invoice_date = trim($_POST['invoice_date'] ?? date('d-m-Y'));
 $amount = trim($_POST['amount'] ?? '');
 $total_price = trim($_POST['total_price'] ?? '');
 $notes = trim($_POST['notes'] ?? '');
@@ -52,8 +52,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }
     $display_type = $type !== '' ? $type : 'booking';
 
-    $date_object = DateTime::createFromFormat('m/d/Y', $invoice_date);
-    $normalized_date = $date_object ? $date_object->format('Y-m-d') : '';
+    $normalized_date = booking_invoice_normalize_date($invoice_date);
     $numeric_amount = (float)$amount;
     $type_establishes_total = booking_invoice_establishes_total($conn, $user_id, $type);
     $numeric_total_price = $type_establishes_total ? (float)$total_price : 0;
@@ -214,8 +213,13 @@ require_once '../includes/sidebar.php';
             <div class="row">
                 <div class="col-md-3">
                     <div class="form-group">
-                        <label>Date</label>
-                        <input type="text" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="mm/dd/yyyy" required>
+                        <label>Payment Date</label>
+                        <div class="input-group">
+                            <input type="text" id="invoice-date-display" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="DD-MM-YYYY" pattern="\d{2}-\d{2}-\d{4}" required>
+                            <div class="input-group-append">
+                                <input type="date" id="invoice-date-picker" class="form-control" value="<?= htmlspecialchars(booking_invoice_normalize_date($invoice_date)); ?>" aria-label="Choose invoice date" style="max-width:52px; padding:4px;">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -385,6 +389,25 @@ document.addEventListener('DOMContentLoaded', function () {
     const totalPriceGroup = document.getElementById('total-price-group');
     const totalPriceInput = document.getElementById('total_price');
     const walletSelect = document.getElementById('wallet_id');
+    const invoiceDateDisplay = document.getElementById('invoice-date-display');
+    const invoiceDatePicker = document.getElementById('invoice-date-picker');
+
+    function invoiceDateToDisplay(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return '';
+        const parts = value.split('-');
+        return parts[2] + '-' + parts[1] + '-' + parts[0];
+    }
+    function invoiceDateToPicker(value) {
+        const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec((value || '').trim());
+        return match ? match[3] + '-' + match[2] + '-' + match[1] : '';
+    }
+    invoiceDatePicker.addEventListener('change', function () {
+        invoiceDateDisplay.value = invoiceDateToDisplay(this.value);
+    });
+    invoiceDateDisplay.addEventListener('change', function () {
+        const value = invoiceDateToPicker(this.value);
+        if (value) invoiceDatePicker.value = value;
+    });
 
     function updateWalletBalance(){
         let el = document.getElementById('selected-wallet-balance');

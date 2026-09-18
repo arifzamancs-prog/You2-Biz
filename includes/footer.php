@@ -153,24 +153,38 @@ if (isset($page_script)) {
 }
 </style>
 
-<?php if(function_exists('is_manager_user') && is_manager_user()){ ?>
+<?php if(function_exists('is_manager_user') && is_manager_user()){
+    $footer_request_path = strtolower((string)parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH));
+    $footer_is_lead_management_page = strpos($footer_request_path, '/lead_management/') !== false;
+    $footer_restricted_selectors = $footer_is_lead_management_page
+        ? [
+            '[title*="Delete" i]',
+            '[aria-label*="Delete" i]',
+            'a[href*="delete" i]',
+            'a[href*="del=" i]',
+            'input[type="submit"][value*="Delete" i]',
+            'button[value*="delete" i]',
+            'button[name="action"][value*="delete" i]',
+        ]
+        : [
+            '[title*="Edit" i]',
+            '[aria-label*="Edit" i]',
+            'a[href*="edit" i]',
+            '[title*="Delete" i]',
+            '[aria-label*="Delete" i]',
+            'a[href*="delete" i]',
+            'a[href*="del=" i]',
+            'input[type="submit"][value*="Edit" i]',
+            'input[type="submit"][value*="Delete" i]',
+            'button[value*="edit" i]',
+            'button[value*="delete" i]',
+            'button[name="action"][value*="edit" i]',
+            'button[name="action"][value*="delete" i]',
+        ];
+?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const restrictedSelector = [
-        '[title*="Edit" i]',
-        '[aria-label*="Edit" i]',
-        'a[href*="edit" i]',
-        '[title*="Delete" i]',
-        '[aria-label*="Delete" i]',
-        'a[href*="delete" i]',
-        'a[href*="del=" i]',
-        'input[type="submit"][value*="Edit" i]',
-        'input[type="submit"][value*="Delete" i]',
-        'button[value*="edit" i]',
-        'button[value*="delete" i]',
-        'button[name="action"][value*="edit" i]',
-        'button[name="action"][value*="delete" i]'
-    ].join(',');
+    const restrictedSelector = <?= json_encode($footer_restricted_selectors); ?>.join(',');
 
     document.querySelectorAll(restrictedSelector).forEach(function (element) {
         element.remove();

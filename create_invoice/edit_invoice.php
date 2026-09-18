@@ -38,6 +38,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $wallet_id = (int)($_POST['wallet_id'] ?? $cash_wallet_id);
     $invoice_type = trim((string)($_POST['invoice_type'] ?? ''));
     $invoice_date = trim((string)($_POST['invoice_date'] ?? ''));
+    $normalized_invoice_date = booking_invoice_normalize_date($invoice_date);
     $amount = (float)($_POST['amount'] ?? 0);
     $total_price = trim((string)($_POST['total_price'] ?? ''));
     $charge_inputs = $_POST['charge_value'] ?? [];
@@ -53,7 +54,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $numeric_total_price = $invoice_type_establishes_total ? (float)$total_price : 0;
     $notes = trim((string)($_POST['notes'] ?? ''));
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $amount <= 0 || $final_amount <= 0 || ($invoice_type_establishes_total && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $invoice_date)){
+    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $amount <= 0 || $final_amount <= 0 || ($invoice_type_establishes_total && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || $normalized_invoice_date === ''){
         $message = 'Please complete all invoice fields correctly.';
     }else{
         mysqli_begin_transaction($conn);
@@ -75,7 +76,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 $conn,
                 'UPDATE booking_invoices SET customer_id=?, project_id=?, package_id=?, wallet_id=?, invoice_type=?, invoice_date=?, amount=?, total_price=?, notes=?, status=\'pending\', wallet_effect_applied=0, confirmed_at=NULL WHERE id=? AND user_id=?'
             );
-            mysqli_stmt_bind_param($update_stmt, 'iiiissddsii', $customer_id, $project_id, $package_id, $wallet_id, $invoice_type, $invoice_date, $final_amount, $numeric_total_price, $notes, $invoice_id, $user_id);
+            mysqli_stmt_bind_param($update_stmt, 'iiiissddsii', $customer_id, $project_id, $package_id, $wallet_id, $invoice_type, $normalized_invoice_date, $final_amount, $numeric_total_price, $notes, $invoice_id, $user_id);
             if(!mysqli_stmt_execute($update_stmt)){
                 throw new Exception(mysqli_stmt_error($update_stmt));
             }
@@ -90,7 +91,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 $updated_invoice['package_id'] = $package_id;
                 $updated_invoice['wallet_id'] = $wallet_id;
                 $updated_invoice['invoice_type'] = $invoice_type;
-                $updated_invoice['invoice_date'] = $invoice_date;
+                $updated_invoice['invoice_date'] = $normalized_invoice_date;
                 $updated_invoice['amount'] = $final_amount;
                 $updated_invoice['total_price'] = $numeric_total_price;
                 $updated_invoice['notes'] = $notes;
@@ -130,7 +131,7 @@ require_once '../includes/sidebar.php';
         <input type="hidden" name="invoice_id" value="<?= $invoice_id; ?>">
         <?php if($message !== ''){ ?><div class="alert alert-danger"><?= htmlspecialchars($message); ?></div><?php } ?>
         <div class="row">
-            <div class="col-md-3 form-group"><label>Date</label><input type="date" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice['invoice_date']); ?>" required></div>
+            <div class="col-md-3 form-group"><label>Payment Date</label><div class="input-group"><input type="text" id="invoice-date-display" name="invoice_date" class="form-control" value="<?= htmlspecialchars(booking_invoice_display_date($invoice['invoice_date'])); ?>" placeholder="DD-MM-YYYY" pattern="\d{2}-\d{2}-\d{4}" required><div class="input-group-append"><input type="date" id="invoice-date-picker" class="form-control" value="<?= htmlspecialchars(booking_invoice_normalize_date($invoice['invoice_date'])); ?>" aria-label="Choose payment date" style="max-width:52px; padding:4px;"></div></div></div>
             <div class="col-md-3 form-group"><label>Customer Name</label><select name="customer_id" class="form-control" required><?php while($customer = mysqli_fetch_assoc($customers)){ ?><option value="<?= (int)$customer['id']; ?>" <?= (int)$invoice['customer_id'] === (int)$customer['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($customer['customer_name'] . (!empty($customer['customer_code']) ? ' (' . $customer['customer_code'] . ')' : '')); ?></option><?php } ?></select></div>
             <div class="col-md-3 form-group"><label><?= htmlspecialchars($project_package_labels['project']); ?></label><select id="project_id" name="project_id" class="form-control" required><?php while($project = mysqli_fetch_assoc($projects)){ ?><option value="<?= (int)$project['id']; ?>" <?= (int)$invoice['project_id'] === (int)$project['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($project['project_name']); ?></option><?php } ?></select></div>
             <div class="col-md-3 form-group"><label><?= htmlspecialchars($project_package_labels['package']); ?></label><select id="package_id" name="package_id" class="form-control" required><?php while($package = mysqli_fetch_assoc($packages)){ ?><option value="<?= (int)$package['id']; ?>" data-project-id="<?= (int)$package['project_id']; ?>" data-price="<?= htmlspecialchars(number_format((float)$package['price'], 2, '.', '')); ?>" <?= (int)$invoice['package_id'] === (int)$package['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($package['package_name']); ?></option><?php } ?></select></div>
@@ -154,6 +155,25 @@ document.addEventListener('DOMContentLoaded', function () {
     const invoiceTypeSelect = document.getElementById('invoice_type');
     const totalPriceGroup = document.getElementById('total-price-group');
     const totalPriceInput = document.getElementById('total_price');
+    const invoiceDateDisplay = document.getElementById('invoice-date-display');
+    const invoiceDatePicker = document.getElementById('invoice-date-picker');
+
+    function invoiceDateToDisplay(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return '';
+        const parts = value.split('-');
+        return parts[2] + '-' + parts[1] + '-' + parts[0];
+    }
+    function invoiceDateToPicker(value) {
+        const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec((value || '').trim());
+        return match ? match[3] + '-' + match[2] + '-' + match[1] : '';
+    }
+    invoiceDatePicker.addEventListener('change', function () {
+        invoiceDateDisplay.value = invoiceDateToDisplay(this.value);
+    });
+    invoiceDateDisplay.addEventListener('change', function () {
+        const value = invoiceDateToPicker(this.value);
+        if (value) invoiceDatePicker.value = value;
+    });
 
     function filterPackages() {
         const selectedProject = projectSelect.value;
