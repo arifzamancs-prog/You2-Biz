@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/staff_helper.php';
 require_once __DIR__ . '/manager_access_helper.php';
+require_once __DIR__ . '/branch_helper.php';
 
 function ensure_staff_attendance_tables($conn)
 {
@@ -20,6 +21,19 @@ function ensure_staff_attendance_tables($conn)
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_attendance_settings_user (user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $settings_branch_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_settings LIKE 'branch_id'");
+    if (!$settings_branch_column || mysqli_num_rows($settings_branch_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_settings ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id");
+    }
+    $settings_default_key = mysqli_query($conn, "SHOW INDEX FROM staff_attendance_settings WHERE Key_name='uniq_attendance_settings_user'");
+    if ($settings_default_key && mysqli_num_rows($settings_default_key) > 0) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_settings DROP INDEX uniq_attendance_settings_user");
+    }
+    $settings_branch_key = mysqli_query($conn, "SHOW INDEX FROM staff_attendance_settings WHERE Key_name='uniq_attendance_settings_branch'");
+    if (!$settings_branch_key || mysqli_num_rows($settings_branch_key) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_settings ADD UNIQUE KEY uniq_attendance_settings_branch (user_id, branch_id)");
+    }
 
     $absent_time_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_settings LIKE 'absent_after_time'");
     if (!$absent_time_column || mysqli_num_rows($absent_time_column) === 0) {
@@ -40,6 +54,19 @@ function ensure_staff_attendance_tables($conn)
         UNIQUE KEY uniq_office_closed_day (user_id, closed_date),
         INDEX idx_closed_day_user_date (user_id, closed_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $closed_day_branch_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_office_closed_days LIKE 'branch_id'");
+    if (!$closed_day_branch_column || mysqli_num_rows($closed_day_branch_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_office_closed_days ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id");
+    }
+    $closed_day_default_key = mysqli_query($conn, "SHOW INDEX FROM staff_office_closed_days WHERE Key_name='uniq_office_closed_day'");
+    if ($closed_day_default_key && mysqli_num_rows($closed_day_default_key) > 0) {
+        mysqli_query($conn, "ALTER TABLE staff_office_closed_days DROP INDEX uniq_office_closed_day");
+    }
+    $closed_day_branch_key = mysqli_query($conn, "SHOW INDEX FROM staff_office_closed_days WHERE Key_name='uniq_office_closed_day_branch'");
+    if (!$closed_day_branch_key || mysqli_num_rows($closed_day_branch_key) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_office_closed_days ADD UNIQUE KEY uniq_office_closed_day_branch (user_id, branch_id, closed_date)");
+    }
 
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_attendance_logs (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -115,17 +142,25 @@ function ensure_staff_attendance_tables($conn)
     mysqli_query($conn, "INSERT IGNORE INTO staff_attendance_settings (user_id) SELECT id FROM users WHERE role='admin'");
 }
 
-function staff_attendance_settings($conn, $user_id)
+function staff_attendance_settings($conn, $user_id, $branch_id = 0)
 {
     ensure_staff_attendance_tables($conn);
-    $stmt = mysqli_prepare($conn, 'SELECT * FROM staff_attendance_settings WHERE user_id=? LIMIT 1');
-    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    $user_id = (int)$user_id;
+    $branch_id = max(0, (int)$branch_id);
+    $stmt = mysqli_prepare($conn, 'SELECT * FROM staff_attendance_settings WHERE user_id=? AND branch_id=? LIMIT 1');
+    mysqli_stmt_bind_param($stmt, 'ii', $user_id, $branch_id);
     mysqli_stmt_execute($stmt);
     $settings = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
+    if(!$settings && $branch_id > 0){
+        return staff_attendance_settings($conn, $user_id, 0);
+    }
+
     if(!$settings){
-        mysqli_query($conn, 'INSERT IGNORE INTO staff_attendance_settings (user_id) VALUES (' . (int)$user_id . ')');
-        return staff_attendance_settings($conn, $user_id);
+        $insert = mysqli_prepare($conn, 'INSERT IGNORE INTO staff_attendance_settings (user_id, branch_id) VALUES (?, 0)');
+        mysqli_stmt_bind_param($insert, 'i', $user_id);
+        mysqli_stmt_execute($insert);
+        return staff_attendance_settings($conn, $user_id, 0);
     }
 
     return $settings;
@@ -265,7 +300,7 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         $first_login_dates[(int)$first_login['staff_id']] = $first_login['first_login_date'];
     }
 
-    $staff_sql = "SELECT id, name, staff_code, salary, created_at FROM staff WHERE user_id=?" . ($active_only ? " AND status='active'" : '') . ' ORDER BY name ASC';
+    $staff_sql = "SELECT s.id, s.name, s.staff_code, s.designation, s.branch_id, s.salary, s.created_at, COALESCE(NULLIF(b.branch_name,''), 'Head Office') AS branch_name FROM staff s LEFT JOIN branches b ON b.id=s.branch_id AND b.user_id=s.user_id WHERE s.user_id=?" . ($active_only ? " AND s.status='active'" : '') . ' ORDER BY s.name ASC';
     $staff_stmt = mysqli_prepare($conn, $staff_sql);
     mysqli_stmt_bind_param($staff_stmt, 'i', $user_id);
     mysqli_stmt_execute($staff_stmt);
@@ -278,7 +313,7 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         if (!$first_login_date) {
             if ($include_not_started) {
                 $rows[] = [
-                    'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'],
+                    'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'], 'designation' => $staff['designation'], 'branch_name' => $staff['branch_name'],
                     'salary' => (float)$staff['salary'], 'salary_start_date' => null, 'payable_days' => 0,
                     'prorated_salary' => 0, 'late_days' => 0, 'absent_days' => 0,
                     'casual_leave_days' => 0, 'medical_leave_days' => 0,
@@ -314,7 +349,7 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         $prorated_salary = round(($assigned_salary / $days_in_month) * $payable_days, 2);
         $cut_amount = min($prorated_salary, round(($assigned_salary / $days_in_month) * $salary_cut_days, 2));
         $rows[] = [
-            'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'],
+            'staff_id' => $staff_id, 'name' => $staff['name'], 'staff_code' => $staff['staff_code'], 'designation' => $staff['designation'], 'branch_name' => $staff['branch_name'],
             'salary' => $assigned_salary, 'late_days' => $late_days, 'absent_days' => $absent_days,
             'casual_leave_days' => $casual_leave_days, 'medical_leave_days' => $medical_leave_days,
             'salary_start_date' => $salary_start_date, 'payable_days' => $payable_days,

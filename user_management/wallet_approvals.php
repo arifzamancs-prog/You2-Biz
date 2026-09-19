@@ -5,7 +5,10 @@ require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
 
-require_admin_user();
+if (!is_admin_user() && !manager_has_permission('wallet_approvals')) {
+    header('Location: ' . app_path('dashboard.php?error=Permission denied'));
+    exit;
+}
 
 $user_id = (int)$_SESSION['user_id'];
 $admin_id = (int)($_SESSION['login_user_id'] ?? $_SESSION['user_id']);

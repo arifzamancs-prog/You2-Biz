@@ -163,7 +163,7 @@ function role_power_includes($role)
 
 function require_admin_user()
 {
-    if (!is_admin_user()) {
+    if (!is_admin_user() && !manager_can_modify()) {
         header("Location: " . app_path('dashboard.php?error=Permission denied'));
         exit;
     }
@@ -239,7 +239,14 @@ function subscription_support_message()
 
 function manager_can_modify()
 {
-    return !is_manager_user();
+    if (!is_manager_user()) {
+        return true;
+    }
+
+    // Access to a module is enforced separately by its permission guard and
+    // block_manager_restricted_actions(). Once a manager reaches an allowed
+    // module, every non-delete action in that module is available.
+    return true;
 }
 
 function can_delete_company_records()
@@ -268,7 +275,7 @@ function block_manager_restricted_actions()
     ];
     $admin_only_prefixes = ['user_management/', 'profit_cash_out/', 'tools/'];
 
-    if(!is_admin_user()){
+    if(!is_admin_user() && !manager_can_modify()){
         $is_admin_only = in_array($requested_path, $admin_only_paths, true);
         foreach($admin_only_prefixes as $admin_only_prefix){
             if(str_starts_with($requested_path, $admin_only_prefix)){
@@ -279,8 +286,10 @@ function block_manager_restricted_actions()
         if($requested_path === 'user_management/notice_publish.php' && manager_has_permission('notice_publish')){
             $is_admin_only = false;
         }
+        if($requested_path === 'user_management/wallet_approvals.php' && manager_has_permission('wallet_approvals')){
+            $is_admin_only = false;
+        }
         // The Admin permission grants the Admin section to a staff account.
-        // Wallet approvals remain restricted to the company administrator.
         if(
             is_manager_user() &&
             manager_has_permission('admin') &&
@@ -312,13 +321,13 @@ function block_manager_restricted_actions()
     $path = $requested_path;
     $file = basename($path);
 
-    // Edit/delete protection is checked before permission routing, because
-    // several modules perform those changes through an index page or AJAX.
-    $restricted_action = false;
+    // Deletion is the only protected action. A manager may otherwise perform
+    // every operation in a module explicitly granted by the administrator.
+    $delete_requested = false;
     foreach(['action', 'form_action', 'staff_action'] as $action_key){
         $action_value = strtolower(trim((string)($_POST[$action_key] ?? $_GET[$action_key] ?? '')));
-        if($action_value !== '' && (str_contains($action_value, 'delete') || str_contains($action_value, 'edit'))){
-            $restricted_action = true;
+        if($action_value !== '' && (str_contains($action_value, 'delete') || str_contains($action_value, 'remove') || str_contains($action_value, 'destroy'))){
+            $delete_requested = true;
             break;
         }
     }
@@ -326,14 +335,13 @@ function block_manager_restricted_actions()
     if(
         isset($_GET['delete']) ||
         isset($_POST['delete']) ||
-        isset($_GET['edit']) ||
-        isset($_POST['edit']) ||
+        isset($_GET['remove']) ||
+        isset($_POST['remove']) ||
         str_contains($file, 'delete') ||
-        str_contains($file, 'edit') ||
-        str_contains($file, 'update') ||
-        $restricted_action
+        str_contains($file, 'remove') ||
+        $delete_requested
     ){
-        header("Location: " . app_path('dashboard.php?error=Only the company administrator can edit or delete records'));
+        header("Location: " . app_path('dashboard.php?error=Only the company administrator can delete records'));
         exit;
     }
 
@@ -350,8 +358,11 @@ function block_manager_restricted_actions()
                 'customers' => ['customers/'],
                 'suppliers' => ['suppliers/', 'purchases/'],
                 'leads' => ['lead_management/'],
-                'admin' => ['user_management/', 'tools/'],
                 'notice_publish' => ['user_management/notice_publish.php'],
+                'wallet_approvals' => ['user_management/wallet_approvals.php'],
+                // Exact admin-area permissions must be checked before the
+                // broad Admin path so a Wallet Approvals-only account works.
+                'admin' => ['user_management/', 'tools/'],
             ];
 
             if(!in_array($path, $always_allowed_paths, true)){
@@ -392,31 +403,13 @@ function block_manager_restricted_actions()
         }
     }
 
-    $blocked_files = [
-        'edit.php',
-        'update.php',
-        'delete.php',
-        'active.php',
-        'inactive.php',
-        'edit_invoice.php',
-        'update_invoice.php',
-        'delete_invoice.php',
-    ];
+    $blocked_files = ['delete.php', 'delete_invoice.php'];
 
     $blocked_paths = [
-        'categories/create.php',
-        'product_categories/create.php',
-        'products/create.php',
-        'suppliers/create.php',
-        'suppliers/save.php',
-        'wallets/create.php',
         'tools/delete_data.php',
-        'tools/import.php',
     ];
 
-    if (str_starts_with($file, 'edit_') ||
-        str_starts_with($file, 'delete_') ||
-        str_starts_with($file, 'update_') ||
+    if (str_starts_with($file, 'delete_') ||
         in_array($file, $blocked_files, true) ||
         in_array($path, $blocked_paths, true)) {
 

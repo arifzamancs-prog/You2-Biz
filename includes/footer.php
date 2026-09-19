@@ -71,6 +71,28 @@ $(function () {
 });
 
 </script>
+<?php if (function_exists('is_manager_user') && is_manager_user()) { ?>
+<script>
+(function () {
+    const removeDeleteControls = function (root) {
+        (root || document).querySelectorAll('a, button, input[type="submit"], input[type="button"]').forEach(function (control) {
+            const href = (control.getAttribute('href') || '').toLowerCase();
+            const label = [control.getAttribute('title'), control.getAttribute('name'), control.getAttribute('value'), control.dataset.action, control.dataset.staffAction, control.dataset.formAction].filter(Boolean).join(' ').toLowerCase();
+            const isDeleteControl = control.dataset.staffAction === 'delete'
+                || control.dataset.action === 'delete'
+                || control.dataset.formAction === 'delete'
+                || /(^|\/)delete[^/]*\.php(?:\?|$)/.test(href)
+                || /\b(delete|remove|destroy)\b/.test(label);
+            if (isDeleteControl) control.remove();
+        });
+    };
+    removeDeleteControls(document);
+    new MutationObserver(function (changes) {
+        changes.forEach(function (change) { change.addedNodes.forEach(function (node) { if (node.nodeType === 1) removeDeleteControls(node); }); });
+    }).observe(document.body, {childList: true, subtree: true});
+})();
+</script>
+<?php } ?>
 <?php
 if (isset($page_script)) {
     echo $page_script;
@@ -154,31 +176,13 @@ if (isset($page_script)) {
 </style>
 
 <?php if(function_exists('is_manager_user') && is_manager_user()){
-    $footer_request_path = strtolower((string)parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH));
-    $footer_is_lead_management_page = strpos($footer_request_path, '/lead_management/') !== false;
-    $footer_restricted_selectors = $footer_is_lead_management_page
-        ? [
+    $footer_restricted_selectors = [
             '[title*="Delete" i]',
             '[aria-label*="Delete" i]',
             'a[href*="delete" i]',
             'a[href*="del=" i]',
             'input[type="submit"][value*="Delete" i]',
             'button[value*="delete" i]',
-            'button[name="action"][value*="delete" i]',
-        ]
-        : [
-            '[title*="Edit" i]',
-            '[aria-label*="Edit" i]',
-            'a[href*="edit" i]',
-            '[title*="Delete" i]',
-            '[aria-label*="Delete" i]',
-            'a[href*="delete" i]',
-            'a[href*="del=" i]',
-            'input[type="submit"][value*="Edit" i]',
-            'input[type="submit"][value*="Delete" i]',
-            'button[value*="edit" i]',
-            'button[value*="delete" i]',
-            'button[name="action"][value*="edit" i]',
             'button[name="action"][value*="delete" i]',
         ];
 ?>

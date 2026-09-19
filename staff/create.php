@@ -3,11 +3,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/customer_form_helper.php';
+require_once '../includes/branch_helper.php';
 
 require_create_staff_access();
 ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+ensure_head_office_branch($conn, $user_id);
 $message = '';
 $message_type = 'success';
 $staff_code = trim($_POST['staff_code'] ?? '');
@@ -26,6 +28,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $phone = trim($_POST['phone'] ?? '');
     $address = trim($_POST['address'] ?? '');
     $designation = staff_submitted_designation();
+    $branch_id = (int)($_POST['branch_id'] ?? 0);
     $salary = trim($_POST['salary'] ?? '0');
     $upload_message = '';
     $photo = customer_form_upload_photo($_FILES['photo'] ?? null, $user_id, 'staff_photo', $upload_message);
@@ -42,10 +45,21 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }elseif($designation === ''){
         $message = 'Please select or enter a designation.';
         $message_type = 'danger';
+    }elseif($branch_id <= 0){
+        $message = 'Please select a branch.';
+        $message_type = 'danger';
     }elseif($salary === '' || !is_numeric($salary) || (float)$salary < 0){
         $message = 'Please enter a valid salary.';
         $message_type = 'danger';
     }else{
+        $branch_stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($branch_stmt, 'ii', $branch_id, $user_id);
+        mysqli_stmt_execute($branch_stmt);
+        $selected_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($branch_stmt));
+        if(!$selected_branch){
+            $message = 'Selected branch was not found.';
+            $message_type = 'danger';
+        }else{
         $code_stmt = mysqli_prepare($conn, "SELECT id FROM staff WHERE user_id=? AND staff_code=? LIMIT 1");
         mysqli_stmt_bind_param($code_stmt, 'is', $user_id, $staff_code);
         mysqli_stmt_execute($code_stmt);
@@ -56,17 +70,22 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         }else{
             $salary = round((float)$salary, 2);
             create_staff_designation($conn, $user_id, $designation);
-            $stmt = mysqli_prepare($conn, "INSERT INTO staff(user_id,staff_code,photo,name,email,phone,address,designation,salary) VALUES(?,?,?,?,?,?,?,?,?)");
-            mysqli_stmt_bind_param($stmt, 'isssssssd', $user_id, $staff_code, $photo, $name, $email, $phone, $address, $designation, $salary);
+            $stmt = mysqli_prepare($conn, "INSERT INTO staff(user_id,staff_code,photo,name,email,phone,address,designation,branch_id,salary) VALUES(?,?,?,?,?,?,?,?,?,?)");
+            mysqli_stmt_bind_param($stmt, 'isssssssid', $user_id, $staff_code, $photo, $name, $email, $phone, $address, $designation, $branch_id, $salary);
             mysqli_stmt_execute($stmt);
             header('Location:index.php');
             exit;
+        }
         }
     }
 }
 
 $designations = staff_designations($conn, $user_id);
 $designation_rows = staff_designation_rows($conn, $user_id);
+$branches_stmt = mysqli_prepare($conn, "SELECT id, branch_name, is_head_office FROM branches WHERE user_id=? AND status='active' ORDER BY is_head_office DESC, branch_name ASC");
+mysqli_stmt_bind_param($branches_stmt, 'i', $user_id);
+mysqli_stmt_execute($branches_stmt);
+$branches_result = mysqli_stmt_get_result($branches_stmt);
 $staff_codes = [];
 $staff_codes_stmt = mysqli_prepare(
     $conn,
@@ -122,6 +141,17 @@ require_once '../includes/sidebar.php';
                 </select>
                 <input class="form-control mt-2" name="new_designation" id="new_designation" placeholder="Enter new designation" style="display:none;">
                 <small class="text-muted d-block mt-2">Default 4 designations sob company automatic pabe. Custom designation add kora jabe.</small>
+            </div>
+            <div class="form-group">
+                <label>Branch <span class="text-danger">*</span></label>
+                <select class="form-control" name="branch_id" required>
+                    <option value="">Select Branch</option>
+                    <?php while($branch = mysqli_fetch_assoc($branches_result)){ ?>
+                        <option value="<?= (int)$branch['id']; ?>" <?= (int)($_POST['branch_id'] ?? 0) === (int)$branch['id'] ? 'selected' : ''; ?>>
+                            <?= htmlspecialchars($branch['branch_name']); ?>
+                        </option>
+                    <?php } ?>
+                </select>
             </div>
             <div class="form-group"><label>Salary (BDT)</label><input class="form-control" name="salary" type="number" min="0" step="0.01" value="<?= htmlspecialchars($_POST['salary'] ?? '0.00') ?>" required></div>
             <button class="btn btn-primary">Save Staff</button>

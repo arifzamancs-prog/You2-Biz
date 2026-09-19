@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/login_email_otp_helper.php';
 require_once '../includes/staff_helper.php';
+require_once '../includes/branch_helper.php';
 
 ensure_login_email_otp_columns($conn);
 
@@ -170,6 +171,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $address = trim($_POST['address'] ?? '');
     $email = ($is_super_admin || $is_company_admin) ? $user['email'] : trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
+    $phone_is_valid = $phone !== '';
     $login_email_otp_status = (
         !$is_manager &&
         (($_POST['login_email_otp_status'] ?? 'inactive') === 'active')
@@ -189,11 +191,17 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         }
     }
 
-    $can_update_profile = true;
+    $can_update_profile = $phone_is_valid;
     $duplicate_message = '';
     $should_check_contact_uniqueness = !$is_super_admin;
 
+    if (!$phone_is_valid) {
+        $message = 'Phone number is required.';
+        $message_type = 'danger';
+    }
+
     if(
+        $can_update_profile &&
         $should_check_contact_uniqueness &&
         (
             ($duplicate_message = profile_user_contact_duplicate_message($conn, 'email', $email, $user_id)) !== '' ||
@@ -331,6 +339,17 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             $_SESSION['login_name'] = $name;
             $_SESSION['user_name'] = $name;
             $_SESSION['avatar'] = $avatar;
+
+            // The company profile is the Head Office contact record as well.
+            ensure_head_office_branch($conn, $user_id);
+            $head_office_sync = mysqli_prepare(
+                $conn,
+                'UPDATE branches SET address=?, phone=? WHERE user_id=? AND is_head_office=1'
+            );
+            if($head_office_sync){
+                mysqli_stmt_bind_param($head_office_sync, 'ssi', $address, $phone, $user_id);
+                mysqli_stmt_execute($head_office_sync);
+            }
         }
 
         $user['name'] = $name;
@@ -474,6 +493,7 @@ if($is_manager && !empty($user['staff_photo'])){
                         <input
                             type="text"
                             name="phone"
+                            required
                             class="form-control"
                             value="<?= htmlspecialchars($user['phone']); ?>"
                             placeholder="None">

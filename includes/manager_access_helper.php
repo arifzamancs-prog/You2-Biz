@@ -42,6 +42,7 @@ function available_manager_permissions($project_package_labels = null)
         'staff' => 'Staff Manage',
         'sales' => 'Sales',
         'wallets' => 'Wallets',
+        'wallet_approvals' => 'Wallet Approvals',
         'projects' => $project_package_label,
         'land_ledger' => 'Land Ledger',
         'customers' => 'Customer Manage',

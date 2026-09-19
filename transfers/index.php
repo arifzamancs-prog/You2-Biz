@@ -45,7 +45,7 @@ require_once '../includes/sidebar.php';
             Transfer History
         </h3>
 
-        <?php if(is_admin_user()){ ?><div class="card-tools">
+        <?php if(manager_can_modify()){ ?><div class="card-tools">
 
             <a href="create.php"
                class="btn btn-primary btn-sm">

@@ -12,6 +12,7 @@ function ensure_staff_table($conn)
         phone VARCHAR(30) NULL,
         address VARCHAR(255) NULL,
         designation VARCHAR(100) NULL,
+        branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
         salary DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         status ENUM('active','inactive') NOT NULL DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -32,6 +33,16 @@ function ensure_staff_table($conn)
     $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'salary'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE staff ADD COLUMN salary DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER designation");
+    }
+
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'branch_id'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE staff ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER designation");
+    }
+
+    $index = mysqli_query($conn, "SHOW INDEX FROM staff WHERE Key_name='idx_staff_user_branch'");
+    if($index && mysqli_num_rows($index) === 0){
+        mysqli_query($conn, "ALTER TABLE staff ADD INDEX idx_staff_user_branch (user_id, branch_id)");
     }
 
     $column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'staff_code'");

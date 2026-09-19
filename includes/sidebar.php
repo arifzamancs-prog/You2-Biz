@@ -185,7 +185,7 @@ $sidebar_is_super_admin = is_super_admin_user();
 $sidebar_is_agent_only = is_agent_user() && !$sidebar_is_super_admin;
 $sidebar_can_see_reports = $sidebar_is_super_admin || !is_agent_user();
 $sidebar_can_see_admin = is_admin_user()
-    || (is_manager_user() && manager_has_permission('admin'));
+    || (is_manager_user() && (manager_has_permission('admin') || manager_has_permission('wallet_approvals')));
 $sidebar_table_system_enabled = false;
 
 if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
@@ -702,8 +702,9 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     <?php if(is_admin_user()){ ?>
                         <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
                         <?php sidebar_item(app_path('staff/attendance_settings.php'), 'Attendance Settings', 'fas fa-user-clock'); ?>
+                        <?php sidebar_item(app_path('user_management/branch_manage.php'), 'Branch Management', 'fas fa-code-branch'); ?>
                     <?php } ?>
-                    <?php if(is_admin_user()){ ?>
+                    <?php if(is_admin_user() || (is_manager_user() && manager_has_permission('wallet_approvals'))){ ?>
                         <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>
                     <?php } ?>
                     <?php sidebar_item(app_path('user_management/invoice_charges.php'), 'Invoice Charges', 'fas fa-percentage'); ?>

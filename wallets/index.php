@@ -30,7 +30,7 @@ require_once '../includes/sidebar.php';
             Wallet List
         </h3>
 
-        <?php if(is_admin_user()){ ?>
+        <?php if(manager_can_modify()){ ?>
 
         <div class="card-tools">
 
