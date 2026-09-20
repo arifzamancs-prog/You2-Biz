@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
+require_once __DIR__ . '/multi_branch_helper.php';
 
 function ensure_sidebar_settings_table($conn)
 {
@@ -216,6 +217,10 @@ function sidebar_layout_items_for_current_user($items)
 
     foreach($items as $item){
         $id = (string)($item['id'] ?? '');
+
+        if($id === 'branch_manage' && (!($conn instanceof mysqli) || !company_multi_branch_enabled($conn, $company_id))){
+            continue;
+        }
 
         if(in_array($id, $super_admin_only, true) && !is_super_admin_user()){
             continue;

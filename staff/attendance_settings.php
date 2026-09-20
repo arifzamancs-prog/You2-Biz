@@ -8,6 +8,8 @@ require_admin_user();
 $user_id = (int)$_SESSION['user_id'];
 ensure_staff_attendance_tables($conn);
 ensure_head_office_branch($conn, $user_id);
+$multi_branch_enabled = company_multi_branch_enabled($conn, $user_id);
+$branch_access_sql = $multi_branch_enabled ? '' : ' AND is_head_office=1';
 $message = '';
 $message_type = 'success';
 $is_ajax = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '1';
@@ -15,8 +17,11 @@ $is_ajax = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['ajax'] ?? '') === '
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $action = $_POST['action'] ?? '';
     $selected_branch_id = max(0, (int)($_POST['branch_id'] ?? 0));
+    if(!$multi_branch_enabled && $selected_branch_id > 0){
+        require_company_multi_branch($conn, $user_id);
+    }
     if($selected_branch_id > 0){
-        $branch_check = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        $branch_check = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active'{$branch_access_sql} LIMIT 1");
         mysqli_stmt_bind_param($branch_check, 'ii', $selected_branch_id, $user_id);
         mysqli_stmt_execute($branch_check);
         if(!mysqli_fetch_assoc(mysqli_stmt_get_result($branch_check))){
@@ -92,7 +97,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 }
 
 $selected_branch_id = max(0, (int)($_GET['branch_id'] ?? $selected_branch_id ?? 0));
-$branches_stmt = mysqli_prepare($conn, "SELECT id, branch_name, is_head_office FROM branches WHERE user_id=? AND status='active' ORDER BY is_head_office DESC, branch_name ASC");
+$selected_branch_id = $multi_branch_enabled ? $selected_branch_id : 0;
+$branches_stmt = mysqli_prepare($conn, "SELECT id, branch_name, is_head_office FROM branches WHERE user_id=? AND status='active'{$branch_access_sql} ORDER BY is_head_office DESC, branch_name ASC");
 mysqli_stmt_bind_param($branches_stmt, 'i', $user_id);
 mysqli_stmt_execute($branches_stmt);
 $branches = mysqli_stmt_get_result($branches_stmt);
@@ -114,7 +120,7 @@ $closed_days = mysqli_stmt_get_result($closed_stmt);
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
 <?php if($message): ?><div class="alert alert-<?= $message_type ?>"><?= htmlspecialchars($message) ?></div><?php endif; ?>
-<div class="card card-outline card-info"><div class="card-body py-3"><form method="get" class="form-inline"><label class="mr-3 mb-2 mb-sm-0">Attendance Settings For</label><select name="branch_id" class="form-control mr-2" onchange="this.form.submit()"><option value="0" <?= $selected_branch_id === 0 ? 'selected' : '' ?>>All Branches (Default)</option><?php while($branch = mysqli_fetch_assoc($branches)): ?><option value="<?= (int)$branch['id'] ?>" <?= $selected_branch_id === (int)$branch['id'] ? 'selected' : '' ?>><?= htmlspecialchars($branch['branch_name']) ?><?= (int)$branch['is_head_office'] === 1 ? ' (Head Office)' : '' ?></option><?php endwhile; ?></select><noscript><button type="submit" class="btn btn-primary">Load</button></noscript><?php if($selected_branch_id > 0): ?><span class="ml-2 badge badge-<?= $custom_check ? 'warning' : 'secondary' ?>"><?= $custom_check ? 'Custom settings active' : 'Using all-branch default' ?></span><?php endif; ?></form></div></div>
+<?php if($multi_branch_enabled): ?><div class="card card-outline card-info"><div class="card-body py-3"><form method="get" class="form-inline"><label class="mr-3 mb-2 mb-sm-0">Attendance Settings For</label><select name="branch_id" class="form-control mr-2" onchange="this.form.submit()"><option value="0" <?= $selected_branch_id === 0 ? 'selected' : '' ?>>All Branches (Default)</option><?php while($branch = mysqli_fetch_assoc($branches)): ?><option value="<?= (int)$branch['id'] ?>" <?= $selected_branch_id === (int)$branch['id'] ? 'selected' : '' ?>><?= htmlspecialchars($branch['branch_name']) ?><?= (int)$branch['is_head_office'] === 1 ? ' (Head Office)' : '' ?></option><?php endwhile; ?></select><noscript><button type="submit" class="btn btn-primary">Load</button></noscript><?php if($selected_branch_id > 0): ?><span class="ml-2 badge badge-<?= $custom_check ? 'warning' : 'secondary' ?>"><?= $custom_check ? 'Custom settings active' : 'Using all-branch default' ?></span><?php endif; ?></form></div></div><?php endif; ?>
 <div class="row">
  <div class="col-lg-7"><div class="card"><div class="card-header"><h3 class="card-title">Attendance Rules</h3></div><form id="attendance-rules-form" method="post"><div class="card-body row">
   <input type="hidden" name="action" value="save_settings"><input type="hidden" name="ajax" value="1"><input type="hidden" name="branch_id" value="<?= $selected_branch_id ?>">

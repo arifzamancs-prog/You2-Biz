@@ -7,6 +7,7 @@ require_once '../includes/branch_helper.php';
 require_admin_user();
 
 $user_id = (int)$_SESSION['user_id'];
+require_company_multi_branch($conn, $user_id);
 ensure_head_office_branch($conn, $user_id);
 
 function branch_manage_redirect($message, $type = 'success')

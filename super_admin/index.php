@@ -18,8 +18,13 @@ require_once '../includes/wallet_helper.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/pricing_plan_visibility_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/multi_branch_helper.php';
 
 require_super_admin_user();
+ensure_multi_branch_column($conn);
+if (empty($_SESSION['multi_branch_csrf'])) {
+    $_SESSION['multi_branch_csrf'] = bin2hex(random_bytes(32));
+}
 ensure_all_admin_invoice_charges($conn);
 ensure_company_setting_columns($conn);
 ensure_sms_marketing_columns($conn);
@@ -514,6 +519,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $company_id = (int)($_POST['company_id'] ?? 0);
     $form_action = $_POST['form_action'] ?? 'update_company';
+
+    if ($form_action === 'update_multi_branch') {
+        if (!hash_equals($_SESSION['multi_branch_csrf'], (string)($_POST['csrf_token'] ?? ''))) {
+            super_admin_flash_and_redirect('Invalid request. Please try again.', 'danger');
+        }
+        if (!is_super_admin_login(super_admin_notify_email(), (string)($_POST['super_admin_password'] ?? ''))) {
+            super_admin_flash_and_redirect('Super Admin password is incorrect.', 'danger');
+        }
+        $enabled = (string)($_POST['multi_branch_enabled'] ?? '');
+        if ($company_id <= 0 || !in_array($enabled, ['0', '1'], true)) {
+            super_admin_flash_and_redirect('Invalid company or Multi Branch status.', 'danger');
+        }
+        $enabled = (int)$enabled;
+        $stmt = mysqli_prepare($conn, "UPDATE users SET multi_branch_enabled=? WHERE id=? AND role='admin' LIMIT 1");
+        mysqli_stmt_bind_param($stmt, 'ii', $enabled, $company_id);
+        if (!mysqli_stmt_execute($stmt)) {
+            super_admin_flash_and_redirect('Unable to update Multi Branch.', 'danger');
+        }
+        super_admin_flash_and_redirect('Multi Branch is now ' . ($enabled ? 'Active.' : 'Inactive.'));
+    }
 
     if($form_action === 'update_company_type'){
         $company_type = trim((string)($_POST['company_type'] ?? ''));
@@ -1130,6 +1155,7 @@ $sql = "SELECT
             u.id,
             u.name,
             u.company_type,
+            u.multi_branch_enabled,
             u.email,
             u.phone,
             u.email_verified,
@@ -1165,6 +1191,7 @@ $sql = "SELECT
             u.id,
             u.name,
             u.company_type,
+            u.multi_branch_enabled,
             u.email,
             u.phone,
             u.email_verified,
@@ -1380,6 +1407,21 @@ require_once '../includes/sidebar.php';
                                     <div class="input-group-append">
                                         <button type="submit" class="btn btn-primary">Update</button>
                                     </div>
+                                </div>
+                            </form>
+                            <form method="post" class="mt-2">
+                                <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
+                                <input type="hidden" name="form_action" value="update_multi_branch">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['multi_branch_csrf']) ?>">
+                                <input type="hidden" name="multi_branch_enabled" value="<?= empty($row['multi_branch_enabled']) ? 1 : 0 ?>">
+                                <span class="small">Multi Branch</span>
+                                <button type="button" class="btn btn-sm btn-<?= empty($row['multi_branch_enabled']) ? 'secondary' : 'success' ?>" onclick="this.nextElementSibling.hidden = !this.nextElementSibling.hidden" aria-label="Change Multi Branch status">
+                                    <?= empty($row['multi_branch_enabled']) ? 'Inactive' : 'Active' ?>
+                                </button>
+                                <div class="mt-2" hidden>
+                                    <label class="small">Super Admin Password</label>
+                                    <input type="password" name="super_admin_password" class="form-control form-control-sm mb-2" required autocomplete="current-password">
+                                    <button type="submit" class="btn btn-primary btn-sm"><?= empty($row['multi_branch_enabled']) ? 'Activate' : 'Deactivate' ?></button>
                                 </div>
                             </form>
                         </td>

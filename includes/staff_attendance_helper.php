@@ -147,6 +147,9 @@ function staff_attendance_settings($conn, $user_id, $branch_id = 0)
     ensure_staff_attendance_tables($conn);
     $user_id = (int)$user_id;
     $branch_id = max(0, (int)$branch_id);
+    if ($branch_id > 0 && !company_multi_branch_enabled($conn, $user_id)) {
+        $branch_id = 0;
+    }
     $stmt = mysqli_prepare($conn, 'SELECT * FROM staff_attendance_settings WHERE user_id=? AND branch_id=? LIMIT 1');
     mysqli_stmt_bind_param($stmt, 'ii', $user_id, $branch_id);
     mysqli_stmt_execute($stmt);

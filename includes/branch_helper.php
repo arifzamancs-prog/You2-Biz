@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/multi_branch_helper.php';
+
 function ensure_branches_table($conn)
 {
     static $checked = false;

@@ -7,6 +7,7 @@ require_once __DIR__ . '/staff_incentive_helper.php';
 require_once __DIR__ . '/project_package_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 require_once __DIR__ . '/sidebar_settings_helper.php';
+require_once __DIR__ . '/multi_branch_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -702,7 +703,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     <?php if(is_admin_user()){ ?>
                         <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
                         <?php sidebar_item(app_path('staff/attendance_settings.php'), 'Attendance Settings', 'fas fa-user-clock'); ?>
-                        <?php sidebar_item(app_path('user_management/branch_manage.php'), 'Branch Management', 'fas fa-code-branch'); ?>
+                        <?php if(company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) { sidebar_item(app_path('user_management/branch_manage.php'), 'Branch Management', 'fas fa-code-branch'); } ?>
                     <?php } ?>
                     <?php if(is_admin_user() || (is_manager_user() && manager_has_permission('wallet_approvals'))){ ?>
                         <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>

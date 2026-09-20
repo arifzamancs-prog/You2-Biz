@@ -10,6 +10,8 @@ ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_head_office_branch($conn, $user_id);
+$multi_branch_enabled = company_multi_branch_enabled($conn, $user_id);
+$branch_access_sql = $multi_branch_enabled ? '' : ' AND is_head_office=1';
 $message = '';
 $message_type = 'success';
 $staff_code = trim($_POST['staff_code'] ?? '');
@@ -29,6 +31,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $address = trim($_POST['address'] ?? '');
     $designation = staff_submitted_designation();
     $branch_id = (int)($_POST['branch_id'] ?? 0);
+    if (!$multi_branch_enabled) {
+        $head_stmt = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND is_head_office=1 LIMIT 1');
+        mysqli_stmt_bind_param($head_stmt, 'i', $user_id);
+        mysqli_stmt_execute($head_stmt);
+        $branch_id = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($head_stmt))['id'] ?? 0);
+    }
     $salary = trim($_POST['salary'] ?? '0');
     $upload_message = '';
     $photo = customer_form_upload_photo($_FILES['photo'] ?? null, $user_id, 'staff_photo', $upload_message);
@@ -52,7 +60,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $message = 'Please enter a valid salary.';
         $message_type = 'danger';
     }else{
-        $branch_stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        $branch_stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active'{$branch_access_sql} LIMIT 1");
         mysqli_stmt_bind_param($branch_stmt, 'ii', $branch_id, $user_id);
         mysqli_stmt_execute($branch_stmt);
         $selected_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($branch_stmt));
@@ -82,7 +90,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
 $designations = staff_designations($conn, $user_id);
 $designation_rows = staff_designation_rows($conn, $user_id);
-$branches_stmt = mysqli_prepare($conn, "SELECT id, branch_name, is_head_office FROM branches WHERE user_id=? AND status='active' ORDER BY is_head_office DESC, branch_name ASC");
+$branches_stmt = mysqli_prepare($conn, "SELECT id, branch_name, is_head_office FROM branches WHERE user_id=? AND status='active'{$branch_access_sql} ORDER BY is_head_office DESC, branch_name ASC");
 mysqli_stmt_bind_param($branches_stmt, 'i', $user_id);
 mysqli_stmt_execute($branches_stmt);
 $branches_result = mysqli_stmt_get_result($branches_stmt);
