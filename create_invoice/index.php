@@ -213,7 +213,7 @@ require_once '../includes/sidebar.php';
             <div class="row">
                 <div class="col-md-3">
                     <div class="form-group">
-                        <label>Payment Date</label>
+                        <label>Date</label>
                         <div class="input-group">
                             <input type="text" id="invoice-date-display" name="invoice_date" class="form-control" value="<?= htmlspecialchars($invoice_date); ?>" placeholder="DD-MM-YYYY" pattern="\d{2}-\d{2}-\d{4}" required>
                             <div class="input-group-append">

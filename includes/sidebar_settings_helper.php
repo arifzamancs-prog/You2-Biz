@@ -63,7 +63,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('staff_create', 'Create Staff', app_path('staff/index.php'), 'staff_manage', 21),
         sidebar_setting_item('staff_attendance', 'Staff Attendance', app_path('staff/attendance.php'), 'staff_manage', 22),
         sidebar_setting_item('staff_salary', 'Staff Salary', app_path('staff/salary.php'), 'staff_manage', 23),
-        sidebar_setting_item('staff_ledger', 'Staff Ledger', app_path('staff/ledger.php'), 'staff_manage', 24),
+        sidebar_setting_item('staff_ledger', 'Other Payments', app_path('staff/ledger.php'), 'staff_manage', 24),
         sidebar_setting_item('super_admin', 'Super Admin', '', '', 30),
         sidebar_setting_item('subscription', 'Subscription', app_path('super_admin/index.php'), 'super_admin', 31),
         sidebar_setting_item('message_setup', 'Message Setup', app_path('super_admin/signup_message.php'), 'super_admin', 32),

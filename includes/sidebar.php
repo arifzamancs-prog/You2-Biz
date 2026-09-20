@@ -371,7 +371,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ['href' => app_path('staff/index.php'), 'label' => 'Create Staff'],
                     ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
                     ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
-                    ['href' => app_path('staff/ledger.php'), 'label' => 'Staff Ledger'],
+                    ['href' => app_path('staff/ledger.php'), 'label' => 'Other Payments'],
                 ];
                 if(!is_manager_user() || manager_has_permission('staff')){
                     sidebar_tree('Staff Manage', 'fas fa-user-tie', $sidebar_staff_items);

@@ -128,7 +128,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <div>
                 <p class="title"><?= htmlspecialchars(booking_invoice_page_title($invoice['invoice_type'], $invoice_types)); ?></p>
                 <div class="meta">Invoice No: <strong><?= htmlspecialchars($invoice['invoice_no']); ?></strong></div>
-                <div class="meta">Payment Date: <strong><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></strong></div>
+                <div class="meta">Date: <strong><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date'])) . ($printing_option === 'pos' && !empty($invoice['created_at']) ? ' ' . date('h:i A', strtotime($invoice['created_at'])) : '')); ?></strong></div>
                 <div class="meta"><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'confirmed' : 'pending'; ?>"><?= htmlspecialchars($invoice['status'] ?? 'pending'); ?></span></div>
                 <p><button class="no-print print-button" onclick="window.print()">Print Invoice</button></p>
             </div>
