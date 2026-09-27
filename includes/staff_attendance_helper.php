@@ -77,7 +77,7 @@ function ensure_staff_attendance_tables($conn)
         login_at DATETIME NOT NULL,
         login_ip VARCHAR(45) NULL,
         login_device ENUM('desktop','mobile') NOT NULL DEFAULT 'desktop',
-        attendance_status ENUM('present','late','absent','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present',
+        attendance_status ENUM('present','late','absent','out_of_office','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present',
         is_auto_absent TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uniq_staff_attendance_day (user_id, staff_id, attendance_date),
@@ -87,8 +87,8 @@ function ensure_staff_attendance_tables($conn)
 
     $attendance_status_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_logs LIKE 'attendance_status'");
     if ($attendance_status_column && ($attendance_status_info = mysqli_fetch_assoc($attendance_status_column))
-        && (stripos($attendance_status_info['Type'], "'absent'") === false || stripos($attendance_status_info['Type'], "'casual_leave'") === false)) {
-        mysqli_query($conn, "ALTER TABLE staff_attendance_logs MODIFY attendance_status ENUM('present','late','absent','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present'");
+        && stripos($attendance_status_info['Type'], "'out_of_office'") === false) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_logs MODIFY attendance_status ENUM('present','late','absent','out_of_office','closed_day','casual_leave','medical_leave') NOT NULL DEFAULT 'present'");
     }
     $auto_absent_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_logs LIKE 'is_auto_absent'");
     if (!$auto_absent_column || mysqli_num_rows($auto_absent_column) === 0) {
@@ -188,7 +188,7 @@ function staff_attendance_auto_mark_absent($conn, $company_user_id)
 
     ensure_staff_attendance_tables($conn);
     $settings = staff_attendance_settings($conn, $company_user_id);
-    if (date('H:i:s') <= ($settings['absent_after_time'] ?? '12:00:00')) return 0;
+    if (date('H:i:s') <= '20:00:00') return 0;
 
     $today = date('Y-m-d');
     $closed_stmt = mysqli_prepare($conn, 'SELECT id FROM staff_office_closed_days WHERE user_id=? AND closed_date=? LIMIT 1');
@@ -250,15 +250,25 @@ function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
     $is_closed = mysqli_num_rows(mysqli_stmt_get_result($closed_stmt)) > 0;
 
     $now_time = date('H:i:s');
-    $absent_after_time = $settings['absent_after_time'] ?? '12:00:00';
-    $status = $is_closed ? 'closed_day' : ($now_time > $absent_after_time ? 'absent' : ($now_time > $settings['late_after_time'] ? 'late' : 'present'));
+    $office_start_time = '08:00:00';
+    $office_end_time = '20:00:00';
+    $within_login_window = $now_time >= $office_start_time && $now_time < $office_end_time;
+    $status = $is_closed
+        ? 'closed_day'
+        : ($within_login_window ? ($now_time > ($settings['late_after_time'] ?? '10:00:00') ? 'late' : 'present') : 'out_of_office');
     $ip = staff_attendance_client_ip();
     $device = 'desktop';
 
     $stmt = mysqli_prepare($conn, "INSERT INTO staff_attendance_logs
         (user_id, staff_id, login_user_id, attendance_date, login_at, login_ip, login_device, attendance_status, is_auto_absent)
         VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, 0)
-        ON DUPLICATE KEY UPDATE login_user_id=VALUES(login_user_id), login_at=VALUES(login_at), login_ip=VALUES(login_ip), login_device=VALUES(login_device), attendance_status=VALUES(attendance_status), is_auto_absent=0");
+        ON DUPLICATE KEY UPDATE
+            login_user_id=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_user_id, VALUES(login_user_id)),
+            login_at=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_at, VALUES(login_at)),
+            login_ip=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_ip, VALUES(login_ip)),
+            login_device=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_device, VALUES(login_device)),
+            attendance_status=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, attendance_status, VALUES(attendance_status)),
+            is_auto_absent=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, is_auto_absent, 0)");
     mysqli_stmt_bind_param($stmt, 'iiissss', $company_user_id, $staff_id, $login_user_id, $today, $ip, $device, $status);
     mysqli_stmt_execute($stmt);
 }
