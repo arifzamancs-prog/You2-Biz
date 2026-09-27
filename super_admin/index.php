@@ -764,9 +764,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Password must contain at least 6 characters.', 'danger');
         }
 
-        $duplicate_message = contact_duplicate_message($conn, 'email', $company_email);
+        $duplicate_message = contact_duplicate_message_in_table(
+            $conn,
+            'users',
+            'Company',
+            'email',
+            $company_email,
+            0,
+            0
+        );
         if($duplicate_message === ''){
-            $duplicate_message = contact_duplicate_message($conn, 'phone', $company_phone);
+            $duplicate_message = contact_duplicate_message_in_table(
+                $conn,
+                'users',
+                'Company',
+                'phone',
+                $company_phone,
+                0,
+                0
+            );
         }
 
         if($duplicate_message !== ''){
