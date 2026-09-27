@@ -163,7 +163,7 @@ class="table table-bordered table-striped">
 
 <th>Purchase No</th>
 <th>Date</th>
-<th>Supplier</th>
+<th><?= supplier_display_text('Supplier'); ?></th>
 <th>Total</th>
 <th>Paid</th>
 <th>Due</th>

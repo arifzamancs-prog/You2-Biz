@@ -19,9 +19,12 @@ require_once '../includes/printing_helper.php';
 require_once '../includes/pricing_plan_visibility_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/multi_branch_helper.php';
+require_once '../includes/stock_module_helper.php';
+require_once '../includes/lead_management_helper.php';
 
 require_super_admin_user();
 ensure_multi_branch_column($conn);
+ensure_stock_module_feature_column($conn);
 if (empty($_SESSION['multi_branch_csrf'])) {
     $_SESSION['multi_branch_csrf'] = bin2hex(random_bytes(32));
 }
@@ -40,6 +43,42 @@ function ensure_super_admin_company_type_column($conn)
 }
 
 ensure_super_admin_company_type_column($conn);
+
+if(isset($_GET['download_leads'])){
+    $company_id = (int)$_GET['download_leads'];
+    if($company_id <= 0){
+        header('Location: ' . app_path('super_admin/index.php'));
+        exit;
+    }
+
+    ensure_lead_management_table($conn);
+    $company_stmt = mysqli_prepare($conn, "SELECT name FROM users WHERE id=? AND role='admin' LIMIT 1");
+    mysqli_stmt_bind_param($company_stmt, 'i', $company_id);
+    mysqli_stmt_execute($company_stmt);
+    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($company_stmt));
+    if(!$company){
+        header('Location: ' . app_path('super_admin/index.php'));
+        exit;
+    }
+
+    $leads_stmt = mysqli_prepare($conn, "SELECT id, name, phone FROM leads WHERE user_id=? ORDER BY id ASC");
+    mysqli_stmt_bind_param($leads_stmt, 'i', $company_id);
+    mysqli_stmt_execute($leads_stmt);
+    $leads = mysqli_stmt_get_result($leads_stmt);
+    $filename = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$company['name']);
+    $filename = trim($filename, '-') ?: 'company';
+
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '-leads.xls"');
+    header('Cache-Control: max-age=0');
+    echo "\xEF\xBB\xBF";
+    echo '<table border="1"><thead><tr><th>Lead Id</th><th>Name</th><th>Phone</th></tr></thead><tbody>';
+    while($lead = mysqli_fetch_assoc($leads)){
+        echo '<tr><td>' . (int)$lead['id'] . '</td><td>' . htmlspecialchars((string)$lead['name'], ENT_QUOTES, 'UTF-8') . '</td><td style="mso-number-format:\\@;">' . htmlspecialchars((string)$lead['phone'], ENT_QUOTES, 'UTF-8') . '</td></tr>';
+    }
+    echo '</tbody></table>';
+    exit;
+}
 
 function ensure_pricing_plan_request_table($conn)
 {
@@ -553,10 +592,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $company_type = normalize_company_type($company_type);
 
+        $stock_enabled = $company_type === 'Stock Product' ? 1 : 0;
         $type_stmt = mysqli_prepare(
             $conn,
             "UPDATE users
-             SET company_type=?
+             SET company_type=?, fifo_enabled=?
              WHERE id=?
              AND role='admin'
              LIMIT 1"
@@ -566,7 +606,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Company type update failed.', 'danger');
         }
 
-        mysqli_stmt_bind_param($type_stmt, 'si', $company_type, $company_id);
+        mysqli_stmt_bind_param($type_stmt, 'sii', $company_type, $stock_enabled, $company_id);
 
         if(mysqli_stmt_execute($type_stmt)){
             super_admin_flash_and_redirect('Company type updated successfully.', 'success');
@@ -733,13 +773,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect($duplicate_message, 'danger');
         }
 
+        $company_type = normalize_company_type($company_type);
+        $stock_enabled = $company_type === 'Stock Product' ? 1 : 0;
         $password_hash = password_hash($company_password, PASSWORD_DEFAULT);
         $avatar = branding_company_default_avatar_filename($conn);
         $create_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO users
-                (name, company_type, email, phone, password, role, status, avatar, email_verified, email_verified_at)
-             VALUES (?, ?, ?, ?, ?, 'admin', 'active', ?, 1, NOW())"
+                (name, company_type, fifo_enabled, email, phone, password, role, status, avatar, email_verified, email_verified_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'admin', 'active', ?, 1, NOW())"
         );
 
         if(!$create_stmt){
@@ -748,9 +790,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         mysqli_stmt_bind_param(
             $create_stmt,
-            'ssssss',
+            'ssissss',
             $company_name,
-            normalize_company_type($company_type),
+            $company_type,
+            $stock_enabled,
             $company_email,
             $company_phone,
             $password_hash,
@@ -1399,29 +1442,31 @@ require_once '../includes/sidebar.php';
                                 <input type="hidden" name="form_action" value="update_company_type">
                                 <label class="small text-muted mb-1">Company Type</label>
                                 <div class="input-group input-group-sm">
-                                    <?php $company_type = ($row['company_type'] ?? 'Housing') === 'Others' ? 'Others' : 'Housing'; ?>
+                                    <?php $company_type = normalize_company_type($row['company_type'] ?? 'Housing'); ?>
                                     <select name="company_type" class="form-control">
                                         <option value="Housing" <?= $company_type === 'Housing' ? 'selected' : ''; ?>>Housing</option>
                                         <option value="Others" <?= $company_type === 'Others' ? 'selected' : ''; ?>>Others</option>
+                                        <option value="Stock Product" <?= $company_type === 'Stock Product' ? 'selected' : ''; ?>>Stock Product</option>
                                     </select>
                                     <div class="input-group-append">
                                         <button type="submit" class="btn btn-primary">Update</button>
                                     </div>
                                 </div>
                             </form>
-                            <form method="post" class="mt-2">
+                            <form method="post" class="mt-2" onsubmit="var password = window.prompt('Enter Super Admin password to update Multi Branch.'); if(password === null || password === ''){ return false; } this.elements['super_admin_password'].value = password;">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                 <input type="hidden" name="form_action" value="update_multi_branch">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['multi_branch_csrf']) ?>">
-                                <input type="hidden" name="multi_branch_enabled" value="<?= empty($row['multi_branch_enabled']) ? 1 : 0 ?>">
-                                <span class="small">Multi Branch</span>
-                                <button type="button" class="btn btn-sm btn-<?= empty($row['multi_branch_enabled']) ? 'secondary' : 'success' ?>" onclick="this.nextElementSibling.hidden = !this.nextElementSibling.hidden" aria-label="Change Multi Branch status">
-                                    <?= empty($row['multi_branch_enabled']) ? 'Inactive' : 'Active' ?>
-                                </button>
-                                <div class="mt-2" hidden>
-                                    <label class="small">Super Admin Password</label>
-                                    <input type="password" name="super_admin_password" class="form-control form-control-sm mb-2" required autocomplete="current-password">
-                                    <button type="submit" class="btn btn-primary btn-sm"><?= empty($row['multi_branch_enabled']) ? 'Activate' : 'Deactivate' ?></button>
+                                <input type="hidden" name="super_admin_password" value="">
+                                <label class="small mb-1 d-block">Multi Branch</label>
+                                <div class="input-group">
+                                    <select name="multi_branch_enabled" class="form-control">
+                                        <option value="1" <?= !empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Active</option>
+                                        <option value="0" <?= empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Inactive</option>
+                                    </select>
+                                    <div class="input-group-append">
+                                        <button type="submit" class="btn btn-primary">Update</button>
+                                    </div>
                                 </div>
                             </form>
                         </td>
@@ -1478,6 +1523,11 @@ require_once '../includes/sidebar.php';
                                         onclick="return confirm('Force verify this company without email confirmation?');">
                                         Force Verify
                                     </button>
+                                    <div class="mt-2">
+                                        <a href="<?= htmlspecialchars(app_path('super_admin/index.php?download_leads=' . (int)$row['id'])); ?>" class="btn btn-outline-success btn-sm">
+                                            <i class="fas fa-file-excel"></i> Lead Download
+                                        </a>
+                                    </div>
                                 </div>
                             </form>
                         </td>
@@ -1717,7 +1767,7 @@ require_once '../includes/sidebar.php';
 
                             <div class="border-top mt-3 pt-3">
                                 <strong class="d-block mb-2">
-                                    <i class="fas fa-tools"></i> Company Tools
+                                    <i class="fas fa-tools"></i> Tools
                                 </strong>
                                 <a
                                     href="<?= htmlspecialchars(app_path('tools/export.php?company_id=' . (int)$row['id'])); ?>"
@@ -1832,6 +1882,10 @@ require_once '../includes/sidebar.php';
                     <div class="custom-control custom-radio">
                         <input type="radio" id="create_company_type_others" name="company_type" value="Others" class="custom-control-input" required>
                         <label class="custom-control-label" for="create_company_type_others">Others</label>
+                    </div>
+                    <div class="custom-control custom-radio">
+                        <input type="radio" id="create_company_type_stock_product" name="company_type" value="Stock Product" class="custom-control-input" required>
+                        <label class="custom-control-label" for="create_company_type_stock_product">Stock Product</label>
                     </div>
                 </div>
                 <div class="form-group">

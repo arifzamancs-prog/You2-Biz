@@ -23,10 +23,6 @@ if(!$category){
     die('Category Not Found');
 }
 
-if(product_category_is_default($category['category_name'])){
-    die('Default categories cannot be deleted.');
-}
-
 if(product_category_has_usage($conn, $id, $user_id)){
     die('Cannot delete category. Products or transactions exist in this category.');
 }

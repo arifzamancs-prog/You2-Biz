@@ -4,10 +4,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/transaction_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $message = '';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_id = selected_branch_id($conn, true);
 
 if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
@@ -33,6 +36,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         (
             txn_no,
             user_id,
+            branch_id,
             wallet_id,
             txn_date,
             amount,
@@ -45,16 +49,17 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         )
         VALUES
         (
-            ?,?,?,?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?,?,?,?
         )";
 
         $stmt = mysqli_prepare($conn,$sql);
 
         mysqli_stmt_bind_param(
             $stmt,
-            "siisdsssiis",
+            "siiisdsssiis",
             $txn_no,
             $user_id,
+            $branch_id,
             $wallet_id,
             $txn_date,
             $amount,
@@ -97,6 +102,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         (
             txn_no,
             user_id,
+            branch_id,
             wallet_id,
             transaction_type,
             reference_id,
@@ -106,7 +112,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         )
         VALUES
         (
-            ?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?
         )";
 
         $stmt = mysqli_prepare($conn,$sql);
@@ -115,9 +121,10 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
         mysqli_stmt_bind_param(
             $stmt,
-            "siisidss",
+            "siiisidss",
             $txn_no,
             $user_id,
+            $branch_id,
             $wallet_id,
             $type,
             $money_in_id,

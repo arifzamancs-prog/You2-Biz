@@ -5,10 +5,12 @@ require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 ensure_booking_invoice_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+$branch_scope = branch_scope_sql($conn, 'bi');
 $id = (int)($_GET['id'] ?? 0);
 
 ensure_booking_invoice_type_table($conn, $user_id);
@@ -34,6 +36,7 @@ $stmt = mysqli_prepare(
      LEFT JOIN users creator ON creator.id = bi.created_by_user_id
      WHERE bi.id=?
      AND bi.user_id=?
+     {$branch_scope}
      LIMIT 1"
 );
 mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);

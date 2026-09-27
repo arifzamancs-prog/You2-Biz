@@ -24,7 +24,7 @@ mysqli_begin_transaction($conn);
 
 try{
 
-if(!fifo_inventory_purchase_is_editable($conn, $purchase_id)){
+if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_purchase_is_editable($conn, $purchase_id)){
     throw new Exception("This purchase already affected FIFO stock usage. Delete is not allowed.");
 }
 
@@ -170,7 +170,7 @@ $initial_purchase_payment_amount = max(0, $paid_amount - $supplier_payment_total
     mysqli_free_result($items_result);
     mysqli_stmt_close($stmt);
 
-    if(!fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
+    if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
         throw new Exception("FIFO batches could not be removed.");
     }
 
@@ -181,6 +181,7 @@ $initial_purchase_payment_amount = max(0, $paid_amount - $supplier_payment_total
     */
 
     foreach($items as $row){
+        if(($_SESSION['company_type'] ?? '') === 'Housing') continue;
 
         $sql = "UPDATE products
 

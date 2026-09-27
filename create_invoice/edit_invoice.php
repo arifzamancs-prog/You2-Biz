@@ -5,9 +5,12 @@ require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 require_sales_access();
 $user_id = (int)$_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'booking_invoices');
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
 $project_package_labels = project_package_labels($conn, $user_id);
@@ -18,7 +21,7 @@ if($invoice_id <= 0){
     exit;
 }
 
-$invoice_stmt = mysqli_prepare($conn, 'SELECT * FROM booking_invoices WHERE id=? AND user_id=? LIMIT 1');
+$invoice_stmt = mysqli_prepare($conn, "SELECT * FROM booking_invoices WHERE id=? AND user_id=? {$branch_scope} LIMIT 1");
 mysqli_stmt_bind_param($invoice_stmt, 'ii', $invoice_id, $user_id);
 mysqli_stmt_execute($invoice_stmt);
 $invoice = mysqli_fetch_assoc(mysqli_stmt_get_result($invoice_stmt));
@@ -59,7 +62,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }else{
         mysqli_begin_transaction($conn);
         try{
-            $lock_stmt = mysqli_prepare($conn, 'SELECT * FROM booking_invoices WHERE id=? AND user_id=? FOR UPDATE');
+            $lock_stmt = mysqli_prepare($conn, "SELECT * FROM booking_invoices WHERE id=? AND user_id=? {$branch_scope} FOR UPDATE");
             mysqli_stmt_bind_param($lock_stmt, 'ii', $invoice_id, $user_id);
             mysqli_stmt_execute($lock_stmt);
             $locked_invoice = mysqli_fetch_assoc(mysqli_stmt_get_result($lock_stmt));

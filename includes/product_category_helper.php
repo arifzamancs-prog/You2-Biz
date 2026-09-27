@@ -1,10 +1,15 @@
 <?php
 
 /**
- * Add the standard product categories for a newly created company.
- * The existence check makes this safe if registration is retried.
+ * Product inventory is FIFO-only.  The legacy category_type column remains
+ * for backwards-compatible databases, but every category is now stock based.
  */
 function ensure_default_product_categories($conn, $user_id)
+{
+    return ensure_fifo_only_product_categories($conn, $user_id);
+}
+
+function ensure_fifo_only_product_categories($conn, $user_id)
 {
     ensure_product_category_type_column($conn);
     $user_id = (int)$user_id;
@@ -15,47 +20,35 @@ function ensure_default_product_categories($conn, $user_id)
         return false;
     }
 
-    $categories = [
-        ['General (Non Stock/Service)', 'non_stock'],
-        ['Stock Product', 'stock_product'],
-    ];
-
-    $sql = "INSERT INTO product_categories (user_id, category_name, category_type, status)
-            SELECT ?, ?, ?, 'active'
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM product_categories
-                WHERE user_id=? AND category_name=?
-            )";
-
-    $stmt = mysqli_prepare($conn, $sql);
-
-    if(!$stmt){
+    // Preserve historic categories and products, but make each one eligible
+    // for FIFO inventory. No records are deleted during this migration.
+    $update = mysqli_prepare(
+        $conn,
+        "UPDATE product_categories SET category_type='stock_product' WHERE user_id=?"
+    );
+    if(!$update){
         return false;
     }
+    mysqli_stmt_bind_param($update, 'i', $user_id);
+    $ok = mysqli_stmt_execute($update);
+    mysqli_stmt_close($update);
 
-    foreach($categories as $category){
-        [$category_name, $category_type] = $category;
-
-        mysqli_stmt_bind_param(
-            $stmt,
-            'issis',
-            $user_id,
-            $category_name,
-            $category_type,
-            $user_id,
-            $category_name
-        );
-
-        if(!mysqli_stmt_execute($stmt)){
-            mysqli_stmt_close($stmt);
-            return false;
-        }
+    // Remove the legacy non-stock wording from records shown in the FIFO UI.
+    // Duplicate category names are harmless and preserve every historic link.
+    $rename = mysqli_prepare(
+        $conn,
+        "UPDATE product_categories
+         SET category_name='General'
+         WHERE user_id=?
+           AND category_name IN ('General (Non Stock/Service)', 'General (Non Stock)')"
+    );
+    if($rename){
+        mysqli_stmt_bind_param($rename, 'i', $user_id);
+        mysqli_stmt_execute($rename);
+        mysqli_stmt_close($rename);
     }
 
-    mysqli_stmt_close($stmt);
-
-    return true;
+    return $ok;
 }
 
 function ensure_product_category_type_column($conn)
@@ -71,31 +64,11 @@ function ensure_product_category_type_column($conn)
         );
     }
 
-    mysqli_query(
-        $conn,
-        "UPDATE product_categories
-         SET category_name='General (Non Stock/Service)'
-         WHERE category_name='General'"
-    );
-
-    mysqli_query(
-        $conn,
-        "UPDATE product_categories
-         SET category_name='General (Non Stock/Service)'
-         WHERE category_name='General (Non Stock)'"
-    );
-
-    mysqli_query(
-        $conn,
-        "UPDATE product_categories
-         SET category_type='stock_product'
-         WHERE category_name='Stock Product'"
-    );
 }
 
 function product_category_type_label($category_type)
 {
-    return $category_type === 'stock_product' ? 'Stock' : 'Non Stock/Service';
+    return 'FIFO Stock';
 }
 
 function product_category_is_stock($conn, $category_id, $user_id)
@@ -186,11 +159,9 @@ function product_uses_stock($conn, $product_id, $user_id)
 
 function product_category_is_default($category_name)
 {
-    return in_array(
-        trim((string)$category_name),
-        ['General (Non Stock/Service)', 'General (Non Stock)', 'General', 'Stock Product'],
-        true
-    );
+    // Kept as a compatibility helper for older callers. FIFO categories are
+    // user-managed, so none of them are locked as a system default.
+    return false;
 }
 
 function product_category_has_usage($conn, $category_id, $user_id)

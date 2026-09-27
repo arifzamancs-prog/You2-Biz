@@ -5,14 +5,17 @@ require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$branch_id = selected_branch_id($conn, false);
 
 ensure_default_cash_wallet($conn, $user_id);
 
 $result = mysqli_query(
     $conn,
-    "SELECT *
-     FROM wallets
-     WHERE user_id = $user_id
+    "SELECT w.*, b.branch_name
+     FROM wallets w
+     LEFT JOIN branches b ON b.id=w.branch_id AND b.user_id=w.user_id
+     WHERE w.user_id = $user_id
+     " . ($branch_id > 0 ? "AND w.branch_id={$branch_id}" : '') . "
      ORDER BY id DESC"
 );
 
@@ -58,6 +61,7 @@ require_once '../includes/sidebar.php';
 
             <tr>
                 <th>Wallet Name</th>
+                <?php if($branch_id === 0){ ?><th>Branch</th><?php } ?>
                 <th>Description</th>
                 <th>Balance</th>
                 <th>Status</th>
@@ -75,6 +79,7 @@ require_once '../includes/sidebar.php';
                 <td>
                     <?= htmlspecialchars($row['wallet_name']); ?>
                 </td>
+                <?php if($branch_id === 0){ ?><td><?= htmlspecialchars($row['branch_name'] ?: 'Head Office'); ?></td><?php } ?>
 
                 <td>
 

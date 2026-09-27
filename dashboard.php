@@ -7,11 +7,19 @@ require_once 'includes/invoice_posting_helper.php';
 require_once 'includes/customer_opening_due_helper.php';
 require_once 'includes/customer_due_allocation_helper.php';
 require_once 'includes/booking_invoice_helper.php';
+require_once 'includes/branch_context_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $user_name = $_SESSION['login_name'] ?? $_SESSION['user_name'] ?? 'User';
 $dashboard_is_agent = is_agent_user();
 $dashboard_is_staff_login = is_manager_user();
+ensure_branch_accounting_columns($conn, $user_id);
+$wallet_scope = branch_scope_sql($conn);
+$booking_scope = branch_scope_sql($conn, 'bi');
+$expense_scope = branch_scope_sql($conn);
+$invoice_scope = branch_scope_sql($conn);
+$purchase_scope = branch_scope_sql($conn);
+$transaction_scope = branch_scope_sql($conn, 't');
 
 if($dashboard_is_staff_login && !manager_has_permission('dashboard')){
     require_once 'staff_dashboard.php';
@@ -154,6 +162,7 @@ $total_wallet_balance = dashboard_value(
     "SELECT COALESCE(SUM(balance),0)
      FROM wallets
      WHERE user_id=?
+     {$wallet_scope}
      AND status='active'",
     "i",
     [$user_id]
@@ -167,6 +176,7 @@ $total_sales = dashboard_value(
         ON bit.user_id=bi.user_id
         AND bit.type_key=bi.invoice_type
      WHERE bi.user_id=?
+     {$booking_scope}
      AND bi.status='confirmed'
      AND COALESCE(bit.behavior,'income')='income'
      AND bi.invoice_date = CURDATE()",
@@ -179,6 +189,7 @@ $total_purchases = dashboard_value(
     "SELECT COALESCE(SUM(total_amount),0)
      FROM purchases
      WHERE user_id=?
+     {$purchase_scope}
      AND purchase_date = CURDATE()",
     "i",
     [$user_id]
@@ -189,6 +200,7 @@ $total_expense = dashboard_value(
     "SELECT COALESCE(SUM(amount),0)
      FROM expenses
      WHERE user_id=?
+     {$expense_scope}
      AND approval_status='approved'",
     "i",
     [$user_id]
@@ -200,7 +212,8 @@ $supplier_due = dashboard_value(
     $conn,
     "SELECT COALESCE(SUM(due_amount),0)
      FROM purchases
-     WHERE user_id=?",
+     WHERE user_id=?
+     {$purchase_scope}",
     "i",
     [$user_id]
 );
@@ -210,6 +223,7 @@ $month_sales = dashboard_value(
     "SELECT COALESCE(SUM(total_amount),0)
      FROM invoices
      WHERE user_id=?
+     {$invoice_scope}
      AND accounting_status='posted'
      AND MONTH(invoice_date)=MONTH(CURDATE())
      AND YEAR(invoice_date)=YEAR(CURDATE())",
@@ -222,6 +236,7 @@ $month_expense = dashboard_value(
     "SELECT COALESCE(SUM(amount),0)
      FROM expenses
      WHERE user_id=?
+     {$expense_scope}
      AND approval_status='approved'
      AND MONTH(txn_date)=MONTH(CURDATE())
      AND YEAR(txn_date)=YEAR(CURDATE())",
@@ -234,6 +249,7 @@ $active_wallets = dashboard_value(
     "SELECT COUNT(*)
      FROM wallets
      WHERE user_id=?
+     {$wallet_scope}
      AND status='active'",
     "i",
     [$user_id]
@@ -273,6 +289,7 @@ $today_expense = dashboard_value(
     "SELECT COALESCE(SUM(amount),0)
      FROM expenses
      WHERE user_id=?
+     {$expense_scope}
      AND approval_status='approved'
      AND txn_date = CURDATE()",
     "i",
@@ -291,6 +308,7 @@ $recent_invoices = dashboard_rows(
      FROM booking_invoices bi
      LEFT JOIN customers c ON c.id=bi.customer_id
      WHERE bi.user_id=?
+     {$booking_scope}
      ORDER BY bi.invoice_date DESC, bi.id DESC
      LIMIT 6",
     "i",
@@ -320,6 +338,7 @@ $wallets = dashboard_rows(
     "SELECT wallet_name, balance
      FROM wallets
      WHERE user_id=?
+     {$wallet_scope}
      AND status='active'
      ORDER BY balance DESC
      LIMIT 8",
@@ -349,6 +368,7 @@ $recent_transactions = dashboard_rows(
      LEFT JOIN wallets tw
         ON tw.id = tr.to_wallet_id
      WHERE t.user_id=?
+     {$transaction_scope}
      ORDER BY t.id DESC
      LIMIT 6",
     "i",
@@ -378,6 +398,7 @@ $sales_rows = dashboard_rows(
         ON bit.user_id=bi.user_id
         AND bit.type_key=bi.invoice_type
      WHERE bi.user_id=?
+     {$booking_scope}
      AND bi.status='confirmed'
      AND COALESCE(bit.behavior,'income')='income'
      AND bi.invoice_date >= ?
@@ -399,6 +420,7 @@ $expense_rows = dashboard_rows(
         COALESCE(SUM(amount),0) AS total
      FROM expenses
      WHERE user_id=?
+     {$expense_scope}
      AND approval_status='approved'
      AND txn_date >= ?
      GROUP BY DATE_FORMAT(txn_date,'%Y-%m')",
@@ -468,7 +490,7 @@ require_once 'includes/sidebar.php';
     <div class="col-md-8">
 
         <h1 class="mb-1">
-            Dashboard
+            <?= $dashboard_is_staff_login ? 'Branch Dashboard' : 'Dashboard'; ?>
         </h1>
 
         <p class="text-muted mb-0">

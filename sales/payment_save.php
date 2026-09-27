@@ -7,6 +7,7 @@ require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
+$stock_due_scope = stock_customer_scope($conn);
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 $payment_mode = $_POST['payment_mode'] ?? 'invoice';
@@ -18,7 +19,8 @@ mysqli_begin_transaction($conn);
 
 try{
 
-    if($amount < 0){
+    stock_require_wallet($conn, $receive_wallet_id, $user_id, stock_customer_branch($conn));
+    if(!is_finite($amount) || $amount < 0){
         throw new Exception("Amount cannot be negative.");
     }
 
@@ -37,7 +39,7 @@ try{
         $sql = "SELECT id, customer_name
                 FROM customers
                 WHERE id=?
-                AND user_id=?";
+                AND user_id=? FOR UPDATE";
 
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param($stmt, "ii", $customer_id, $user_id);
@@ -56,7 +58,7 @@ try{
                           LEFT JOIN (
                               SELECT customer_id, SUM(total_amount) AS total_sales
                               FROM invoices
-                              WHERE user_id=?
+                              WHERE user_id=? {$stock_due_scope}
                               AND accounting_status='posted'
                               GROUP BY customer_id
                           ) inv
@@ -64,14 +66,14 @@ try{
                           LEFT JOIN (
                               SELECT customer_id, SUM(amount) AS total_sales
                               FROM customer_opening_dues
-                              WHERE user_id=?
+                              WHERE user_id=? {$stock_due_scope}
                               GROUP BY customer_id
                           ) open_due
                               ON open_due.customer_id = c.id
                           LEFT JOIN (
                               SELECT customer_id, SUM(amount) AS total_paid
                               FROM customer_payments
-                              WHERE user_id=?
+                              WHERE user_id=? {$stock_due_scope}
                               GROUP BY customer_id
                           ) pay
                               ON pay.customer_id = c.id
@@ -103,10 +105,10 @@ try{
         $sql = "SELECT id, invoice_no, invoice_date, paid_amount, due_amount
                 FROM invoices
                 WHERE customer_id=?
-                AND user_id=?
+                AND user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
                 AND due_amount > 0
-                ORDER BY invoice_date ASC, id ASC";
+                ORDER BY invoice_date ASC, id ASC FOR UPDATE";
 
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param($stmt, "ii", $customer_id, $user_id);
@@ -131,9 +133,9 @@ try{
             "SELECT id, due_no, entry_date, paid_amount, due_amount
              FROM customer_opening_dues
              WHERE customer_id=?
-             AND user_id=?
+             AND user_id=? {$stock_due_scope}
              AND due_amount > 0
-             ORDER BY entry_date ASC, id ASC"
+             ORDER BY entry_date ASC, id ASC FOR UPDATE"
         );
         mysqli_stmt_bind_param($opening_stmt, "ii", $customer_id, $user_id);
         mysqli_stmt_execute($opening_stmt);
@@ -178,17 +180,14 @@ try{
             if($entry['entry_type'] === 'invoice'){
                 $note = 'Due Collection - ' . $entry['reference_no'];
 
-                $sql = "INSERT INTO customer_payments
-                        (
+                $sql = "INSERT INTO customer_payments (branch_id,
                             user_id,
                             customer_id,
                             invoice_id,
                             amount,
                             payment_date,
                             note
-                        )
-                        VALUES
-                        (
+                        ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                             ?,
                             ?,
                             ?,
@@ -211,8 +210,7 @@ try{
             }else{
                 $note = 'Previous Due Collection - ' . $entry['reference_no'];
 
-                $sql = "INSERT INTO customer_payments
-                        (
+                $sql = "INSERT INTO customer_payments (branch_id,
                             user_id,
                             customer_id,
                             invoice_id,
@@ -220,9 +218,7 @@ try{
                             amount,
                             payment_date,
                             note
-                        )
-                        VALUES
-                        (
+                        ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                             ?,
                             ?,
                             NULL,
@@ -255,7 +251,7 @@ try{
                             due_amount=?,
                             payment_status=?
                         WHERE id=?
-                        AND user_id=?";
+                        AND user_id=? {$stock_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
@@ -274,7 +270,7 @@ try{
                             due_amount=?,
                             status=?
                         WHERE id=?
-                        AND user_id=?";
+                        AND user_id=? {$stock_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
@@ -301,9 +297,9 @@ try{
         $sql = "SELECT *
                 FROM invoices
                 WHERE id=?
-                AND user_id=?
+                AND user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
-                AND due_amount > 0";
+                AND due_amount > 0 FOR UPDATE";
 
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param($stmt, "ii", $invoice_id, $user_id);
@@ -330,17 +326,14 @@ try{
         $note = 'Due Collection - ' . $invoice['invoice_no'];
 
         if((int)$invoice['customer_id'] > 0){
-            $sql = "INSERT INTO customer_payments
-                    (
+            $sql = "INSERT INTO customer_payments (branch_id,
                         user_id,
                         customer_id,
                         invoice_id,
                         amount,
                         payment_date,
                         note
-                    )
-                    VALUES
-                    (
+                    ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
@@ -368,7 +361,7 @@ try{
                     due_amount=?,
                     payment_status=?
                 WHERE id=?
-                AND user_id=?";
+                AND user_id=? {$stock_due_scope}";
 
         $stmt = mysqli_prepare($conn, $sql);
         mysqli_stmt_bind_param(
@@ -393,7 +386,7 @@ try{
     $sql = "UPDATE wallets
             SET balance = balance + ?
             WHERE id=?
-            AND user_id=?";
+            AND user_id=? {$stock_due_scope}";
 
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param(
@@ -419,7 +412,8 @@ try{
         $wallet_reference_id,
         $amount,
         $wallet_note,
-        $payment_date
+        $payment_date,
+        stock_customer_branch($conn)
     );
 
     mysqli_commit($conn);

@@ -3,8 +3,11 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 't');
 $company_profile = printing_company_profile_data($conn);
 
 $from_date = trim($_GET['from_date'] ?? '');
@@ -45,7 +48,7 @@ $sql = "SELECT
         LEFT JOIN customers direct_customer
         ON direct_customer.id = t.reference_id
         AND t.transaction_type = 'receive_payment'
-        WHERE t.user_id=?";
+        WHERE t.user_id=? {$branch_scope}";
 
 if($from_date !== '' && $to_date !== ''){
     $sql .= " AND t.txn_date BETWEEN ? AND ?";

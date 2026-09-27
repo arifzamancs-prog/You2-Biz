@@ -7,9 +7,12 @@ require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/pending_invoice_stock_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $invoice_id = (int)($_GET['id'] ?? 0);
+require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
 $reload_parent = isset($_GET['reload_parent'])
     ? trim((string)$_GET['reload_parent'])
     : '';
@@ -28,7 +31,7 @@ try{
             FROM invoices
             WHERE id=?
             AND user_id=?
-            LIMIT 1";
+            LIMIT 1 FOR UPDATE";
 
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param($stmt, "ii", $invoice_id, $user_id);
@@ -87,7 +90,8 @@ try{
             continue;
         }
 
-        if($qty > (float)$product['current_stock']){
+        $snapshot = product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $invoice_id);
+        if($qty > (float)$snapshot['available_stock']){
             throw new Exception("Insufficient Stock.");
         }
 
@@ -243,17 +247,14 @@ try{
         $payment_note = "Invoice Payment - " . $invoice['invoice_no'];
 
         if($current_invoice_cash_payment > 0.01){
-            $sql = "INSERT INTO customer_payments
-                    (
+            $sql = "INSERT INTO customer_payments (branch_id,
                         user_id,
                         customer_id,
                         invoice_id,
                         amount,
                         payment_date,
                         note
-                    )
-                    VALUES
-                    (
+                    ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
@@ -288,17 +289,14 @@ try{
 
         if($outstanding_payable > 0.01){
             $advance_note = "Outstanding Amount - " . $invoice['invoice_no'];
-            $sql = "INSERT INTO customer_payments
-                    (
+            $sql = "INSERT INTO customer_payments (branch_id,
                         user_id,
                         customer_id,
                         invoice_id,
                         amount,
                         payment_date,
                         note
-                    )
-                    VALUES
-                    (
+                    ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
@@ -350,7 +348,8 @@ try{
             $invoice_id,
             $paid_amount,
             'Sales Invoice - ' . $invoice['invoice_no'],
-            date('Y-m-d')
+            date('Y-m-d'),
+            (int)($invoice['branch_id'] ?? 0)
         );
     }
 

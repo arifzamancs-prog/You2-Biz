@@ -6,8 +6,7 @@ require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
-// Also backfill the defaults for companies created before this feature existed.
-ensure_default_product_categories($conn, $user_id);
+ensure_fifo_only_product_categories($conn, $user_id);
 
 $sql = "SELECT *
         FROM product_categories
@@ -75,8 +74,8 @@ require_once '../includes/sidebar.php';
             <tr>
 
                 <th>Category Name</th>
-                <th>Category Type</th>
                 <th>Status</th>
+                <th>Created</th>
                 <?php if(manager_can_modify()){ ?>
                     <th width="150">Action</th>
                 <?php } ?>
@@ -91,16 +90,7 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <td>
-                    <?= htmlspecialchars($row['category_name']); ?>
-                    <?php if(product_category_is_default($row['category_name'])){ ?>
-                        <span class="badge badge-secondary ml-1">Default</span>
-                    <?php } ?>
-                </td>
-
-                <td>
-                    <?= htmlspecialchars(product_category_type_label($row['category_type'] ?? 'non_stock')); ?>
-                </td>
+                <td><?= htmlspecialchars($row['category_name']); ?></td>
 
                 <td>
 
@@ -124,14 +114,12 @@ require_once '../includes/sidebar.php';
 
                 </td>
 
+                <td><?= !empty($row['created_at']) ? date('d-m-Y h:i A', strtotime($row['created_at'])) : '-'; ?></td>
+
                 <?php if(manager_can_modify()){ ?>
                 <td>
 
-                    <?php if(product_category_is_default($row['category_name'])){ ?>
-
-                        <span class="text-muted small">Locked</span>
-
-                    <?php } elseif(product_category_has_usage($conn, $row['id'], $user_id)){ ?>
+                    <?php if(product_category_has_usage($conn, $row['id'], $user_id)){ ?>
 
                         <span class="text-muted small">In use</span>
 

@@ -2,8 +2,11 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'm');
 
 $sql = "SELECT
             m.*,
@@ -13,6 +16,7 @@ $sql = "SELECT
         ON w.id = m.wallet_id
         AND w.user_id = m.user_id
         WHERE m.user_id=?
+        {$branch_scope}
         ORDER BY m.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);

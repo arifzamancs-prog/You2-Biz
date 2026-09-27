@@ -2,8 +2,11 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 't');
 
 $sql = "SELECT
             t.*,
@@ -16,7 +19,7 @@ $sql = "SELECT
         LEFT JOIN wallets tw
             ON tw.id = t.to_wallet_id
             AND tw.user_id = t.user_id
-        WHERE t.user_id=?
+        WHERE t.user_id=? {$branch_scope}
         ORDER BY t.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);

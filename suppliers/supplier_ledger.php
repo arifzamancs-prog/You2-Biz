@@ -34,7 +34,7 @@ $supplier = mysqli_fetch_assoc($result);
 
 if(!$supplier){
 
-    die("Supplier Not Found");
+    die(supplier_display_text("Supplier Not Found"));
 
 }
 $ledger = [];
@@ -162,7 +162,7 @@ usort($ledger, function($a, $b){
 
 <h3>
 
-Supplier Ledger
+<?= supplier_display_text('Supplier'); ?> Ledger
 
 </h3>
 
@@ -172,7 +172,7 @@ Supplier Ledger
 
 <h5>
 
-Supplier :
+<?= supplier_display_text('Supplier'); ?> :
 <?= htmlspecialchars($supplier['supplier_name']); ?>
 
 </h5>

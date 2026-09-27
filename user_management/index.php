@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/manager_access_helper.php';
 require_once '../includes/customer_portal_helper.php';
 require_once '../includes/staff_helper.php';
+require_once '../includes/branch_helper.php';
 require_once '../includes/project_package_helper.php';
 
 require_admin_user();
@@ -13,6 +14,9 @@ ensure_customer_access_table($conn);
 ensure_staff_table($conn);
 
 $user_id = (int)$_SESSION['user_id'];
+ensure_head_office_branch($conn, $user_id);
+$multi_branch_enabled = company_multi_branch_enabled($conn, $user_id);
+$company_type = project_package_company_type($conn, $user_id);
 $project_package_labels = project_package_labels($conn, $user_id);
 $message = '';
 $message_type = '';
@@ -173,9 +177,9 @@ if(isset($_GET['edit'])){
     $edit_sql = "SELECT id,
                         name,
                         username,
-                         manager_type,
                          staff_id,
-                         access_permissions
+                         access_permissions,
+                         (SELECT s.branch_id FROM staff s WHERE s.id=users.staff_id AND s.user_id=users.owner_id LIMIT 1) AS branch_id
                  FROM users
                  WHERE id=?
                  AND owner_id=?
@@ -262,11 +266,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
 
     $manager_id = (int)($_POST['manager_id'] ?? 0);
     $staff_id = (int)($_POST['staff_id'] ?? 0);
+    $branch_id = (int)($_POST['branch_id'] ?? 0);
     $name = '';
-    $manager_type = 'agent';
     $access_permissions = normalize_manager_permissions($_POST['access_permissions'] ?? []);
+
+    // A single-branch company always operates from Head Office. Do not trust a
+    // posted branch or branch-only permissions when Multi Branch is disabled.
+    if(!$multi_branch_enabled){
+        $head_office_stmt = mysqli_prepare(
+            $conn,
+            "SELECT id FROM branches WHERE user_id=? AND is_head_office=1 AND status='active' LIMIT 1"
+        );
+        if($head_office_stmt){
+            mysqli_stmt_bind_param($head_office_stmt, 'i', $user_id);
+            mysqli_stmt_execute($head_office_stmt);
+            $head_office = mysqli_fetch_assoc(mysqli_stmt_get_result($head_office_stmt));
+            $branch_id = (int)($head_office['id'] ?? 0);
+        }
+
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            ['dashboard', 'all_branches', 'warehouse', 'branch_management']
+        ));
+    }
+
+    // Housing companies do not use the stock/invoice modules. Enforce the
+    // same rule on submitted data as on the visible permission list.
+    if($company_type === 'Housing'){
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            ['stock_sales', 'products', 'warehouse']
+        ));
+    }
+
+    if($company_type === 'Others'){
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            ['stock_sales', 'products', 'warehouse', 'suppliers']
+        ));
+    }
+
+    // Stock Product companies use the dedicated Sales and Products modules;
+    // their service invoice/category module must not be assignable.
+    if($company_type === 'Stock Product'){
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            ['sales', 'projects']
+        ));
+    }
+
+    $admin_sidebar_permission_keys = array_keys(admin_sidebar_permissions());
+    if(!in_array('admin', $access_permissions, true)){
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured'])
+        ));
+    }
+
     $access_permissions_json = json_encode($access_permissions);
-    $sensitive_permissions = ['dashboard', 'projects', 'admin'];
+    $sensitive_permissions = ['main_dashboard', 'dashboard', 'all_branches', 'projects', 'admin'];
     $requires_admin_password = count(array_intersect($sensitive_permissions, $access_permissions)) > 0;
     $admin_password = (string)($_POST['admin_password'] ?? '');
     $username_base = normalize_agent_username_base($_POST['username'] ?? '');
@@ -306,6 +364,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
         if($selected_staff){ $name = trim((string)$selected_staff['name']); }
     }
 
+    $selected_branch = null;
+    if($branch_id > 0){
+        $branch_stmt = mysqli_prepare($conn, "SELECT id,is_head_office FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($branch_stmt, 'ii', $branch_id, $user_id);
+        mysqli_stmt_execute($branch_stmt);
+        $selected_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($branch_stmt));
+    }
+
+    // Under Multi Branch, administrative and cross-branch controls are reserved
+    // for Head Office staff. Enforce this server-side against forged requests.
+    if($multi_branch_enabled && (!$selected_branch || (int)($selected_branch['is_head_office'] ?? 0) !== 1)){
+        $access_permissions = array_values(array_diff($access_permissions, ['all_branches', 'admin']));
+        $access_permissions_json = json_encode($access_permissions);
+    }
+    $requires_admin_password = count(array_intersect($sensitive_permissions, $access_permissions)) > 0;
+
     if ($requires_admin_password) {
         $admin_password_stmt = mysqli_prepare($conn, "SELECT password FROM users WHERE id=? AND role='admin' LIMIT 1");
         mysqli_stmt_bind_param($admin_password_stmt, 'i', $user_id);
@@ -313,7 +387,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
         $admin_row = mysqli_fetch_assoc(mysqli_stmt_get_result($admin_password_stmt));
 
         if(!$admin_row || !password_verify($admin_password, $admin_row['password'])){
-            user_management_flash_and_redirect('Admin Password is required to grant Company Dashboard, ' . $project_package_labels['module'] . ', or Admin access.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
+            user_management_flash_and_redirect('Admin Password is required to grant Branch Dashboard, All Branches, ' . $project_package_labels['module'] . ', or Admin access.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
         }
     }
 
@@ -321,9 +395,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
 
         user_management_flash_and_redirect($limit_error, 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
 
-    } elseif (!$selected_staff || $name === '' || $username_base === '' || ($manager_id === 0 && $password === '')) {
+    } elseif (!$selected_staff || !$selected_branch || $name === '' || $username_base === '' || ($manager_id === 0 && $password === '')) {
  
-        user_management_flash_and_redirect('Select a staff member, then enter username and password.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
+        user_management_flash_and_redirect('Select a staff member and branch, then enter username and password.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
 
     } elseif ($manager_id === 0 && $limit && (int)$limit['manager_count'] >= (int)$limit['max_managers']) {
 
@@ -378,7 +452,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
  
         } elseif (mysqli_num_rows($staff_account_result) > 0) {
 
-            user_management_flash_and_redirect('This staff member already has an Assistant/Manager account.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
+            user_management_flash_and_redirect('This staff member already has a login access account.', 'danger', $manager_id > 0 ? ('edit=' . $manager_id) : '');
 
         } else {
 
@@ -390,31 +464,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
                                    SET name=?,
                                        username=?,
                                        password=?,
-                                        manager_type=?,
-                                       staff_id=?,
-                                       access_permissions=?
-                                   WHERE id=?
-                                   AND owner_id=?
-                                   AND role='manager'";
-
-                    $update_stmt = mysqli_prepare($conn, $update_sql);
-                    mysqli_stmt_bind_param(
-                        $update_stmt,
-                        "ssssisii",
-                        $name,
-                        $username,
-                        $hash,
-                        $manager_type,
-                        $staff_id,
-                        $access_permissions_json,
-                        $manager_id,
-                        $user_id
-                    );
-                }else{
-                    $update_sql = "UPDATE users
-                                   SET name=?,
-                                       username=?,
-                                        manager_type=?,
                                        staff_id=?,
                                        access_permissions=?
                                    WHERE id=?
@@ -427,7 +476,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
                         "sssisii",
                         $name,
                         $username,
-                        $manager_type,
+                        $hash,
+                        $staff_id,
+                        $access_permissions_json,
+                        $manager_id,
+                        $user_id
+                    );
+                }else{
+                    $update_sql = "UPDATE users
+                                   SET name=?,
+                                       username=?,
+                                       staff_id=?,
+                                       access_permissions=?
+                                   WHERE id=?
+                                   AND owner_id=?
+                                   AND role='manager'";
+
+                    $update_stmt = mysqli_prepare($conn, $update_sql);
+                    mysqli_stmt_bind_param(
+                        $update_stmt,
+                        "ssisii",
+                        $name,
+                        $username,
                         $staff_id,
                         $access_permissions_json,
                         $manager_id,
@@ -436,10 +506,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
                 }
 
                 if(mysqli_stmt_execute($update_stmt)){
-                    user_management_flash_and_redirect('Assistant/Manager updated successfully.', 'success');
+                    $staff_branch_stmt = mysqli_prepare($conn, 'UPDATE staff SET branch_id=? WHERE id=? AND user_id=?');
+                    mysqli_stmt_bind_param($staff_branch_stmt, 'iii', $branch_id, $staff_id, $user_id);
+                    mysqli_stmt_execute($staff_branch_stmt);
+                    user_management_flash_and_redirect('Staff login access updated successfully.', 'success');
                 }
 
-                user_management_flash_and_redirect('Assistant/Manager could not be updated.', 'danger', 'edit=' . $manager_id);
+                user_management_flash_and_redirect('Staff login access could not be updated.', 'danger', 'edit=' . $manager_id);
             } else {
 
             $hash = password_hash($password, PASSWORD_DEFAULT);
@@ -456,7 +529,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
                                phone,
                                password,
                                role,
-                               manager_type,
                                 owner_id,
                                 staff_id,
                                 access_permissions,
@@ -471,7 +543,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
                                 ?,
                                 ?,
                                  'manager',
-                                ?,
                                  ?,
                                  ?,
                                  ?,
@@ -484,14 +555,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
             if($insert_stmt){
                 mysqli_stmt_bind_param(
                     $insert_stmt,
-                    "sssssssiis",
+                    "ssssssiis",
                     $name,
                     $username,
                     $address,
                     $email,
                     $phone,
                     $hash,
-                    $manager_type,
                     $user_id,
                     $staff_id
                     ,$access_permissions_json
@@ -506,15 +576,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
 
             if ($inserted) {
 
+                $staff_branch_stmt = mysqli_prepare($conn, 'UPDATE staff SET branch_id=? WHERE id=? AND user_id=?');
+                mysqli_stmt_bind_param($staff_branch_stmt, 'iii', $branch_id, $staff_id, $user_id);
+                mysqli_stmt_execute($staff_branch_stmt);
+
                 user_management_flash_and_redirect(
-                    "Assistant/Manager created successfully. Login username: " . $username,
+                    "Staff login access created successfully. Login username: " . $username,
                     'success'
                 );
 
             } else {
 
                 user_management_flash_and_redirect(
-                    'Assistant/Manager could not be created. Please check username or subscription setup.',
+                    'Staff login access could not be created. Please check username or subscription setup.',
                     'danger'
                 );
             }
@@ -581,9 +655,9 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete
     $manager_id = (int)($_POST['manager_id'] ?? 0);
 
     if($manager_id <= 0){
-        user_management_flash_and_redirect('Invalid assistant/manager selected.', 'danger');
+        user_management_flash_and_redirect('Invalid staff login access selected.', 'danger');
     }elseif(user_management_manager_has_transactions($conn, $manager_id)){
-        user_management_flash_and_redirect('Delete not allowed. This assistant/manager already has transaction history.', 'danger');
+        user_management_flash_and_redirect('Delete not allowed. This staff login access already has transaction history.', 'danger');
     }else{
         $delete_stmt = mysqli_prepare(
             $conn,
@@ -598,27 +672,30 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete
             mysqli_stmt_bind_param($delete_stmt, "ii", $manager_id, $user_id);
 
             if(mysqli_stmt_execute($delete_stmt) && mysqli_stmt_affected_rows($delete_stmt) > 0){
-                user_management_flash_and_redirect('Assistant/Manager deleted successfully.', 'success');
+                user_management_flash_and_redirect('Staff login access deleted successfully.', 'success');
             }else{
-                user_management_flash_and_redirect('Assistant/Manager could not be deleted.', 'danger');
+                user_management_flash_and_redirect('Staff login access could not be deleted.', 'danger');
             }
         }else{
-            user_management_flash_and_redirect('Assistant/Manager could not be deleted.', 'danger');
+            user_management_flash_and_redirect('Staff login access could not be deleted.', 'danger');
         }
     }
 }
 
-$sql = "SELECT id,
-               name,
-               username,
-               manager_type,
-               status,
-               last_login,
-               created_at
-        FROM users
-        WHERE owner_id=?
-        AND role='manager'
-        ORDER BY id DESC";
+$sql = "SELECT u.id,
+               u.name,
+               u.username,
+               u.status,
+               u.last_login,
+               u.created_at,
+               s.designation,
+               COALESCE(NULLIF(b.branch_name,''), 'Head Office') AS branch_name
+        FROM users u
+        LEFT JOIN staff s ON s.id=u.staff_id AND s.user_id=u.owner_id
+        LEFT JOIN branches b ON b.id=s.branch_id AND b.user_id=s.user_id
+        WHERE u.owner_id=?
+        AND u.role='manager'
+        ORDER BY u.id DESC";
 
 $stmt = mysqli_prepare($conn, $sql);
 
@@ -641,6 +718,12 @@ $selected_staff_id = (int)($edit_manager['staff_id'] ?? 0);
 $selected_access_permissions = normalize_manager_permissions(
     json_decode($edit_manager['access_permissions'] ?? '[]', true)
 );
+$admin_sidebar_permission_keys = array_keys(admin_sidebar_permissions());
+$admin_sidebar_is_legacy = in_array('admin', $selected_access_permissions, true)
+    && !in_array('admin_sidebar_configured', $selected_access_permissions, true);
+$selected_admin_sidebar_permissions = $admin_sidebar_is_legacy
+    ? $admin_sidebar_permission_keys
+    : $selected_access_permissions;
 $editing_manager_id = (int)($edit_manager['id'] ?? 0);
 $staff_options_sql = "SELECT s.id,s.name,s.designation
                       FROM staff s
@@ -658,6 +741,12 @@ $staff_options_stmt = mysqli_prepare($conn, $staff_options_sql);
 mysqli_stmt_bind_param($staff_options_stmt, 'iiii', $user_id, $selected_staff_id, $user_id, $editing_manager_id);
 mysqli_stmt_execute($staff_options_stmt);
 $staff_options = mysqli_stmt_get_result($staff_options_stmt);
+
+$branch_options_stmt = mysqli_prepare($conn, "SELECT id,branch_name,is_head_office FROM branches WHERE user_id=? AND status='active' ORDER BY is_head_office DESC,branch_name ASC");
+mysqli_stmt_bind_param($branch_options_stmt, 'i', $user_id);
+mysqli_stmt_execute($branch_options_stmt);
+$branch_options = mysqli_stmt_get_result($branch_options_stmt);
+$selected_branch_id = (int)($edit_manager['branch_id'] ?? 0);
 
 $customer_access_options_stmt = mysqli_prepare(
     $conn,
@@ -742,10 +831,22 @@ require_once '../includes/sidebar.php';
                         </select>
                     </div>
 
+                    <?php if($multi_branch_enabled){ ?>
+                        <div class="form-group">
+                            <label>Branch Name</label>
+                            <select name="branch_id" id="access_branch_id" class="form-control" required>
+                                <option value="">Select Branch</option>
+                                <?php while($branch_option = mysqli_fetch_assoc($branch_options)){ ?>
+                                    <option value="<?= (int)$branch_option['id']; ?>" data-head-office="<?= (int)$branch_option['is_head_office']; ?>" <?= $selected_branch_id === (int)$branch_option['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($branch_option['branch_name']); ?></option>
+                                <?php } ?>
+                            </select>
+                        </div>
+                    <?php } ?>
+
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if($permission_key === 'land_ledger' && project_package_company_type($conn, $user_id) !== 'Housing') continue; ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Others' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Stock Product' && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
                                 <div class="col-md-6 mb-2">
                                     <div class="custom-control custom-checkbox">
                                         <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>
@@ -754,12 +855,27 @@ require_once '../includes/sidebar.php';
                                 </div>
                             <?php } ?>
                         </div>
+                        <div id="admin-sidebar-permissions" class="border rounded p-3 mt-2" style="display:none;">
+                            <strong class="d-block mb-2">Admin Sidebar Options</strong>
+                            <input type="hidden" name="access_permissions[]" value="admin_sidebar_configured" disabled>
+                            <div class="row">
+                                <?php foreach(admin_sidebar_permissions() as $permission_key => $permission_label){ if($permission_key === 'branch_management' && !$multi_branch_enabled) continue; ?>
+                                    <div class="col-md-6 mb-2">
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input admin-sidebar-option" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_admin_sidebar_permissions, true) ? 'checked' : ''; ?> disabled>
+                                            <label class="custom-control-label" for="permission_<?= htmlspecialchars($permission_key); ?>"><?= htmlspecialchars($permission_label); ?></label>
+                                        </div>
+                                    </div>
+                                <?php } ?>
+                            </div>
+                        </div>
+                        <?php if($multi_branch_enabled){ ?><small class="text-muted">Admin and All Branches access can only be granted to Head Office staff. Other Head Office access works globally; branch staff access stays local.</small><?php } ?>
                     </div>
 
                     <div class="form-group" id="sensitive-permission-password" style="display:none;">
                         <label>Admin Password</label>
                         <input type="password" name="admin_password" class="form-control" style="max-width: 280px;" autocomplete="current-password">
-                        <small class="text-muted">Required for Company Dashboard, <?= htmlspecialchars($project_package_labels['module']); ?>, or Admin access.</small>
+                        <small class="text-muted">Required for Main Dashboard, Branch Dashboard, All Branches, <?= htmlspecialchars($project_package_labels['module']); ?>, or Admin access.</small>
                     </div>
 
                     <div class="form-group">
@@ -831,7 +947,7 @@ require_once '../includes/sidebar.php';
                     <thead>
                         <tr>
                             <th>Name</th>
-                            <th>Type</th>
+                            <th>Designation</th>
                             <th>Login Username</th>
                             <th>Status</th>
                             <th>Last Login</th>
@@ -847,11 +963,8 @@ require_once '../includes/sidebar.php';
                             <tr>
                                 <td><?= htmlspecialchars($row['name']); ?></td>
                                 <td>
-                                    <?php if(($row['manager_type'] ?? 'manager') === 'agent'){ ?>
-                                        <span class="badge badge-info">Assistant</span>
-                                    <?php }else{ ?>
-                                        <span class="badge badge-primary">Manager</span>
-                                    <?php } ?>
+                                    <?= htmlspecialchars($row['designation'] ?: '-'); ?>
+                                    <small class="text-muted d-block"><?= htmlspecialchars($row['branch_name']); ?></small>
                                 </td>
                                 <td><?= htmlspecialchars($row['username']); ?></td>
                                 <td>
@@ -885,7 +998,7 @@ require_once '../includes/sidebar.php';
                                     <?php } ?>
 
                                     <?php if(!empty($row['can_delete'])){ ?>
-                                        <form method="post" class="d-inline" onsubmit="return confirm('Delete this assistant/manager?');">
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Delete this staff login access?');">
                                             <input type="hidden" name="action" value="delete_manager">
                                             <input type="hidden" name="manager_id" value="<?= (int)$row['id']; ?>">
                                             <button type="submit" class="btn btn-sm btn-danger" title="Delete Access" aria-label="Delete Access">
@@ -914,132 +1027,8 @@ require_once '../includes/sidebar.php';
 
 </div>
 
-<div class="row">
-
-    <div class="col-lg-4">
-
-        <div class="card">
-
-            <div class="card-header">
-                <h3 class="card-title">Create Customer Login Access</h3>
-            </div>
-
-            <div class="card-body">
-                <form method="post">
-                    <input type="hidden" name="action" value="create_customer_access">
-
-                    <div class="form-group">
-                        <label>Customer Name</label>
-                        <select name="customer_id" class="form-control customer-select" required>
-                            <option value="">Search and select customer</option>
-                            <?php while($customer_option = mysqli_fetch_assoc($customer_access_options)){ ?>
-                                <option value="<?= (int)$customer_option['id']; ?>">
-                                    <?= htmlspecialchars($customer_option['customer_name'] . (!empty($customer_option['phone']) ? ' (' . $customer_option['phone'] . ')' : '')); ?>
-                                </option>
-                            <?php } ?>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Username</label>
-                        <div class="input-group" style="max-width: 280px;">
-                            <input type="text" name="customer_username" class="form-control" required>
-                            <div class="input-group-append">
-                                <span class="input-group-text">@c<?= (int)$user_id; ?></span>
-                            </div>
-                        </div>
-                        <small class="text-muted">Customer must login with this username, not email or phone.</small>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Password</label>
-                        <input type="password" name="customer_password" class="form-control" style="max-width: 280px;" minlength="6" required>
-                    </div>
-
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-user-plus"></i>
-                        Create Customer Access
-                    </button>
-                </form>
-            </div>
-
-        </div>
-
-    </div>
-
-    <div class="col-lg-8">
-
-        <div class="card">
-
-            <div class="card-header">
-                <h3 class="card-title">Customer Access Management</h3>
-            </div>
-
-            <div class="card-body">
-                <table class="table table-bordered table-striped">
-                    <thead>
-                        <tr>
-                            <th>Customer</th>
-                            <th>Contact</th>
-                            <th>Login Username</th>
-                            <th>Status</th>
-                            <th>Last Login</th>
-                            <th>Created</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while($customer_access = mysqli_fetch_assoc($customer_access_result)){ ?>
-                            <tr>
-                                <td>
-                                    <?= htmlspecialchars($customer_access['customer_name']); ?>
-                                    <small class="text-muted d-block">CID: <?= htmlspecialchars($customer_access['customer_code'] ?: '-'); ?></small>
-                                </td>
-                                <td>
-                                    <?= htmlspecialchars($customer_access['phone'] ?: '-'); ?>
-                                    <small class="text-muted d-block"><?= htmlspecialchars($customer_access['email'] ?: '-'); ?></small>
-                                </td>
-                                <td><?= htmlspecialchars($customer_access['username']); ?></td>
-                                <td>
-                                    <?php if($customer_access['status'] === 'active'){ ?>
-                                        <span class="badge badge-success">Active</span>
-                                    <?php }else{ ?>
-                                        <span class="badge badge-secondary">Inactive</span>
-                                    <?php } ?>
-                                </td>
-                                <td><?= htmlspecialchars(app_datetime($customer_access['last_login'] ?? null)); ?></td>
-                                <td><?= htmlspecialchars(app_datetime($customer_access['created_at'])); ?></td>
-                                <td>
-                                    <?php if($customer_access['status'] === 'active'){ ?>
-                                        <a href="index.php?customer_access_id=<?= (int)$customer_access['id']; ?>&customer_access_status=inactive" class="btn btn-sm btn-warning" title="Deactivate Customer Access" aria-label="Deactivate Customer Access">
-                                            <i class="fas fa-ban"></i>
-                                        </a>
-                                    <?php }else{ ?>
-                                        <a href="index.php?customer_access_id=<?= (int)$customer_access['id']; ?>&customer_access_status=active" class="btn btn-sm btn-success" title="Activate Customer Access" aria-label="Activate Customer Access">
-                                            <i class="fas fa-check"></i>
-                                        </a>
-                                    <?php } ?>
-                                    <form method="post" class="d-inline" onsubmit="return confirm('Delete this customer access?');">
-                                        <input type="hidden" name="action" value="delete_customer_access">
-                                        <input type="hidden" name="access_id" value="<?= (int)$customer_access['id']; ?>">
-                                        <button type="submit" class="btn btn-sm btn-danger" title="Delete Customer Access" aria-label="Delete Customer Access">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                        <?php } ?>
-                    </tbody>
-                </table>
-            </div>
-
-        </div>
-
-    </div>
-
-</div>
-
 <?php
-$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); $('.customer-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select customer'}); }); document.addEventListener('DOMContentLoaded', function(){ const sensitive = ['dashboard', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const sync = function(){ const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
+$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); $('.customer-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select customer'}); }); document.addEventListener('DOMContentLoaded', function(){ const multiBranchEnabled = " . ($multi_branch_enabled ? 'true' : 'false') . "; const sensitive = ['main_dashboard', 'dashboard', 'all_branches', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const branch = document.getElementById('access_branch_id'); const syncBranchPermission = function(){ if(!multiBranchEnabled || !branch){ return; } const option = branch.options[branch.selectedIndex]; const isHeadOffice = option && option.dataset.headOffice === '1'; document.querySelectorAll('[data-head-office-only=\"1\"]').forEach(function(row){ const permission = row.querySelector('input[name=\"access_permissions[]\"]'); row.style.display = isHeadOffice ? '' : 'none'; if(permission){ permission.disabled = !isHeadOffice; if(!isHeadOffice){ permission.checked = false; } } }); }; const sync = function(){ syncBranchPermission(); const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; if(branch){ branch.addEventListener('change', sync); } document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
+$page_script .= "<script>document.addEventListener('DOMContentLoaded', function(){ var admin = document.getElementById('permission_admin'); var panel = document.getElementById('admin-sidebar-permissions'); if(!admin || !panel){ return; } var options = panel.querySelectorAll('.admin-sidebar-option'); var configured = panel.querySelector('input[value=admin_sidebar_configured]'); function syncAdminSidebar(){ var enabled = admin.checked && !admin.disabled; panel.style.display = enabled ? '' : 'none'; options.forEach(function(option){ option.disabled = !enabled; if(!enabled){ option.checked = false; } }); if(configured){ configured.disabled = !enabled; } } admin.addEventListener('change', syncAdminSidebar); syncAdminSidebar(); });</script>";
 require_once '../includes/footer.php';
 ?>

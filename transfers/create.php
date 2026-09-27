@@ -4,10 +4,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $message = '';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_id = selected_branch_id($conn, true);
 
 ensure_default_cash_wallet($conn, $user_id);
 
@@ -65,15 +68,17 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         $sql = "SELECT balance
                 FROM wallets
                 WHERE id=?
-                AND user_id=?";
+                AND user_id=?
+                AND branch_id=?";
 
         $stmt = mysqli_prepare($conn,$sql);
 
         mysqli_stmt_bind_param(
             $stmt,
-            "ii",
+            "iii",
             $from_wallet_id,
-            $user_id
+            $user_id,
+            $branch_id
         );
 
         mysqli_stmt_execute($stmt);
@@ -102,6 +107,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                         (
                             txn_no,
                             user_id,
+                            branch_id,
                             from_wallet_id,
                             to_wallet_id,
                             txn_date,
@@ -114,16 +120,17 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                         )
                         VALUES
                         (
-                            ?,?,?,?,?,?,?,?,?,?,?
+                            ?,?,?,?,?,?,?,?,?,?,?,?
                         )";
 
                 $stmt = mysqli_prepare($conn,$sql);
 
                 mysqli_stmt_bind_param(
                     $stmt,
-                    "siiisdssiis",
+                    "siiiisdssiis",
                     $txn_no,
                     $user_id,
+                    $branch_id,
                     $from_wallet_id,
                     $to_wallet_id,
                     $txn_date,
@@ -168,7 +175,8 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                     $transfer_id,
                     $amount,
                     'Transfer: ' . $note,
-                    $txn_date
+                    $txn_date,
+                    $branch_id
                 );
 
                 }

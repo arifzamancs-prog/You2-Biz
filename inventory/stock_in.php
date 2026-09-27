@@ -9,7 +9,7 @@ ensure_fifo_inventory_tables($conn);
 
 $message = '';
 
-$sql = "SELECT id, product_name
+$sql = "SELECT id, product_name, sku
         FROM products
         WHERE user_id=?
         AND status='active'
@@ -205,7 +205,7 @@ require_once '../includes/sidebar.php';
                         <option
                             value="<?= $row['id']; ?>">
 
-                            <?= htmlspecialchars($row['product_name']); ?>
+                            <?= htmlspecialchars(product_option_label($row['product_name'], $row['sku'] ?? '')); ?>
 
                         </option>
 

@@ -46,7 +46,7 @@ try{
             FROM purchases
 
             WHERE id=?
-            AND user_id=?";
+            AND user_id=? FOR UPDATE";
 
     $stmt = mysqli_prepare($conn,$sql);
 
@@ -73,7 +73,7 @@ try{
 
     }
 
-    if($amount<=0){
+    if(!is_finite($amount) || $amount<=0){
 
         throw new Exception("Invalid Amount");
 
@@ -187,6 +187,7 @@ SAVE SUPPLIER PAYMENT
 
 $sql = "INSERT INTO supplier_payments
 (
+    branch_id,
     user_id,
     supplier_id,
     purchase_id,
@@ -197,6 +198,7 @@ $sql = "INSERT INTO supplier_payments
 )
 VALUES
 (
+    " . stock_customer_branch($conn) . ",
     ?,
     ?,
     ?,
@@ -254,7 +256,7 @@ $supplier_payment_id = mysqli_insert_id($conn);
         'supplier_payment',
         $supplier_payment_id,
         $amount,
-        'Supplier Due Payment - ' . $purchase['purchase_no'],
+        supplier_display_text('Supplier Due Payment - ') . $purchase['purchase_no'],
         date('Y-m-d')
     );
 
@@ -264,7 +266,7 @@ $supplier_payment_id = mysqli_insert_id($conn);
         $payment_wallet_id,
         $amount,
         date('Y-m-d'),
-        'Supplier Due Payment - ' . $purchase['purchase_no'],
+        supplier_display_text('Supplier Due Payment - ') . $purchase['purchase_no'],
         'supplier_payment',
         $supplier_payment_id
     );

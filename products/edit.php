@@ -9,7 +9,7 @@ require_once '../includes/product_category_helper.php';
 $user_id = $_SESSION['user_id'];
 ensure_product_management_columns($conn);
 ensure_fifo_inventory_tables($conn);
-ensure_product_category_type_column($conn);
+ensure_fifo_only_product_categories($conn, $user_id);
 $show_expired_on = is_product_expiry_enabled($conn);
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -68,19 +68,24 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_id    = (int)$_POST['category_id'];
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
+    if(!$is_stock_product){
+        $_SESSION['error'] = 'Please select an active FIFO product category.';
+        header("Location: edit.php?id=" . $id);
+        exit;
+    }
     $product_name   = trim($_POST['product_name']);
     $sku            = trim($_POST['sku']);
-    $purchase_price = $is_stock_product ? (float)($_POST['purchase_price'] ?? 0) : 0;
+    $purchase_price = (float)($_POST['purchase_price'] ?? 0);
     $sale_price     = (float)$_POST['sale_price'];
-    $expired_on     = $is_stock_product && $show_expired_on
+    $expired_on     = $show_expired_on
         ? trim($_POST['expired_on'] ?? '')
         : (string)($product['expired_on'] ?? '');
 
     if($expired_on === ''){
         $expired_on = null;
     }
-    $opening_stock  = $is_stock_product ? (int)($_POST['current_stock'] ?? 0) : 0;
-    $minimum_stock =  $is_stock_product ? (int)($_POST['minimum_stock'] ?? 0) : 0;
+    $opening_stock  = (int)($_POST['current_stock'] ?? 0);
+    $minimum_stock = (int)($_POST['minimum_stock'] ?? 0);
     $status         = $_POST['status'];
 
     mysqli_begin_transaction($conn);
@@ -124,7 +129,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if(
         mysqli_stmt_execute($stmt) &&
         fifo_inventory_remove_product_opening_batches($conn, $id) &&
-        (!$is_stock_product || fifo_inventory_create_batch(
+        fifo_inventory_create_batch(
             $conn,
             $user_id,
             $id,
@@ -134,7 +139,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             $id,
             'OPEN-' . $id,
             date('Y-m-d')
-        ))
+        )
     ){
         mysqli_commit($conn);
 
@@ -195,7 +200,6 @@ require_once '../includes/sidebar.php';
 
                         <option
                             value="<?= $cat['id']; ?>"
-                            data-category-type="<?= htmlspecialchars($cat['category_type'] ?? 'non_stock'); ?>"
                             <?= $product['category_id']==$cat['id']?'selected':''; ?>>
 
                             <?= htmlspecialchars($cat['category_name']); ?>
@@ -233,7 +237,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <div class="form-group stock-only-field">
+            <div class="form-group">
 
                 <label>Purchase Price</label>
 
@@ -261,7 +265,7 @@ require_once '../includes/sidebar.php';
             </div>
 
             <?php if($show_expired_on){ ?>
-            <div class="form-group stock-only-field">
+            <div class="form-group">
 
                 <label>Expiry on</label>
 
@@ -279,7 +283,7 @@ require_once '../includes/sidebar.php';
                     value="<?= htmlspecialchars($product['expired_on'] ?? ''); ?>">
             <?php } ?>
 
-            <div class="form-group stock-only-field">
+            <div class="form-group">
 
                 <label>Opening Stock</label>
 
@@ -293,7 +297,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <div class="form-group stock-only-field">
+            <div class="form-group">
 
             <label>
                 Minimum Stock
@@ -345,26 +349,5 @@ require_once '../includes/sidebar.php';
     </div>
 
 </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    var category = document.querySelector('[name="category_id"]');
-    var stockFields = document.querySelectorAll('.stock-only-field');
-
-    function updateStockFields() {
-        var option = category.options[category.selectedIndex];
-        var isStock = option && option.dataset.categoryType === 'stock_product';
-        stockFields.forEach(function (field) {
-            field.style.display = isStock ? '' : 'none';
-            field.querySelectorAll('input').forEach(function (input) {
-                input.disabled = !isStock;
-            });
-        });
-    }
-
-    category.addEventListener('change', updateStockFields);
-    updateStockFields();
-});
-</script>
 
 <?php require_once '../includes/footer.php'; ?>

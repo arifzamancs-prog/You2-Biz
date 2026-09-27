@@ -197,5 +197,30 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 <?php } ?>
 
+<?php if (function_exists('stock_csrf_token')) { ?>
+<script>
+(function () {
+    const token = <?= json_encode(stock_csrf_token()); ?>;
+    const localStockUrl = function (value) {
+        const url = new URL(value || location.href, location.href);
+        return url.origin === location.origin && /\/(sales|products|product_categories|purchases|suppliers|warehouse)\//.test(url.pathname);
+    };
+    document.querySelectorAll('form').forEach(function (form) {
+        if (form.method.toLowerCase() !== 'post' || !localStockUrl(form.action)) return;
+        if (!form.querySelector('[name="stock_csrf"]')) {
+            const input = document.createElement('input');
+            input.type = 'hidden'; input.name = 'stock_csrf'; input.value = token;
+            form.appendChild(input);
+        }
+    });
+    if (window.jQuery) $.ajaxPrefilter(function (options) {
+        if ((options.type || 'GET').toUpperCase() !== 'POST' || !localStockUrl(options.url)) return;
+        if (options.data instanceof FormData) options.data.set('stock_csrf', token);
+        else if (typeof options.data === 'string') options.data += '&stock_csrf=' + encodeURIComponent(token);
+        else options.data = Object.assign({}, options.data, {stock_csrf: token});
+    });
+})();
+</script>
+<?php } ?>
 </body>
 </html>

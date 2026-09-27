@@ -2,12 +2,15 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $message = '';
 
 if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
     $user_id = $_SESSION['user_id'];
+    ensure_branch_accounting_columns($conn, (int)$user_id);
+    $branch_id = selected_branch_id($conn, true);
 
     $wallet_name = trim($_POST['wallet_name']);
     $description = trim($_POST['description']);
@@ -21,14 +24,16 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         $sql = "SELECT id
                 FROM wallets
                 WHERE user_id=?
+                AND branch_id=?
                 AND wallet_name=?";
 
         $stmt = mysqli_prepare($conn,$sql);
 
         mysqli_stmt_bind_param(
             $stmt,
-            "is",
+            "iis",
             $user_id,
+            $branch_id,
             $wallet_name
         );
 
@@ -45,6 +50,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
             $sql = "INSERT INTO wallets
             (
                 user_id,
+                branch_id,
                 wallet_name,
                 description,
                 balance,
@@ -52,15 +58,16 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
             )
             VALUES
             (
-                ?,?,?,0,'active'
+                ?,?,?,?,0,'active'
             )";
 
             $stmt = mysqli_prepare($conn,$sql);
 
             mysqli_stmt_bind_param(
                 $stmt,
-                "iss",
+                "iiss",
                 $user_id,
+                $branch_id,
                 $wallet_name,
                 $description
             );

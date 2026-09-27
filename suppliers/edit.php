@@ -30,7 +30,7 @@ $result = mysqli_stmt_get_result($stmt);
 $row = mysqli_fetch_assoc($result);
 
 if(!$row){
-    die("Supplier Not Found");
+    die(supplier_display_text("Supplier Not Found"));
 }
 
 ?>
@@ -40,7 +40,7 @@ if(!$row){
 <div class="card-header">
 
 <h3 class="card-title">
-Edit Supplier
+Edit <?= supplier_display_text('Supplier'); ?>
 </h3>
 
 </div>
@@ -63,7 +63,7 @@ Edit Supplier
 
 <div class="form-group">
 
-<label>Supplier Name</label>
+<label><?= supplier_display_text('Supplier'); ?> Name</label>
 
 <input type="text"
        name="supplier_name"
@@ -109,7 +109,7 @@ class="form-control"><?= htmlspecialchars($row['address']); ?></textarea>
 type="submit"
 class="btn btn-primary">
 
-Update Supplier
+Update <?= supplier_display_text('Supplier'); ?>
 
 </button>
 

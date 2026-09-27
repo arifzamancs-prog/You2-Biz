@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/supplier_label_helper.php';
 
 function ensure_manager_access_columns($conn)
 {
@@ -38,19 +39,71 @@ function available_manager_permissions($project_package_labels = null)
         : 'Project & Package';
 
     return [
-        'dashboard' => 'Company Dashboard',
+        'main_dashboard' => 'Main Dashboard',
+        'dashboard' => 'Branch Dashboard',
+        'all_branches' => 'All Branches',
         'staff' => 'Staff Manage',
-        'sales' => 'Sales',
+        'sales' => 'Sales / Invoice',
+        'stock_sales' => 'Sales',
+        'products' => 'Products',
+        'warehouse' => 'Main Warehouse',
         'wallets' => 'Wallets',
-        'wallet_approvals' => 'Wallet Approvals',
         'projects' => $project_package_label,
         'land_ledger' => 'Land Ledger',
         'customers' => 'Customer Manage',
         'leads' => 'Lead Management',
-        'suppliers' => 'Supplier',
+        'suppliers' => supplier_display_text('Suppliers'),
         'admin' => 'Admin',
+        // These are shown as Admin sub-options in Access Management, rather
+        // than as regular module permissions. Tools is intentionally a regular
+        // permission so it can be assigned independently of Admin access.
+        'admin_access_management' => 'Access Management',
+        'attendance_settings' => 'Attendance Settings',
+        'wallet_approvals' => 'Wallet Approvals',
+        'branch_management' => 'Branch Management',
+        'invoice_charges' => 'Invoice Charges',
+        'printing_option' => 'Printing Option',
+        'profit_cash_out' => 'Profit Cash Out',
+        'sidebar_settings' => 'Slidebar Settings',
+        'admin_sidebar_configured' => 'Admin sidebar configured',
+        'tools' => 'Tools',
         'notice_publish' => 'Notice Publish',
+        'reports' => 'Reports',
     ];
+}
+
+function admin_sidebar_permissions()
+{
+    return [
+        'admin_access_management' => 'Access Management',
+        'attendance_settings' => 'Attendance Settings',
+        'wallet_approvals' => 'Wallet Approvals',
+        'branch_management' => 'Branch Management',
+        'invoice_charges' => 'Invoice Charges',
+        'printing_option' => 'Printing Option',
+        'profit_cash_out' => 'Profit Cash Out',
+        'sidebar_settings' => 'Slidebar Settings',
+    ];
+}
+
+function manager_has_selected_admin_sidebar_permission($permission)
+{
+    if(!function_exists('is_manager_user') || !is_manager_user() || empty($_SESSION['permissions_configured'])){
+        return true;
+    }
+
+    $permissions = $_SESSION['access_permissions'] ?? [];
+    if(!in_array('admin', $permissions, true)){
+        return false;
+    }
+
+    // Existing accounts created before granular Admin options keep their
+    // former full Admin access until the access record is saved again.
+    if(!in_array('admin_sidebar_configured', $permissions, true)){
+        return true;
+    }
+
+    return in_array($permission, $permissions, true);
 }
 
 function normalize_manager_permissions($permissions)

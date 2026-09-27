@@ -347,7 +347,8 @@ function confirm_booking_invoice($conn, $invoice_id, $user_id)
 
     mysqli_begin_transaction($conn);
     try {
-        $stmt = mysqli_prepare($conn, "SELECT * FROM booking_invoices WHERE id=? AND user_id=? FOR UPDATE");
+        $branch_scope = branch_scope_sql($conn, 'booking_invoices');
+        $stmt = mysqli_prepare($conn, "SELECT * FROM booking_invoices WHERE id=? AND user_id=? {$branch_scope} FOR UPDATE");
         mysqli_stmt_bind_param($stmt, 'ii', $invoice_id, $user_id);
         mysqli_stmt_execute($stmt);
         $invoice = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
@@ -394,7 +395,7 @@ function booking_invoice_apply_wallet_effect($conn, $invoice, $user_id)
     $transaction_type = $behavior === 'expense' ? 'invoice_expense' : 'invoice_income';
     $txn_no = generate_short_unique_txn_no($conn, 'INV', 'transactions', 'txn_no');
     $note = 'Invoice ' . $invoice['invoice_no'] . ' confirmed';
-    record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, $invoice_id, $amount, $note, $invoice['invoice_date']);
+    record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, $invoice_id, $amount, $note, $invoice['invoice_date'], (int)($invoice['branch_id'] ?? 0));
 
     $update_stmt = mysqli_prepare($conn, "UPDATE booking_invoices SET status='confirmed', wallet_effect_applied=1, confirmed_at=NOW() WHERE id=? AND user_id=?");
     mysqli_stmt_bind_param($update_stmt, 'ii', $invoice_id, $user_id);

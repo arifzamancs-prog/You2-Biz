@@ -108,10 +108,10 @@ $status_class = $payment_status === 'paid' ? 'success' : ($payment_status === 'p
         <div class="row mb-4">
             <div class="col-lg-7 mb-3 mb-lg-0">
                 <div class="border rounded h-100 p-3 bg-light">
-                    <div class="text-uppercase small font-weight-bold text-muted mb-3">Supplier Information</div>
+                    <div class="text-uppercase small font-weight-bold text-muted mb-3"><?= supplier_display_text('Supplier'); ?> Information</div>
                     <div class="row">
                         <div class="col-sm-7 mb-3 mb-sm-0">
-                            <div class="small text-muted mb-1">Supplier</div>
+                            <div class="small text-muted mb-1"><?= supplier_display_text('Supplier'); ?></div>
                             <div class="font-weight-bold text-dark"><?= htmlspecialchars($purchase['supplier_name'] ?: '—'); ?></div>
                         </div>
                         <div class="col-sm-5">

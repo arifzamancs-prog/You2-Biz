@@ -6,7 +6,8 @@ require_once '../includes/wallet_helper.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
-ensure_product_category_type_column($conn);
+$housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
+if(!$housing_purchase) ensure_fifo_only_product_categories($conn, $user_id);
 
 $suppliers = mysqli_query(
     $conn,
@@ -19,12 +20,11 @@ $suppliers = mysqli_query(
 
 $products = mysqli_query(
     $conn,
-    "SELECT p.id, p.product_name
+    "SELECT p.id, p.product_name, p.sku
      FROM products p
      INNER JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id='$user_id'
      AND p.status='active'
-     AND c.category_type='stock_product'
      ORDER BY product_name"
 );
 
@@ -37,7 +37,6 @@ $managed_products = mysqli_query(
      INNER JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id='$user_id'
      AND p.status='active'
-     AND c.category_type='stock_product'
      ORDER BY p.product_name"
 );
 
@@ -55,7 +54,8 @@ while($supplier = mysqli_fetch_assoc($suppliers)){
 
 $product_options_html = '';
 while($product = mysqli_fetch_assoc($products)){
-    $product_options_html .= '<option value="' . (int)$product['id'] . '">' . htmlspecialchars($product['product_name']) . '</option>';
+    $label = product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase);
+    $product_options_html .= '<option value="' . (int)$product['id'] . '">' . htmlspecialchars($label) . '</option>';
 }
 
 require_once '../includes/header.php';
@@ -90,11 +90,11 @@ require_once '../includes/sidebar.php';
 
 <div class="row">
     <div class="col-md-12">
-        <label>Supplier</label>
+        <label><?= supplier_display_text('Supplier'); ?></label>
         <select name="supplier_id" class="form-control supplier-select" required>
-            <option value="">Select Supplier</option>
+            <option value="">Select <?= supplier_display_text('Supplier'); ?></option>
             <?= $supplier_options_html; ?>
-            <option value="__new__">+ Add New Supplier</option>
+            <option value="__new__">+ Add New <?= supplier_display_text('Supplier'); ?></option>
         </select>
     </div>
 </div>
@@ -102,7 +102,7 @@ require_once '../includes/sidebar.php';
 <div id="new_supplier_box" class="border rounded p-3 mt-3" style="display:none; background:#f8fbff;">
     <div class="row">
         <div class="col-md-4">
-            <label>Supplier Name</label>
+            <label><?= supplier_display_text('Supplier'); ?> Name</label>
             <input type="text" name="new_supplier_name" class="form-control" placeholder="Enter supplier name">
         </div>
         <div class="col-md-4">
@@ -122,10 +122,12 @@ require_once '../includes/sidebar.php';
 <thead>
 <tr>
 <th width="42%">Product</th>
-<th width="18%">Price</th>
-<th width="14%">Qty</th>
-<th width="18%">Total</th>
-<th width="10%">Action</th>
+<?php if(!$housing_purchase){ ?><th width="13%">Stock</th><?php } ?>
+<th width="16%"><?= $housing_purchase ? 'Price' : 'Purchase Price'; ?></th>
+<?php if(!$housing_purchase){ ?><th width="16%">Sale Price</th><?php } ?>
+<th width="12%">Qty</th>
+<th width="16%">Total</th>
+<th width="8%">Action</th>
 </tr>
 </thead>
 <tbody>
@@ -141,9 +143,15 @@ require_once '../includes/sidebar.php';
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
     </div>
 </td>
+<?php if(!$housing_purchase){ ?><td>
+    <input type="text" class="form-control product_stock" readonly>
+</td><?php } ?>
 <td>
     <input type="number" step="0.01" name="cost_price[]" class="form-control cost_price" required>
 </td>
+<?php if(!$housing_purchase){ ?><td>
+    <input type="number" step="0.01" min="0" name="sale_price[]" class="form-control sale_price" value="0" required>
+</td><?php } ?>
 <td>
     <input type="number" step="1" min="1" name="qty[]" class="form-control qty" value="1" required>
 </td>
@@ -221,6 +229,7 @@ require_once '../includes/sidebar.php';
 </div>
 </section>
 
+<?php if(!$housing_purchase){ ?>
 <section class="content">
 <div class="container-fluid">
 <div class="card">
@@ -279,7 +288,8 @@ require_once '../includes/sidebar.php';
 
 <?php
 
-$page_script = <<<SCRIPT
+} // Stock product management panel.
+$supplier_display_label = supplier_display_text('Supplier'); $page_script = <<<SCRIPT
 <script>
 let paidAmountManuallyChanged = false;
 
@@ -333,6 +343,8 @@ $(function(){
             newBox.show();
             nameInput.prop("required", true);
             row.find(".cost_price").val("0");
+            row.find(".sale_price").val("0");
+            row.find(".product_stock").val(0);
             calculateRow(row);
             return;
         }
@@ -342,6 +354,8 @@ $(function(){
 
         if(id === ""){
             row.find(".cost_price").val("");
+            row.find(".sale_price").val("");
+            row.find(".product_stock").val("");
             row.find(".line_total").val("");
             calculateGrandTotal();
             return;
@@ -354,6 +368,8 @@ $(function(){
             dataType: "json",
             success: function(res){
                 row.find(".cost_price").val(res.cost_price);
+                row.find(".sale_price").val(res.sale_price);
+                row.find(".product_stock").val(res.stock);
                 calculateRow(row);
             },
             error: function(xhr){
@@ -384,6 +400,8 @@ $(function(){
         row.find(".new-product-box").hide();
         row.find(".new-product-name").prop("required", false).val("");
         row.find(".cost_price").val("");
+        row.find(".sale_price").val("");
+        row.find(".product_stock").val("");
         row.find(".qty").val(1);
         row.find(".line_total").val("");
 
@@ -431,7 +449,7 @@ function initCustomerSupplierSelect(context){
         $(this).select2({
             theme: "bootstrap4",
             width: "100%",
-            placeholder: "Select Supplier",
+            placeholder: "Select {$supplier_display_label}",
             allowClear: true
         });
     });

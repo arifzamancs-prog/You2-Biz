@@ -7,6 +7,7 @@ require_once '../includes/branch_helper.php';
 
 require_admin_user();
 ensure_staff_table($conn);
+ensure_manager_access_columns($conn);
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_head_office_branch($conn, $user_id);
@@ -22,6 +23,13 @@ $staff = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 if(!$staff){ die('Staff record not found.'); }
 
 $has_transactions = staff_has_transactions($conn, $id);
+$access_stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE owner_id=? AND staff_id=? AND role='manager' LIMIT 1");
+$has_login_access = false;
+if ($access_stmt) {
+    mysqli_stmt_bind_param($access_stmt, 'ii', $user_id, $id);
+    mysqli_stmt_execute($access_stmt);
+    $has_login_access = (bool)mysqli_fetch_assoc(mysqli_stmt_get_result($access_stmt));
+}
 $error = '';
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
@@ -37,6 +45,9 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         mysqli_stmt_bind_param($head_stmt, 'i', $user_id);
         mysqli_stmt_execute($head_stmt);
         $branch_id = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($head_stmt))['id'] ?? 0);
+    }
+    if ($has_login_access) {
+        $branch_id = (int)($staff['branch_id'] ?? 0);
     }
     $salary = trim($_POST['salary'] ?? '0');
     $photo = $staff['photo'] ?? '';
@@ -76,7 +87,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $salary = round((float)$salary, 2);
             create_staff_designation($conn, $user_id, $designation);
             $stmt = mysqli_prepare($conn, "UPDATE staff SET staff_code=?,name=?,email=?,phone=?,address=?,designation=?,branch_id=?,salary=?,photo=? WHERE id=? AND user_id=?");
-            mysqli_stmt_bind_param($stmt, 'sssssssidsii', $staff_code, $name, $email, $phone, $address, $designation, $branch_id, $salary, $photo, $id, $user_id);
+            mysqli_stmt_bind_param($stmt, 'ssssssidsii', $staff_code, $name, $email, $phone, $address, $designation, $branch_id, $salary, $photo, $id, $user_id);
             mysqli_stmt_execute($stmt);
             header('Location:index.php');
             exit;
@@ -98,6 +109,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header"><h3 class="card-title">Edit Staff</h3></div>
     <div class="card-body">
         <?php if($has_transactions){ ?><div class="alert alert-info">This staff has transactions, so the name cannot be changed.</div><?php } ?>
+        <?php if($has_login_access){ ?><div class="alert alert-info">This staff has login access. Branch can only be changed from Access Management.</div><?php } ?>
         <?php if($error){ ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php } ?>
         <form method="post" enctype="multipart/form-data">
             <div class="form-group"><label>Staff ID <span class="text-danger">*</span></label><input class="form-control" name="staff_code" value="<?= htmlspecialchars($_POST['staff_code'] ?? $staff['staff_code'] ?? staff_code_from_id($staff['id'])) ?>" required></div>
@@ -108,7 +120,7 @@ require_once '../includes/sidebar.php';
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($staff['phone']) ?>"></div>
             <div class="form-group"><label>Address</label><textarea class="form-control" name="address" rows="3"><?= htmlspecialchars($staff['address'] ?? '') ?></textarea></div>
             <div class="form-group"><label>Designation</label><select class="form-control" name="designation" id="designation" required><option value="">Select Designation</option><?php foreach($designations as $item){ ?><option value="<?= htmlspecialchars($item) ?>" <?= ($staff['designation'] ?? '') === $item ? 'selected' : '' ?>><?= htmlspecialchars($item) ?></option><?php } ?><option value="__new__">+ Add New Designation</option></select><input class="form-control mt-2" name="new_designation" id="new_designation" placeholder="Enter new designation" style="display:none;"></div>
-            <div class="form-group"><label>Branch <span class="text-danger">*</span></label><select class="form-control" name="branch_id" required><option value="">Select Branch</option><?php $current_branch_id = (int)($_POST['branch_id'] ?? $staff['branch_id'] ?? 0); while($branch = mysqli_fetch_assoc($branches_result)){ ?><option value="<?= (int)$branch['id'] ?>" <?= $current_branch_id === (int)$branch['id'] ? 'selected' : '' ?>><?= htmlspecialchars($branch['branch_name']) ?></option><?php } ?></select></div>
+            <div class="form-group"><label>Branch <span class="text-danger">*</span></label><select class="form-control" name="branch_id" required <?= $has_login_access ? 'disabled' : '' ?>><option value="">Select Branch</option><?php $current_branch_id = (int)($_POST['branch_id'] ?? $staff['branch_id'] ?? 0); while($branch = mysqli_fetch_assoc($branches_result)){ ?><option value="<?= (int)$branch['id'] ?>" <?= $current_branch_id === (int)$branch['id'] ? 'selected' : '' ?>><?= htmlspecialchars($branch['branch_name']) ?></option><?php } ?></select><?php if($has_login_access){ ?><small class="text-muted">Change this branch from Access Management.</small><?php } ?></div>
             <div class="form-group"><label>Salary (BDT)</label><input class="form-control" name="salary" type="number" min="0" step="0.01" value="<?= htmlspecialchars($_POST['salary'] ?? $staff['salary'] ?? '0.00') ?>" required></div>
             <button class="btn btn-primary">Update Staff</button>
             <a href="index.php" class="btn btn-secondary">Back</a>

@@ -14,8 +14,8 @@ $duplicate_message = '';
 if(
     contact_has_company_user_conflict($conn, 'phone', $phone, $user_id, $duplicate_message) ||
     contact_has_company_user_conflict($conn, 'email', $email, $user_id, $duplicate_message) ||
-    contact_has_duplicate_in_table($conn, 'suppliers', 'Supplier', 'phone', $phone, $id, $duplicate_message, $user_id) ||
-    contact_has_duplicate_in_table($conn, 'suppliers', 'Supplier', 'email', $email, $id, $duplicate_message, $user_id)
+    contact_has_duplicate_in_table($conn, 'suppliers', supplier_display_text('Supplier'), 'phone', $phone, $id, $duplicate_message, $user_id) ||
+    contact_has_duplicate_in_table($conn, 'suppliers', supplier_display_text('Supplier'), 'email', $email, $id, $duplicate_message, $user_id)
 ){
     $_SESSION['error'] = $duplicate_message;
     header("Location:edit.php?id=" . $id);

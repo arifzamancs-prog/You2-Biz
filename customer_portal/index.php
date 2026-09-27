@@ -248,6 +248,13 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
             text-transform:uppercase;
             white-space:nowrap;
         }
+        /* Give notes more room without changing the payment-related columns. */
+        .ledger-table th:nth-child(1),
+        .ledger-table td:nth-child(1){width:13%;}
+        .ledger-table th:nth-child(2),
+        .ledger-table td:nth-child(2){width:16%;}
+        .ledger-table th:nth-child(3),
+        .ledger-table td:nth-child(3){width:29%;}
         .ledger-type{
             background:#e0f2fe;
             border-radius:999px;
@@ -288,6 +295,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
             Customer Dashboard
         </div>
         <div class="portal-menu">
+            <a href="invoice_request.php" class="btn btn-primary portal-menu-link"><i class="fas fa-file-invoice"></i> Invoice Req.</a>
             <a href="#edit-profile" class="btn btn-info portal-menu-link" id="edit-profile-toggle"><i class="fas fa-user-edit"></i> Edit Profile</a>
             <a href="logout.php" class="btn btn-danger portal-menu-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
         </div>

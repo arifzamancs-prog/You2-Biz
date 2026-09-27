@@ -61,7 +61,7 @@ while($row = mysqli_fetch_assoc($result)){
     <div class="card-header">
 
         <h3 class="card-title">
-            Supplier Due Payment History
+            <?= supplier_display_text('Supplier'); ?> Due Payment History
         </h3>
 
     </div>
@@ -77,7 +77,7 @@ while($row = mysqli_fetch_assoc($result)){
             <tr>
 
                 <th>Date</th>
-                <th>Supplier</th>
+                <th><?= supplier_display_text('Supplier'); ?></th>
                 <th>Purchase No</th>
                 <th>Wallet</th>
                 <th>Amount</th>
@@ -98,7 +98,7 @@ while($row = mysqli_fetch_assoc($result)){
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])); ?>
+                    <?= htmlspecialchars($row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$row['supplier_id'])); ?>
                 </td>
 
                 <td>

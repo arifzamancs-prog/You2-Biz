@@ -15,7 +15,7 @@ $user_id = $_SESSION['user_id'];
 
 ensure_fifo_inventory_tables($conn);
 ensure_product_management_columns($conn);
-ensure_product_category_type_column($conn);
+if(($_SESSION['company_type'] ?? '') !== 'Housing') ensure_fifo_only_product_categories($conn, $user_id);
 ensure_expense_support_tables($conn, $user_id);
 
 if($_SERVER['REQUEST_METHOD'] != 'POST'){
@@ -33,7 +33,7 @@ function purchase_find_or_create_supplier($conn, $user_id)
         $address = trim((string)($_POST['new_supplier_address'] ?? ''));
         $email = '';
 
-        if(($error = validate_person_name($supplier_name, 'Supplier name')) !== ''){
+        if(($error = validate_person_name($supplier_name, supplier_display_text('Supplier name'))) !== ''){
             throw new Exception($error);
         }
 
@@ -44,7 +44,7 @@ function purchase_find_or_create_supplier($conn, $user_id)
         $duplicate_message = '';
         if(
             contact_has_company_user_conflict($conn, 'phone', $phone, $user_id, $duplicate_message) ||
-            contact_has_duplicate_in_table($conn, 'suppliers', 'Supplier', 'phone', $phone, 0, $duplicate_message, $user_id)
+            contact_has_duplicate_in_table($conn, 'suppliers', supplier_display_text('Supplier'), 'phone', $phone, 0, $duplicate_message, $user_id)
         ){
             throw new Exception($duplicate_message);
         }
@@ -67,7 +67,7 @@ function purchase_find_or_create_supplier($conn, $user_id)
         );
 
         if(!$stmt){
-            throw new Exception("Supplier could not be created.");
+            throw new Exception(supplier_display_text("Supplier could not be created."));
         }
 
         mysqli_stmt_bind_param(
@@ -81,7 +81,7 @@ function purchase_find_or_create_supplier($conn, $user_id)
         );
 
         if(!mysqli_stmt_execute($stmt)){
-            throw new Exception("Supplier could not be created.");
+            throw new Exception(supplier_display_text("Supplier could not be created."));
         }
 
         return (int)mysqli_insert_id($conn);
@@ -119,6 +119,7 @@ function purchase_prepare_items($conn, $user_id)
     $product_ids = $_POST['product_id'] ?? [];
     $qtys = $_POST['qty'] ?? [];
     $prices = $_POST['cost_price'] ?? [];
+    $sale_prices = $_POST['sale_price'] ?? [];
     $totals = $_POST['line_total'] ?? [];
     $new_product_names = $_POST['new_product_name'] ?? [];
 
@@ -140,13 +141,19 @@ function purchase_prepare_items($conn, $user_id)
     $existing_product_count = (int)($limit_info['product_count'] ?? 0);
     $max_products = (int)($limit_info['max_products'] ?? 0);
 
-    // Products added from purchasing always belong to the default stock category.
-    ensure_default_product_categories($conn, $user_id);
+    // Purchases can only create FIFO stock products.
+    if(($_SESSION['company_type'] ?? '') !== 'Housing') ensure_fifo_only_product_categories($conn, $user_id);
+    if(($_SESSION['company_type'] ?? '') === 'Housing'){
+        ensure_product_category_type_column($conn);
+        $category_stmt = mysqli_prepare($conn, "INSERT INTO product_categories (user_id, category_name, category_type, status) SELECT ?, 'General Purchases', 'non_stock', 'active' WHERE NOT EXISTS (SELECT 1 FROM product_categories WHERE user_id=? AND status='active')");
+        mysqli_stmt_bind_param($category_stmt, 'ii', $user_id, $user_id);
+        mysqli_stmt_execute($category_stmt);
+    }
     $stock_category_stmt = mysqli_prepare(
         $conn,
         "SELECT id FROM product_categories
-         WHERE user_id=? AND status='active' AND category_type='stock_product'
-         ORDER BY CASE WHEN category_name='Stock Product' THEN 0 ELSE 1 END, id ASC
+         WHERE user_id=? AND status='active'
+         ORDER BY id ASC
          LIMIT 1"
     );
     mysqli_stmt_bind_param($stock_category_stmt, 'i', $user_id);
@@ -162,21 +169,23 @@ function purchase_prepare_items($conn, $user_id)
         $product_choice = trim((string)$product_choice);
         $qty = (int)($qtys[$key] ?? 0);
         $price = (float)($prices[$key] ?? 0);
-        // Sale price is not part of the supplier purchase form. For a newly
-        // created product, retain the entered purchase price as its initial value.
-        $sale_price = $price;
+        $sale_price = (float)($sale_prices[$key] ?? 0);
         $total = (float)($totals[$key] ?? 0);
 
         if($product_choice === '' && trim((string)($new_product_names[$key] ?? '')) === ''){
             continue;
         }
 
-        if($qty <= 0){
+        if($qty <= 0 || (float)($qtys[$key] ?? 0) !== (float)$qty){
             throw new Exception("Quantity must be at least 1.");
         }
 
-        if($price < 0){
+        if(!is_finite($price) || $price < 0){
             throw new Exception("Purchase price cannot be negative.");
+        }
+
+        if(!is_finite($sale_price) || $sale_price < 0){
+            throw new Exception("Sale price cannot be negative.");
         }
 
         if($product_choice === '__new__'){
@@ -262,7 +271,6 @@ function purchase_prepare_items($conn, $user_id)
                  WHERE p.id=?
                  AND p.user_id=?
                  AND p.status='active'
-                 AND c.category_type='stock_product'
                  LIMIT 1"
             );
 
@@ -309,9 +317,14 @@ try{
     $notes = trim((string)($_POST['notes'] ?? ''));
     $due_amount = $grand_total - $paid_amount;
 
-    if($paid_amount < 0){
-        throw new Exception("Paid Amount cannot be negative.");
+    if(!is_finite($paid_amount) || $paid_amount < 0 || $paid_amount > $grand_total){
+        throw new Exception("Paid Amount must be between zero and the purchase total.");
     }
+    $payment_status = $paid_amount <= 0 ? 'due' : ($paid_amount < $grand_total ? 'partial' : 'paid');
+    $branch_id = ($_SESSION['company_type'] ?? '') === 'Housing'
+        ? selected_branch_id($conn, true)
+        : stock_warehouse_id($conn, (int)$user_id);
+    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $branch_id);
 
     if($paid_amount > 0){
         $wallet_balance_stmt = mysqli_prepare(
@@ -343,6 +356,7 @@ try{
         "INSERT INTO purchases
          (
             user_id,
+            branch_id,
             purchase_no,
             supplier_id,
             payment_wallet_id,
@@ -355,14 +369,15 @@ try{
          )
          VALUES
          (
-            ?,?,?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?,?,?
          )"
     );
 
     mysqli_stmt_bind_param(
         $stmt,
-        "isiisdddss",
+        "iisiisdddss",
         $user_id,
+        $branch_id,
         $purchase_no,
         $supplier_id,
         $payment_wallet_id,
@@ -402,6 +417,7 @@ try{
         mysqli_stmt_bind_param($stmt, "iiddd", $purchase_id, $product_id, $qty, $price, $total);
         mysqli_stmt_execute($stmt);
 
+        if(($_SESSION['company_type'] ?? '') !== 'Housing'){
         if(!fifo_inventory_create_batch(
             $conn,
             $user_id,
@@ -420,12 +436,14 @@ try{
             $conn,
             "UPDATE products
              SET current_stock = current_stock + ?,
-                 purchase_price = ?
+                 purchase_price = ?,
+                 sale_price = ?
              WHERE id = ?
              AND user_id = ?"
         );
 
-        mysqli_stmt_bind_param($stmt, "ddii", $qty, $price, $product_id, $user_id);
+        $sale_price = (float)$item['sale_price'];
+        mysqli_stmt_bind_param($stmt, "dddii", $qty, $price, $sale_price, $product_id, $user_id);
         mysqli_stmt_execute($stmt);
 
         $stmt = mysqli_prepare(
@@ -454,6 +472,7 @@ try{
         $note = "Purchase";
         mysqli_stmt_bind_param($stmt, "iidsss", $user_id, $product_id, $qty, $note, $purchase_date, $purchase_no);
         mysqli_stmt_execute($stmt);
+        }
     }
 
     if($paid_amount > 0){
@@ -477,7 +496,7 @@ try{
             $payment_wallet_id,
             $paid_amount,
             $purchase_date,
-            'Supplier Payment - ' . $purchase_no,
+            supplier_display_text('Supplier Payment - ') . $purchase_no,
             'purchase_payment',
             $purchase_id
         );

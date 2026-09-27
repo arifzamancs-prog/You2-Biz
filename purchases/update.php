@@ -5,9 +5,11 @@ require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
+require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_fifo_inventory_tables($conn);
+ensure_expense_support_tables($conn, (int)$user_id);
 
 if($_SERVER['REQUEST_METHOD'] != 'POST'){
 
@@ -26,16 +28,30 @@ try{
 
     $purchase_date = $_POST['purchase_date'];
 
-    $grand_total = (float)$_POST['grand_total'];
+    $supplier_check = mysqli_prepare($conn, 'SELECT id FROM suppliers WHERE id=? AND user_id=?');
+    mysqli_stmt_bind_param($supplier_check, 'ii', $supplier_id, $user_id);
+    mysqli_stmt_execute($supplier_check);
+    if (!mysqli_fetch_assoc(mysqli_stmt_get_result($supplier_check))) throw new Exception(supplier_display_text('Supplier not found.'));
+    $_POST['line_total'] = stock_line_totals($_POST['product_id'] ?? [], $_POST['qty'] ?? [], $_POST['cost_price'] ?? [], false);
+    $grand_total = array_sum($_POST['line_total']);
+    foreach (array_keys($_POST['line_total']) as $key) {
+        $product_id = (int)$_POST['product_id'][$key];
+        $category_condition = ($_SESSION['company_type'] ?? '') === 'Housing' ? '' : " AND c.category_type='stock_product'";
+        $product_check = mysqli_prepare($conn, "SELECT p.id FROM products p JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id WHERE p.id=? AND p.user_id=?{$category_condition} FOR UPDATE");
+        mysqli_stmt_bind_param($product_check, 'ii', $product_id, $user_id);
+        mysqli_stmt_execute($product_check);
+        if (!mysqli_fetch_assoc(mysqli_stmt_get_result($product_check))) throw new Exception('Stock product not found.');
+    }
 
     $paid_amount = (float)$_POST['paid_amount'];
     
     $payment_wallet_id =
     (int)($_POST['payment_wallet_id'] ?? 0);
 
-    $due_amount = (float)$_POST['due_amount'];
+    $due_amount = $grand_total - $paid_amount;
 
-    $payment_status = $_POST['payment_status'];
+    $payment_status = $due_amount <= 0 ? 'paid' : ($paid_amount > 0 ? 'partial' : 'due');
+    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, $user_id, stock_customer_branch($conn));
 
     $notes = trim($_POST['notes']);
 
@@ -45,7 +61,7 @@ try{
             payment_wallet_id
         FROM purchases
         WHERE id=?
-        AND user_id=?";
+        AND user_id=? FOR UPDATE";
 
 $stmt = mysqli_prepare($conn,$sql);
 
@@ -68,8 +84,15 @@ if(!$old_purchase){
 
 }
 
-if(!fifo_inventory_purchase_is_editable($conn, $purchase_id)){
+if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_purchase_is_editable($conn, $purchase_id)){
     throw new Exception("This purchase already affected FIFO stock usage. Edit is not allowed.");
+}
+
+$settlements = mysqli_prepare($conn, "SELECT id FROM supplier_payments WHERE purchase_id=? AND user_id=? FOR UPDATE");
+mysqli_stmt_bind_param($settlements, "ii", $purchase_id, $user_id);
+mysqli_stmt_execute($settlements);
+if(mysqli_num_rows(mysqli_stmt_get_result($settlements)) > 0){
+    throw new Exception("This purchase has separate supplier payments and cannot be edited.");
 }
 
 $old_paid_amount =
@@ -81,7 +104,7 @@ $old_wallet_id =
 $purchase_no =
     $old_purchase['purchase_no'];
 
-if($paid_amount < 0){
+if(!is_finite($paid_amount) || $paid_amount < 0){
 
     throw new Exception("Invalid Paid Amount");
 
@@ -158,6 +181,7 @@ mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 
 while($row=mysqli_fetch_assoc($result)){
+    if(($_SESSION['company_type'] ?? '') === 'Housing') continue;
 
     $sql="UPDATE products
 
@@ -194,7 +218,7 @@ mysqli_query(
 
 );
 
-if(!fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
+if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
     throw new Exception("Old FIFO batches could not be removed.");
 }
 $sql = "UPDATE purchases SET
@@ -293,6 +317,7 @@ foreach($product_ids as $key=>$product_id){
 
     mysqli_stmt_execute($stmt);
 
+    if(($_SESSION['company_type'] ?? '') === 'Housing') continue;
     if(!fifo_inventory_create_batch(
         $conn,
         $user_id,
@@ -432,6 +457,10 @@ if($paid_amount > 0){
 
 }
 
+$expense_delete = mysqli_prepare($conn, "DELETE FROM expenses WHERE user_id=? AND source_type='purchase_payment' AND source_id=?");
+mysqli_stmt_bind_param($expense_delete, 'ii', $user_id, $purchase_id);
+mysqli_stmt_execute($expense_delete);
+if ($paid_amount > 0) record_supplier_payment_expense($conn, $user_id, $payment_wallet_id, $paid_amount, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
 mysqli_commit($conn);
 
 header("Location:index.php");

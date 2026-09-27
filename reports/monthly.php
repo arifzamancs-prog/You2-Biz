@@ -2,8 +2,12 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$money_scope = branch_scope_sql($conn, 'm');
+$expense_scope = branch_scope_sql($conn, 'e');
 
 $month = isset($_GET['month']) ? (int)$_GET['month'] : date('m');
 $year  = isset($_GET['year']) ? (int)$_GET['year'] : date('Y');
@@ -11,8 +15,9 @@ $year  = isset($_GET['year']) ? (int)$_GET['year'] : date('Y');
 /* Money In */
 
 $sql = "SELECT SUM(amount) total_money_in
-        FROM money_ins
-        WHERE user_id=?
+        FROM money_ins m
+        WHERE m.user_id=?
+        {$money_scope}
         AND approval_status='approved'
         AND MONTH(txn_date)=?
         AND YEAR(txn_date)=?";
@@ -38,8 +43,9 @@ $total_money_in = $row['total_money_in'] ?? 0;
 /* Expense */
 
 $sql = "SELECT SUM(amount) total_expense
-        FROM expenses
-        WHERE user_id=?
+        FROM expenses e
+        WHERE e.user_id=?
+        {$expense_scope}
         AND approval_status='approved'
         AND MONTH(txn_date)=?
         AND YEAR(txn_date)=?";

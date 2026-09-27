@@ -107,7 +107,7 @@ class="table table-bordered table-striped">
 
 <th>Purchase No</th>
 <th>Date</th>
-<th>Supplier</th>
+<th><?= supplier_display_text('Supplier'); ?></th>
 <th>Product</th>
 <th>Qty</th>
 <th>Total</th>
@@ -140,7 +140,7 @@ mysqli_fetch_assoc($result)
 
 <td>
 <?= htmlspecialchars(
-$row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])
+$row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$row['supplier_id'])
 ); ?>
 </td>
 

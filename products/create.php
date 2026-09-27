@@ -9,7 +9,7 @@ require_once '../includes/product_category_helper.php';
 $user_id = $_SESSION['user_id'];
 ensure_product_management_columns($conn);
 ensure_fifo_inventory_tables($conn);
-ensure_product_category_type_column($conn);
+ensure_fifo_only_product_categories($conn, $user_id);
 $show_expired_on = is_product_expiry_enabled($conn);
 
 $message = '';
@@ -25,9 +25,7 @@ $sql = "SELECT *
         FROM product_categories
         WHERE user_id=?
         AND status='active'
-        ORDER BY
-            CASE WHEN category_name IN('General (Non Stock)', 'General (Non Stock/Service)') THEN 0 ELSE 1 END,
-            category_name ASC";
+        ORDER BY category_name ASC";
 
 $stmt = mysqli_prepare($conn,$sql);
 
@@ -82,18 +80,23 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
 
+    if(!$is_stock_product){
+        $message = 'Please select an active FIFO product category.';
+        $message_type = 'danger';
+    }else{
+
     $product_name =
     trim($_POST['product_name']);
 
     $sku =
     trim($_POST['sku']);
 
-    $purchase_price = $is_stock_product ? (float)($_POST['purchase_price'] ?? 0) : 0;
+    $purchase_price = (float)($_POST['purchase_price'] ?? 0);
 
     $sale_price =
     (float)$_POST['sale_price'];
 
-    $expired_on = $is_stock_product && $show_expired_on
+    $expired_on = $show_expired_on
         ? trim($_POST['expired_on'] ?? '')
         : '';
 
@@ -101,8 +104,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         $expired_on = null;
     }
 
-    $opening_stock = $is_stock_product ? (int)($_POST['current_stock'] ?? 0) : 0;
-    $minimum_stock = $is_stock_product ? (int)($_POST['minimum_stock'] ?? 0) : 0;
+    $opening_stock = (int)($_POST['current_stock'] ?? 0);
+    $minimum_stock = (int)($_POST['minimum_stock'] ?? 0);
 
     $status =
     $_POST['status'];
@@ -155,7 +158,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if(mysqli_stmt_execute($stmt)){
         $product_id = (int)mysqli_insert_id($conn);
 
-        if($is_stock_product && !fifo_inventory_create_batch(
+        if(!fifo_inventory_create_batch(
             $conn,
             $user_id,
             $product_id,
@@ -187,6 +190,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
         $message_type =
         "danger";
+    }
     }
 
     }
@@ -241,24 +245,10 @@ require_once '../includes/sidebar.php';
                             class="form-control"
                             required>
 
-                            <?php $default_category_selected = false; ?>
-
                             <?php while($cat = mysqli_fetch_assoc($categories)){ ?>
 
-                                <?php
-                                $is_default_non_stock =
-                                    !$default_category_selected &&
-                                    in_array(($cat['category_name'] ?? ''), ['General (Non Stock)', 'General (Non Stock/Service)'], true);
-
-                                if($is_default_non_stock){
-                                    $default_category_selected = true;
-                                }
-                                ?>
-
                                 <option
-                                    value="<?= $cat['id']; ?>"
-                                    data-category-type="<?= htmlspecialchars($cat['category_type'] ?? 'non_stock'); ?>"
-                                    <?= $is_default_non_stock ? 'selected' : ''; ?>>
+                                    value="<?= $cat['id']; ?>">
 
                                     <?= htmlspecialchars($cat['category_name']); ?>
 
@@ -311,7 +301,7 @@ require_once '../includes/sidebar.php';
 
                 </div>
 
-                <div class="col-md-4 stock-only-field">
+                <div class="col-md-4">
 
                     <div class="form-group">
 
@@ -351,7 +341,7 @@ require_once '../includes/sidebar.php';
                 </div>
 
                 <?php if($show_expired_on){ ?>
-                <div class="col-md-4 stock-only-field">
+                <div class="col-md-4">
 
                     <div class="form-group">
 
@@ -373,7 +363,7 @@ require_once '../includes/sidebar.php';
 
             <div class="row">
 
-                <div class="col-md-4 stock-only-field">
+                <div class="col-md-4">
 
                     <div class="form-group">
 
@@ -393,7 +383,7 @@ require_once '../includes/sidebar.php';
 
                 </div>
 
-                <div class="col-md-4 stock-only-field">
+                <div class="col-md-4">
 
                 <div class="form-group">
 
@@ -464,27 +454,6 @@ require_once '../includes/sidebar.php';
     </div>
 
 </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    var category = document.querySelector('[name="category_id"]');
-    var stockFields = document.querySelectorAll('.stock-only-field');
-
-    function updateStockFields() {
-        var option = category.options[category.selectedIndex];
-        var isStock = option && option.dataset.categoryType === 'stock_product';
-        stockFields.forEach(function (field) {
-            field.style.display = isStock ? '' : 'none';
-            field.querySelectorAll('input').forEach(function (input) {
-                input.disabled = !isStock;
-            });
-        });
-    }
-
-    category.addEventListener('change', updateStockFields);
-    updateStockFields();
-});
-</script>
 
 <?php
 require_once '../includes/footer.php';

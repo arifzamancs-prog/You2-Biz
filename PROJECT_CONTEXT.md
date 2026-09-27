@@ -22,3 +22,18 @@ Important:
 
 You2-Wallet reference:
 https://github.com/arifzamancs-prog/You2-wallet
+
+Done list: 
+----------
+Multi-branch accounting system implement করা হয়েছে।
+- Head Office admin navbar থেকে All Branches অথবা নির্দিষ্ট branch নির্বাচন করতে পারবেন।
+- Dashboard, sales, invoices, wallets, money-in, expenses, transfers, transactions এবং reports branch অনুযায়ী filter হবে।
+- All Branches নির্বাচন করলে consolidated হিসাব দেখা যাবে।
+- প্রত্যেক branch-এর আলাদা system Cash wallet তৈরি হবে।
+- Branch user শুধু নিজের branch-এর data দেখতে ও পরিচালনা করতে পারবে।
+- অন্য branch-এর invoice direct URL দিয়েও access করা যাবে না।
+- New invoice ও financial transaction selected branch-এর অধীনে save হবে।
+- Existing data Head Office-এর অধীনে migrate করা হয়েছে।
+- Multi Branch inactive হলে system স্বয়ংক্রিয়ভাবে Head Office context ব্যবহার করবে।
+- Database-এ প্রয়োজনীয় branch_id columns এবং wallet unique index তৈরি হয়েছে।
+- Head Office ও Gulshan Branch—দুইটির পৃথক Cash wallet verified।

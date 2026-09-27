@@ -49,7 +49,7 @@ $result =
 
 <h3 class="card-title">
 
-Suppliers
+<?= supplier_display_text('Suppliers'); ?>
 
 </h3>
 
@@ -60,7 +60,7 @@ Suppliers
 <a href="create.php"
 class="btn btn-primary btn-sm">
 
-Add Supplier
+Add <?= supplier_display_text('Supplier'); ?>
 
 </a>
 
@@ -171,7 +171,7 @@ Inactive
 <a
 href="edit.php?id=<?= (int)$row['id']; ?>"
 class="btn btn-warning btn-sm"
-title="Edit Supplier">
+title="Edit <?= supplier_display_text('Supplier'); ?>">
 
 <i class="fas fa-edit"></i>
 
@@ -181,14 +181,14 @@ title="Edit Supplier">
 <a
 href="delete.php?id=<?= (int)$row['id']; ?>"
 class="btn btn-danger btn-sm"
-title="Delete Supplier"
-onclick="return confirm('Delete this supplier?');">
+title="Delete <?= supplier_display_text('Supplier'); ?>"
+onclick="return confirm('Delete this <?= supplier_display_text('supplier'); ?>?');">
 
 <i class="fas fa-trash"></i>
 
 </a>
 <?php }else{ ?>
-<button type="button" class="btn btn-secondary btn-sm" disabled title="This supplier has transactions and cannot be deleted">
+<button type="button" class="btn btn-secondary btn-sm" disabled title="This <?= supplier_display_text('supplier'); ?> has transactions and cannot be deleted">
 <i class="fas fa-trash"></i>
 </button>
 <?php } ?>

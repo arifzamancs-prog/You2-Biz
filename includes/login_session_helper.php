@@ -29,6 +29,8 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
         && $user['access_permissions'] !== null;
 
     $_SESSION['user_id'] = (int)$owner_id;
+    $_SESSION['company_type'] = trim((string)($account['company_type'] ?? 'Housing'));
+    $_SESSION['stock_product_enabled'] = $_SESSION['company_type'] === 'Stock Product';
     $_SESSION['user_name'] = $account['name'];
     $_SESSION['avatar'] =
         !empty($account['avatar'])

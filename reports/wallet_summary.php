@@ -3,18 +3,21 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
 ensure_default_cash_wallet($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'w');
 
 $sql = "SELECT
             wallet_name,
             description,
             balance,
             status
-        FROM wallets
-        WHERE user_id=?
+        FROM wallets w
+        WHERE w.user_id=?
+        {$branch_scope}
         ORDER BY wallet_name ASC";
 
 $stmt = mysqli_prepare($conn,$sql);

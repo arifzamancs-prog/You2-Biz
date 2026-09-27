@@ -37,7 +37,7 @@ try{
     $payment = mysqli_fetch_assoc(mysqli_stmt_get_result($payment_stmt));
 
     if(!$payment){
-        throw new Exception('Supplier payment not found.');
+        throw new Exception(supplier_display_text('Supplier payment not found.'));
     }
 
     $purchase_stmt = mysqli_prepare(

@@ -7,9 +7,14 @@ require_once '../includes/wallet_helper.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/expense_helper.php';
 require_once '../includes/staff_attendance_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 require_staff_manage_access();
 $user_id=(int)$_SESSION['user_id'];
+ensure_branch_accounting_columns($conn,$user_id);
+$branch_id=selected_branch_id($conn,true);
+$ledger_scope=branch_scope_sql($conn,'l');
+$staff_scope=$branch_id>0 ? " AND branch_id={$branch_id}" : '';
 // Keep the ledger list available even if an older live database still needs
 // expense-table upgrades. Those upgrades are only required when saving a row.
 ensure_staff_table($conn); ensure_staff_ledger_table($conn); ensure_default_staff_ledger_payment_types($conn,$user_id); ensure_default_cash_wallet($conn,$user_id);
@@ -180,18 +185,18 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         mysqli_begin_transaction($conn);
         try{
             ensure_expense_support_tables($conn, $user_id);
-            $staff_stmt=mysqli_prepare($conn,"SELECT id FROM staff WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($staff_stmt,'ii',$staff_id,$user_id); mysqli_stmt_execute($staff_stmt);
+            $staff_stmt=mysqli_prepare($conn,"SELECT id FROM staff WHERE id=? AND user_id=? AND branch_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($staff_stmt,'iii',$staff_id,$user_id,$branch_id); mysqli_stmt_execute($staff_stmt);
             if(!mysqli_fetch_assoc(mysqli_stmt_get_result($staff_stmt))){ throw new Exception('Selected staff is not active.'); }
             $wallet_stmt=mysqli_prepare($conn,"SELECT id FROM wallets WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($wallet_stmt,'ii',$wallet_id,$user_id); mysqli_stmt_execute($wallet_stmt);
             if(!mysqli_fetch_assoc(mysqli_stmt_get_result($wallet_stmt))){ throw new Exception('Selected wallet is not available.'); }
             $txn_no=generate_short_unique_txn_no($conn,'STP','staff_ledger_entries'); $created_by=(int)($_SESSION['login_user_id'] ?? $user_id);
-            $insert=mysqli_prepare($conn,"INSERT INTO staff_ledger_entries (txn_no,user_id,staff_id,wallet_id,entry_type,entry_date,amount,note,created_by) VALUES (?,?,?,?,?,?,?,?,?)");
-            mysqli_stmt_bind_param($insert,'siiissdsi',$txn_no,$user_id,$staff_id,$wallet_id,$entry_type,$entry_date,$amount,$note,$created_by);
+            $insert=mysqli_prepare($conn,"INSERT INTO staff_ledger_entries (txn_no,user_id,branch_id,staff_id,wallet_id,entry_type,entry_date,amount,note,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)");
+            mysqli_stmt_bind_param($insert,'siiiissdsi',$txn_no,$user_id,$branch_id,$staff_id,$wallet_id,$entry_type,$entry_date,$amount,$note,$created_by);
             if(!mysqli_stmt_execute($insert)){ throw new Exception(mysqli_stmt_error($insert)); }
             $ledger_id=(int)mysqli_insert_id($conn);
             debit_wallet($conn,$wallet_id,$user_id,$amount);
             $transaction_note='Staff '.staff_ledger_type_label($entry_type).' payment'.($note!=='' ? ': '.$note : '');
-            record_wallet_transaction($conn,$txn_no,$user_id,$wallet_id,'expense',$ledger_id,$amount,$transaction_note,$entry_date);
+            record_wallet_transaction($conn,$txn_no,$user_id,$wallet_id,'expense',$ledger_id,$amount,$transaction_note,$entry_date,$branch_id);
 
             $reserved_category_name = reserved_expense_category_name_from_entry_type($entry_type);
             $reserved_category_id = reserved_expense_category_id($conn, $user_id, $reserved_category_name);
@@ -200,15 +205,16 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             $expense_stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO expenses
-                 (txn_no, user_id, wallet_id, category_id, staff_id, txn_date, amount, note, approval_status, created_by, approved_by, approved_at)
+                 (txn_no, user_id, branch_id, wallet_id, category_id, staff_id, txn_date, amount, note, approval_status, created_by, approved_by, approved_at)
                  VALUES
-                 (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?)"
+                 (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?)"
             );
             mysqli_stmt_bind_param(
                 $expense_stmt,
-                'siiiisdsiis',
+                'siiiiisdsiis',
                 $txn_no,
                 $user_id,
+                $branch_id,
                 $wallet_id,
                 $reserved_category_id,
                 $staff_id,
@@ -231,13 +237,13 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     }
 }
 
-$staffs=mysqli_query($conn,"SELECT id,staff_code,name FROM staff WHERE user_id={$user_id} AND status='active' ORDER BY name ASC");
+$staffs=mysqli_query($conn,"SELECT id,staff_code,name FROM staff WHERE user_id={$user_id}{$staff_scope} AND status='active' ORDER BY name ASC");
 $wallets=active_wallets_result($conn,$user_id);
 $payment_types=staff_ledger_payment_types($conn,$user_id);
 $payment_type_rows=[];
 $all_payment_types=staff_ledger_payment_types($conn,$user_id,false);
 while($type_row=mysqli_fetch_assoc($all_payment_types)){ $payment_type_rows[]=$type_row; }
-$ledger_stmt=mysqli_prepare($conn,"SELECT l.*,s.staff_code,s.name,w.wallet_name FROM staff_ledger_entries l INNER JOIN staff s ON s.id=l.staff_id AND s.user_id=l.user_id LEFT JOIN wallets w ON w.id=l.wallet_id AND w.user_id=l.user_id WHERE l.user_id=? ORDER BY l.entry_date DESC,l.id DESC"); mysqli_stmt_bind_param($ledger_stmt,'i',$user_id); mysqli_stmt_execute($ledger_stmt); $ledger=mysqli_stmt_get_result($ledger_stmt);
+$ledger_stmt=mysqli_prepare($conn,"SELECT l.*,s.staff_code,s.name,w.wallet_name FROM staff_ledger_entries l INNER JOIN staff s ON s.id=l.staff_id AND s.user_id=l.user_id LEFT JOIN wallets w ON w.id=l.wallet_id AND w.user_id=l.user_id WHERE l.user_id=? {$ledger_scope} ORDER BY l.entry_date DESC,l.id DESC"); mysqli_stmt_bind_param($ledger_stmt,'i',$user_id); mysqli_stmt_execute($ledger_stmt); $ledger=mysqli_stmt_get_result($ledger_stmt);
 
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>

@@ -57,7 +57,7 @@ $wallets = active_wallets_result($conn, $user_id);
 
 <h1>
 
-Supplier Due Payment
+<?= supplier_display_text('Supplier'); ?> Due Payment
 
 </h1>
 
@@ -114,7 +114,7 @@ readonly>
 
 <label>
 
-Supplier
+<?= supplier_display_text('Supplier'); ?>
 
 </label>
 

@@ -14,7 +14,7 @@ require_once '../includes/sidebar.php';
 
         <h3 class="card-title">
 
-            Add Supplier
+            Add <?= supplier_display_text('Supplier'); ?>
 
         </h3>
 
@@ -39,7 +39,7 @@ require_once '../includes/sidebar.php';
             <div class="form-group">
 
                 <label>
-                    Supplier Name
+                    <?= supplier_display_text('Supplier'); ?> Name
                 </label>
 
                 <input
@@ -95,7 +95,7 @@ require_once '../includes/sidebar.php';
                 type="submit"
                 class="btn btn-primary">
 
-                Save Supplier
+                Save <?= supplier_display_text('Supplier'); ?>
 
             </button>
 
@@ -106,13 +106,13 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
-$page_script = '
+$page_script = supplier_display_text('
 <script>
 $(function(){
     $("input[name=\"supplier_name\"]").attr("title", "Supplier name must contain letters.");
     $("input[name=\"phone\"]").attr("title", "Phone must contain at least 11 digits.");
 });
 </script>
-';
+');
 require_once '../includes/footer.php';
 ?>

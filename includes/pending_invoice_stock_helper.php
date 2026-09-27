@@ -1,16 +1,22 @@
 <?php
 
+require_once __DIR__ . '/fifo_inventory_helper.php';
+
 function pending_invoice_reserved_quantity($conn, $user_id, $product_id, $exclude_invoice_id = 0)
 {
     $user_id = (int)$user_id;
     $product_id = (int)$product_id;
     $exclude_invoice_id = (int)$exclude_invoice_id;
+    $branch_id = $exclude_invoice_id > 0
+        ? stock_invoice_branch($conn, $user_id, $exclude_invoice_id)
+        : (int)($GLOBALS['stock_wallet_branch_id'] ?? selected_branch_id($conn, true));
 
     $sql = "SELECT COALESCE(SUM(ii.quantity), 0) AS reserved_quantity
             FROM invoice_items ii
             INNER JOIN invoices i
                 ON i.id = ii.invoice_id
             WHERE i.user_id=?
+            AND i.branch_id={$branch_id}
             AND ii.product_id=?
             AND i.accounting_status='pending'
             AND ii.quantity > 0";
@@ -54,7 +60,7 @@ function product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $exclu
             LEFT JOIN product_categories c ON c.id=p.category_id
             WHERE p.id=?
             AND p.user_id=?
-            LIMIT 1";
+            LIMIT 1 FOR UPDATE";
 
     $stmt = mysqli_prepare($conn, $sql);
 
@@ -72,7 +78,10 @@ function product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $exclu
     }
 
     $is_stock_product = ($product['category_type'] ?? 'non_stock') === 'stock_product';
-    $current_stock = (float)($product['current_stock'] ?? 0);
+    $branch_id = $exclude_invoice_id > 0
+        ? stock_invoice_branch($conn, $user_id, $exclude_invoice_id)
+        : (int)($GLOBALS['stock_wallet_branch_id'] ?? selected_branch_id($conn, true));
+    $current_stock = $is_stock_product ? fifo_inventory_get_available_stock($conn, $user_id, $product_id, $branch_id) : 0;
     $reserved_stock = $is_stock_product ? pending_invoice_reserved_quantity(
         $conn,
         $user_id,

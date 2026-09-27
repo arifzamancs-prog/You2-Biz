@@ -311,7 +311,7 @@ th{
         <span><?= htmlspecialchars(purchase_print_datetime_display($purchase)); ?></span>
     </div>
     <div class="line">
-        <span>Supplier</span>
+        <span><?= supplier_display_text('Supplier'); ?></span>
         <span><?= htmlspecialchars($purchase['supplier_name']); ?></span>
     </div>
     <?php if(!empty($purchase['phone'])){ ?>

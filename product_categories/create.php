@@ -5,7 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
-ensure_product_category_type_column($conn);
+ensure_fifo_only_product_categories($conn, $user_id);
 
 $message = '';
 $message_type = '';
@@ -13,12 +13,8 @@ $message_type = '';
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_name = trim($_POST['category_name']);
-    $category_type = $_POST['category_type'] ?? 'non_stock';
+    $category_type = 'stock_product';
     $status = $_POST['status'];
-
-    if(!in_array($category_type, ['non_stock', 'stock_product'], true)){
-        $category_type = 'non_stock';
-    }
 
     $sql = "INSERT INTO product_categories
             (
@@ -107,17 +103,6 @@ require_once '../includes/sidebar.php';
                     name="category_name"
                     class="form-control"
                     required>
-
-            </div>
-
-            <div class="form-group">
-
-                <label>Category Type</label>
-
-                <select name="category_type" class="form-control" required>
-                    <option value="non_stock">Non Stock/Service</option>
-                    <option value="stock_product">Stock</option>
-                </select>
 
             </div>
 

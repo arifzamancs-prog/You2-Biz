@@ -44,6 +44,7 @@ $products = mysqli_query(
     $conn,
     "SELECT p.id,
             p.product_name,
+            p.sku,
             p.sale_price,
             p.current_stock,
             c.category_type
@@ -352,7 +353,7 @@ require_once '../includes/sidebar.php';
                             <option
                                 value="<?= $p['id']; ?>">
 
-                                <?= htmlspecialchars($p['product_name']); ?>
+                                <?= htmlspecialchars(product_option_label($p['product_name'], $p['sku'] ?? '')); ?>
 
                             </option>
 

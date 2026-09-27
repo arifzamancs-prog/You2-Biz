@@ -1,17 +1,17 @@
 <?php
 
 const APP_BASE_URL_OVERRIDE = '';
-const SALES_MODULE_ENABLED = false;
-const PRODUCTS_MODULE_ENABLED = false;
+const SALES_MODULE_ENABLED = true;
+const PRODUCTS_MODULE_ENABLED = true;
 
 function sales_module_enabled()
 {
-    return SALES_MODULE_ENABLED;
+    return SALES_MODULE_ENABLED && !empty($_SESSION['stock_product_enabled']);
 }
 
 function products_module_enabled()
 {
-    return PRODUCTS_MODULE_ENABLED;
+    return PRODUCTS_MODULE_ENABLED && !empty($_SESSION['stock_product_enabled']);
 }
 
 function app_root_path()

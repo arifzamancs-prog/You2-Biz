@@ -9,10 +9,13 @@ require_once '../includes/wallet_helper.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/expense_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $message = '';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_id = selected_branch_id($conn, true);
 
 ensure_default_cash_wallet($conn, $user_id);
 ensure_staff_table($conn);
@@ -37,15 +40,17 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
     $sql = "SELECT balance
             FROM wallets
             WHERE id=?
-            AND user_id=?";
+            AND user_id=?
+            AND branch_id=?";
 
     $stmt = mysqli_prepare($conn,$sql);
 
     mysqli_stmt_bind_param(
         $stmt,
-        "ii",
+        "iii",
         $wallet_id,
-        $user_id
+        $user_id,
+        $branch_id
     );
 
     mysqli_stmt_execute($stmt);
@@ -80,6 +85,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                 (
                     txn_no,
                     user_id,
+                    branch_id,
                     wallet_id,
                     category_id,
                     staff_id,
@@ -93,16 +99,17 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                 )
                 VALUES
                 (
-                    ?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?
                 )";
 
                 $stmt = mysqli_prepare($conn,$sql);
 
                 mysqli_stmt_bind_param(
                     $stmt,
-                    "siiiisdssiis",
+                    "siiiiisdssiis",
                     $txn_no,
                     $user_id,
+                    $branch_id,
                     $wallet_id,
                     $category_id,
                     $staff_id,
@@ -136,6 +143,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                 (
                     txn_no,
                     user_id,
+                    branch_id,
                     wallet_id,
                     transaction_type,
                     reference_id,
@@ -145,7 +153,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
                 )
                 VALUES
                 (
-                    ?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?
                 )";
 
                 $stmt = mysqli_prepare($conn,$sql);
@@ -154,9 +162,10 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
                 mysqli_stmt_bind_param(
                     $stmt,
-                    "siisidss",
+                    "siiisidss",
                     $txn_no,
                     $user_id,
+                    $branch_id,
                     $wallet_id,
                     $type,
                     $expense_id,

@@ -7,6 +7,7 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/date_helper.php';
 require_once __DIR__ . '/manager_access_helper.php';
+require_once __DIR__ . '/multi_branch_helper.php';
 
 if (!isset($_SESSION['user_id']) && !isset($_SESSION['super_admin'])) {
     header("Location: " . app_path('login.php'));
@@ -46,7 +47,7 @@ function block_disabled_modules()
     }
 }
 
-block_disabled_modules();
+// Database bootstrap checks live per-company stock module availability.
 
 function is_admin_user()
 {
@@ -74,7 +75,9 @@ function manager_access_type()
 
 function is_agent_user()
 {
-    return is_manager_user() && manager_access_type() === 'agent';
+    // Staff accounts are controlled by their assigned module permissions.
+    // The legacy manager/assistant subtype no longer changes access.
+    return false;
 }
 
 function manager_has_permission($permission)
@@ -106,6 +109,32 @@ function refresh_current_manager_permissions($conn)
     $_SESSION['staff_id'] = (int)($manager['staff_id'] ?? 0);
     $_SESSION['access_permissions'] = normalize_manager_permissions(json_decode($manager['access_permissions'] ?? '[]', true));
     $_SESSION['permissions_configured'] = $manager['access_permissions'] !== null;
+
+    // Never trust a stale login session for Head Office-only permissions.
+    // This takes effect on the next request if Super Admin enables Multi Branch
+    // while the staff member is already signed in.
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if($company_id > 0 && company_multi_branch_enabled($conn, $company_id)){
+        $branches_table = mysqli_query($conn, "SHOW TABLES LIKE 'branches'");
+        $staff_branch_column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'branch_id'");
+        if($branches_table && mysqli_num_rows($branches_table) > 0 && $staff_branch_column && mysqli_num_rows($staff_branch_column) > 0){
+            $scope_stmt = mysqli_prepare(
+                $conn,
+                'SELECT b.is_head_office FROM staff s LEFT JOIN branches b ON b.id=s.branch_id AND b.user_id=s.user_id WHERE s.id=? AND s.user_id=? LIMIT 1'
+            );
+            $staff_id = (int)$_SESSION['staff_id'];
+            mysqli_stmt_bind_param($scope_stmt, 'ii', $staff_id, $company_id);
+            mysqli_stmt_execute($scope_stmt);
+            $is_head_office = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($scope_stmt))['is_head_office'] ?? 0) === 1;
+            if(!$is_head_office){
+                $_SESSION['access_permissions'] = array_values(array_diff(
+                    $_SESSION['access_permissions'],
+                    ['all_branches', 'admin']
+                ));
+                unset($_SESSION['selected_branch_id']);
+            }
+        }
+    }
 }
 
 function current_manager_staff_id($conn = null)
@@ -351,7 +380,10 @@ function block_manager_restricted_actions()
             $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'help/video_tutorial.php', 'logout.php'];
             $permission_paths = [
                 'staff' => ['staff/'],
-                'sales' => ['sales/', 'create_invoice/'],
+                'sales' => ['create_invoice/'],
+                'stock_sales' => ['sales/', 'warehouse/sales_report.php'],
+                'products' => ['products/', 'product_categories/'],
+                'warehouse' => ['warehouse/', 'inventory/'],
                 'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
                 'projects' => ['project_package/'],
                 'land_ledger' => ['land/'],
@@ -360,16 +392,29 @@ function block_manager_restricted_actions()
                 'leads' => ['lead_management/'],
                 'notice_publish' => ['user_management/notice_publish.php'],
                 'wallet_approvals' => ['user_management/wallet_approvals.php'],
-                // Exact admin-area permissions must be checked before the
-                // broad Admin path so a Wallet Approvals-only account works.
-                'admin' => ['user_management/', 'tools/'],
+                'reports' => ['reports/'],
+                'admin_access_management' => ['user_management/index.php'],
+                'attendance_settings' => ['staff/attendance_settings.php'],
+                'branch_management' => ['user_management/branch_manage.php'],
+                'invoice_charges' => ['user_management/invoice_charges.php'],
+                'printing_option' => ['user_management/printing_option.php'],
+                'profit_cash_out' => ['profit_cash_out/'],
+                'sidebar_settings' => ['user_management/sidebar_settings.php'],
+                'tools' => ['tools/'],
             ];
 
             if(!in_array($path, $always_allowed_paths, true)){
                 $allowed = false;
                 foreach($permission_paths as $permission => $paths){
                     foreach($paths as $allowed_path){
-                        if(str_starts_with($path, $allowed_path) && in_array($permission, $permissions, true)){
+                        if(
+                            str_starts_with($path, $allowed_path)
+                            && (
+                                in_array($permission, $permissions, true)
+                                || (in_array($permission, array_keys(admin_sidebar_permissions()), true)
+                                    && manager_has_selected_admin_sidebar_permission($permission))
+                            )
+                        ){
                             $allowed = true;
                         }
                     }

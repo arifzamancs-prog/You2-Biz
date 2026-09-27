@@ -13,6 +13,7 @@ $message_type = '';
 $sql = "SELECT
             id,
             product_name,
+            sku,
             current_stock
         FROM products
         WHERE user_id=?
@@ -234,7 +235,7 @@ require_once '../includes/sidebar.php';
                     <option
                         value="<?= $row['id']; ?>">
 
-                        <?= htmlspecialchars($row['product_name']); ?>
+                        <?= htmlspecialchars(product_option_label($row['product_name'], $row['sku'] ?? '')); ?>
                         (Stock:
                         <?= number_format($row['current_stock'],0); ?>)
 

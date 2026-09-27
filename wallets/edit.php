@@ -2,8 +2,10 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$branch_scope = branch_scope_sql($conn, 'wallets');
 
 $id = (int)$_GET['id'];
 
@@ -14,7 +16,7 @@ $message = '';
 $sql = "SELECT *
         FROM wallets
         WHERE id=?
-        AND user_id=?";
+        AND user_id=? {$branch_scope}";
 
 $stmt = mysqli_prepare($conn,$sql);
 
@@ -30,15 +32,12 @@ mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 
 $wallet = mysqli_fetch_assoc($result);
+if(!$wallet){
+    die("Wallet Not Found");
+}
 if ($wallet['is_system'] == 1) {
 
     die("System Wallet Cannot Be Edited");
-
-}
-
-if(!$wallet){
-
-    die("Wallet Not Found");
 
 }
 
@@ -51,7 +50,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $sql = "UPDATE wallets
             SET wallet_name=?
             WHERE id=?
-            AND user_id=?";
+            AND user_id=? {$branch_scope}";
 
     $stmt = mysqli_prepare($conn,$sql);
 

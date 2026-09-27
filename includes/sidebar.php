@@ -144,7 +144,7 @@ if(
 $sidebar_role = is_super_admin_user()
     ? 'Super Admin'
     : (is_manager_user()
-        ? (is_agent_user() ? 'Assistant Access' : 'Manager Access')
+        ? 'Staff Access'
         : 'Administrator');
 
 // A staff login is linked with a staff record. Show that person's actual
@@ -183,10 +183,10 @@ $current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $current_query = [];
 parse_str((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $current_query);
 $sidebar_is_super_admin = is_super_admin_user();
-$sidebar_is_agent_only = is_agent_user() && !$sidebar_is_super_admin;
-$sidebar_can_see_reports = $sidebar_is_super_admin || !is_agent_user();
+$sidebar_can_see_reports = is_admin_user()
+    || (is_manager_user() && manager_has_permission('reports'));
 $sidebar_can_see_admin = is_admin_user()
-    || (is_manager_user() && (manager_has_permission('admin') || manager_has_permission('wallet_approvals')));
+    || (is_manager_user() && (manager_has_permission('admin') || manager_has_permission('tools')));
 $sidebar_table_system_enabled = false;
 
 if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
@@ -365,7 +365,12 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
                 <li class="nav-header">MAIN</li>
 
-                <?php sidebar_item(app_path('dashboard.php'), 'Dashboard', 'fas fa-home'); ?>
+                <?php
+                $dashboard_menu_label = is_manager_user() && manager_has_permission('dashboard')
+                    ? 'Branch Dashboard'
+                    : 'Dashboard';
+                sidebar_item(app_path('dashboard.php'), $dashboard_menu_label, 'fas fa-home');
+                ?>
 
                 <?php
                 $sidebar_staff_items = [
@@ -427,9 +432,9 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             ['href'=>app_path('land/land_summary.php'),'label'=>'Land Summary'],
                         ]);
                     }
-                    if(manager_has_permission('sales')){
+                    if(!products_module_enabled() && manager_has_permission('sales')){
                     sidebar_tree(
-                        'Sales',
+                        'Sales / Invoice',
                         'fas fa-file-invoice',
                         [
                             [
@@ -453,7 +458,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             ['href' => app_path('transactions/index.php'), 'label' => 'Transactions'],
                         ]);
                     }
-                    if(manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
+                    if(!products_module_enabled() && manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
                     if(manager_has_permission('customers')){
                         $sidebar_customer_items = [
                             ['href'=>app_path('customers/index.php'),'label'=>'Create Customer'],
@@ -463,10 +468,26 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                                 'href'=>app_path('customers/form_settings.php'),
                                 'label'=>'Cus. form settings',
                             ];
+                            $sidebar_customer_items[] = [
+                                'href'=>app_path('user_management/customer_login_settings.php'),
+                                'label'=>'Cus. Login Settings',
+                            ];
                         }
                         sidebar_tree('Customer Manage', 'fas fa-users', $sidebar_customer_items);
                     }
-                    if(manager_has_permission('suppliers')){ sidebar_tree('Suppliers', 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>'Suppliers'],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>'Supplier Due Payment']]); }
+                    if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing' && manager_has_permission('suppliers')){
+                        sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [
+                            ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Add Supplier')],
+                            ['href' => app_path('purchases/index.php'), 'label' => 'Purchases'],
+                            ['href' => app_path('suppliers/supplier_payment.php'), 'label' => supplier_display_text('Supplier Due Payment')],
+                        ]);
+                    }
+                    if(products_module_enabled()){
+                        if(manager_has_permission('products')) sidebar_tree('Products', 'fas fa-boxes', $sidebar_product_items);
+                        if(manager_has_permission('suppliers') && stock_can_manage_warehouse($conn)) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]]);
+                        if(manager_has_permission('warehouse')) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                        if(manager_has_permission('stock_sales')) sidebar_tree('Sales', 'fas fa-cash-register', [['href'=>app_path('sales/create_invoice.php'),'label'=>'Create Invoice'],['href'=>app_path('sales/invoice_list.php'),'label'=>'Invoice List'],['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment']]);
+                    }
                     if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
                 <?php }else{ ?>
@@ -483,7 +504,6 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 sidebar_tree(
                     'Sales',
                     'fas fa-file-invoice',
-                    array_merge(
                     [
                         [
                             'href' => app_path('sales/create_invoice.php'),
@@ -501,9 +521,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             'href' => app_path('sales/receive_payment.php'),
                             'label' => 'Due Payment',
                         ],
-                    ],
-                    []
-                    )
+                    ]
                 );
                 }
 
@@ -537,14 +555,6 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                         ],
                     ])
                 );
-
-                if(products_module_enabled()){
-                    sidebar_tree(
-                        'Products',
-                        'fas fa-boxes',
-                        $sidebar_product_items
-                    );
-                }
 
                 if($sidebar_table_system_enabled){
                     sidebar_tree(
@@ -580,19 +590,39 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             'href' => app_path('customers/index.php'),
                             'label' => 'Create Customer',
                         ],
-                    ], is_admin_user() ? [[
-                        'href' => app_path('customers/form_settings.php'),
-                        'label' => 'Cus. form settings',
-                    ]] : [])
+                    ], is_admin_user() ? [
+                        [
+                            'href' => app_path('customers/form_settings.php'),
+                            'label' => 'Cus. form settings',
+                        ],
+                        [
+                            'href' => app_path('user_management/customer_login_settings.php'),
+                            'label' => 'Cus. Login Settings',
+                        ],
+                    ] : [])
                 );
 
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing'){
+                    sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [
+                        ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Add Supplier')],
+                        ['href' => app_path('purchases/index.php'), 'label' => 'Purchases'],
+                        ['href' => app_path('suppliers/supplier_payment.php'), 'label' => supplier_display_text('Supplier Due Payment')],
+                    ]);
+                }
+
+                if(products_module_enabled()){
                 sidebar_tree(
-                    'Suppliers',
+                    'Products',
+                    'fas fa-boxes',
+                    $sidebar_product_items
+                );
+                sidebar_tree(
+                    supplier_display_text('Suppliers'),
                     'fas fa-truck',
                     [
                         [
                             'href' => app_path('suppliers/index.php'),
-                            'label' => is_manager_user() ? 'Suppliers' : 'Add Supplier',
+                            'label' => is_manager_user() ? supplier_display_text('Suppliers') : supplier_display_text('Add Supplier'),
                         ],
                         [
                             'href' => app_path('purchases/index.php'),
@@ -600,12 +630,15 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                         ],
                         [
                             'href' => app_path('suppliers/supplier_payment.php'),
-                            'label' => 'Supplier Due Payment',
+                            'label' => supplier_display_text('Supplier Due Payment'),
                         ],
                     ]
                 );
 
-                sidebar_tree(
+                sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                }
+
+                if(!products_module_enabled()) sidebar_tree(
                     $project_package_labels['module'],
                     'fas fa-project-diagram',
                     [
@@ -659,8 +692,8 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                sidebar_tree(
-                    'Sales',
+                if(!products_module_enabled()) sidebar_tree(
+                    'Sales / Invoice',
                     'fas fa-file-invoice',
                     array_merge([
                         [
@@ -699,69 +732,35 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
                 <?php if($sidebar_can_see_admin){ ?>
                     <li class="nav-header">ADMIN</li>
-
-                    <?php if(is_admin_user()){ ?>
-                        <?php sidebar_item(app_path('user_management/index.php'), 'Access Management', 'fas fa-user-cog'); ?>
-                        <?php sidebar_item(app_path('staff/attendance_settings.php'), 'Attendance Settings', 'fas fa-user-clock'); ?>
-                        <?php if(company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) { sidebar_item(app_path('user_management/branch_manage.php'), 'Branch Management', 'fas fa-code-branch'); } ?>
-                    <?php } ?>
-                    <?php if(is_admin_user() || (is_manager_user() && manager_has_permission('wallet_approvals'))){ ?>
-                        <?php sidebar_item(app_path('user_management/wallet_approvals.php'), 'Wallet Approvals', 'fas fa-check-circle'); ?>
-                    <?php } ?>
-                    <?php sidebar_item(app_path('user_management/invoice_charges.php'), 'Invoice Charges', 'fas fa-percentage'); ?>
-                    <?php sidebar_item(app_path('user_management/printing_option.php'), 'Printing Option', 'fas fa-print'); ?>
-                    <?php if(!is_manager_user()){ ?>
-                        <?php sidebar_item(app_path('profit_cash_out/index.php'), 'Profit Cash Out', 'fas fa-coins'); ?>
-                    <?php } ?>
-                    <?php sidebar_item(app_path('user_management/sidebar_settings.php'), 'Slidebar Settings', 'fas fa-sliders-h'); ?>
-                    <?php if(is_admin_user()){ ?>
                     <?php
-                    $sidebar_tools_items = is_super_admin_user()
-                        ? [
-                            [
-                                'href' => '#',
-                                'label' => 'Export Data',
-                                'class' => 'disabled text-muted',
-                            ],
-                            [
-                                'href' => '#',
-                                'label' => 'Import Data',
-                                'class' => 'disabled text-muted',
-                            ],
-                            [
-                                'href' => '#',
-                                'label' => 'Delete All Data',
-                                'class' => 'disabled text-muted',
-                            ],
-                            [
-                                'href' => app_path('tools/database_export.php'),
-                                'label' => 'Full DB Export',
-                            ],
-                            [
-                                'href' => app_path('tools/database_import.php'),
-                                'label' => 'Full DB Import',
-                                'class' => 'text-danger',
-                            ],
-                        ]
-                        : [
-                            [
-                                'href' => app_path('tools/export.php'),
-                                'label' => 'Export Data',
-                            ],
-                            [
-                                'href' => app_path('tools/import.php'),
-                                'label' => 'Import Data',
-                            ],
-                            [
-                                'href' => app_path('tools/delete_data.php'),
-                                'label' => 'Delete All Data',
-                                'class' => 'text-danger',
-                            ],
-                        ];
-
-                    sidebar_tree('Tools', 'fas fa-tools', $sidebar_tools_items);
+                    $sidebar_admin_items = [];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('admin_access_management')) $sidebar_admin_items[] = ['href' => app_path('user_management/index.php'), 'label' => 'Access Management', 'icon' => 'fas fa-user-cog'];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('attendance_settings')) $sidebar_admin_items[] = ['href' => app_path('staff/attendance_settings.php'), 'label' => 'Attendance Settings', 'icon' => 'fas fa-user-clock'];
+                    if((is_admin_user() || manager_has_selected_admin_sidebar_permission('branch_management')) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_admin_items[] = ['href' => app_path('user_management/branch_manage.php'), 'label' => 'Branch Management', 'icon' => 'fas fa-code-branch'];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('wallet_approvals')) $sidebar_admin_items[] = ['href' => app_path('user_management/wallet_approvals.php'), 'label' => 'Wallet Approvals', 'icon' => 'fas fa-check-circle'];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('invoice_charges')) $sidebar_admin_items[] = ['href' => app_path('user_management/invoice_charges.php'), 'label' => 'Invoice Charges', 'icon' => 'fas fa-percentage'];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('printing_option')) $sidebar_admin_items[] = ['href' => app_path('user_management/printing_option.php'), 'label' => 'Printing Option', 'icon' => 'fas fa-print'];
+                    if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Profit Cash Out', 'icon' => 'fas fa-coins'];
+                    if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
+                    if(products_module_enabled() && (is_admin_user() || (manager_has_permission('admin') && manager_has_permission('stock_sales')))) $sidebar_admin_items[] = ['href' => app_path('warehouse/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'];
+                    if($sidebar_admin_items) sidebar_tree('Admin', 'fas fa-user-cog', $sidebar_admin_items);
+                    if(is_admin_user() || manager_has_permission('tools')) {
+                        $sidebar_tools_items = is_super_admin_user()
+                            ? [
+                                ['href' => '#', 'label' => 'Export Data', 'class' => 'disabled text-muted'],
+                                ['href' => '#', 'label' => 'Import Data', 'class' => 'disabled text-muted'],
+                                ['href' => '#', 'label' => 'Delete All Data', 'class' => 'disabled text-muted'],
+                                ['href' => app_path('tools/database_export.php'), 'label' => 'Full DB Export'],
+                                ['href' => app_path('tools/database_import.php'), 'label' => 'Full DB Import', 'class' => 'text-danger'],
+                            ]
+                            : [
+                                ['href' => app_path('tools/export.php'), 'label' => 'Export Data'],
+                                ['href' => app_path('tools/import.php'), 'label' => 'Import Data'],
+                                ['href' => app_path('tools/delete_data.php'), 'label' => 'Delete All Data', 'class' => 'text-danger'],
+                            ];
+                        sidebar_tree('Tools', 'fas fa-tools', $sidebar_tools_items);
+                    }
                     ?>
-                    <?php } ?>
                 <?php } ?>
 
                 <li class="nav-header">HELP</li>
@@ -817,7 +816,15 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function matchesLayout(identity, layout) {
-        return (layout.href && identity.href === layout.href) || identity.label === layout.label;
+        // A submenu can share its parent's label (for example, Products).
+        // Match page links by URL so the child cannot replace its parent.
+        if (layout.href) return identity.href === layout.href;
+        const legacyLabels = { sales: 'Sales', suppliers: 'Stock In' };
+        return (!identity.href || identity.href === '#')
+            && (identity.label === layout.label
+                || identity.label === legacyLabels[layout.id]
+                || (layout.id === 'sales' && identity.label === 'Invoice')
+                || (layout.id === 'stock_sales' && identity.label === 'Sales'));
     }
 
     function ensureTree(item) {
@@ -908,7 +915,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (sidebarLayout.length) return;
     if (!operationsHeader) return;
 
-    const orderedLabels = ['Sales', 'Wallets', <?= json_encode($project_package_labels['module']); ?>, 'Customer Manage', 'Lead Management', 'Suppliers'];
+    const orderedLabels = ['Sales / Invoice', 'Products', '<?= supplier_display_text('Suppliers'); ?>', 'Main Warehouse', 'Sales', 'Wallets', <?= json_encode($project_package_labels['module']); ?>, 'Customer Manage', 'Lead Management'];
     let previousItem = operationsHeader;
 
     orderedLabels.forEach(function (label) {

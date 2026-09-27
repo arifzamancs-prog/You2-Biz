@@ -9,18 +9,21 @@ require_once '../includes/product_category_helper.php';
 $user_id = $_SESSION['user_id'];
 ensure_product_management_columns($conn);
 ensure_fifo_inventory_tables($conn);
-ensure_product_category_type_column($conn);
+ensure_fifo_only_product_categories($conn, $user_id);
 $show_expired_on = is_product_expiry_enabled($conn);
+$stock_branch_id = selected_branch_id($conn, false);
+$stock_filter = $stock_branch_id > 0 ? ' AND sb.branch_id=' . $stock_branch_id : '';
 
 $sql = "SELECT
             p.*,
+            (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.product_id=p.id AND sb.user_id=p.user_id {$stock_filter}) AS current_stock,
             c.category_name,
             c.category_type
         FROM products p
         LEFT JOIN product_categories c
             ON c.id = p.category_id
         WHERE p.user_id=?
-        ORDER BY CASE WHEN c.category_type='stock_product' THEN 0 ELSE 1 END, p.id DESC";
+        ORDER BY p.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);
 
@@ -52,7 +55,7 @@ require_once '../includes/sidebar.php';
 
         </h3>
 
-        <?php if(manager_can_modify()){ ?>
+        <?php if(manager_can_modify() && stock_can_manage_warehouse($conn)){ ?>
 
         <div class="card-tools">
 
@@ -102,7 +105,7 @@ require_once '../includes/sidebar.php';
                 <?php } ?>
                 <th>Stock</th>
                 <th>Status</th>
-                <?php if(manager_can_modify()){ ?>
+                <?php if(manager_can_modify() && stock_can_manage_warehouse($conn)){ ?>
                     <th width="150">Action</th>
                 <?php } ?>
 
@@ -112,16 +115,11 @@ require_once '../includes/sidebar.php';
 
             <tbody>
 
-            <?php $last_product_type = null; $product_column_count = 7 + ($show_expired_on ? 1 : 0) + (manager_can_modify() ? 1 : 0); while($row = mysqli_fetch_assoc($result)){ ?>
+            <?php while($row = mysqli_fetch_assoc($result)){ ?>
 
             <?php
             $product_has_transactions = product_has_transactions($conn, (int)$row['id'], $user_id);
-            $current_product_type = ($row['category_type'] ?? 'non_stock') === 'stock_product' ? 'stock_product' : 'non_stock';
             ?>
-
-            <?php if($current_product_type !== $last_product_type){ $last_product_type = $current_product_type; ?>
-            <tr class="table-primary"><td colspan="<?=$product_column_count?>"><strong><?= $current_product_type === 'stock_product' ? 'Stock Products' : 'Non Stock/Service Products' ?></strong></td></tr>
-            <?php } ?>
 
             <tr>
 
@@ -138,11 +136,7 @@ require_once '../includes/sidebar.php';
                 </td>
 
                 <td>
-                    <?php if(($row['category_type'] ?? 'non_stock') === 'stock_product'){ ?>
-                        BDT <?= number_format($row['purchase_price'],2); ?>
-                    <?php }else{ ?>
-                        N/A
-                    <?php } ?>
+                    BDT <?= number_format($row['purchase_price'],2); ?>
                 </td>
 
                 <td>
@@ -150,19 +144,11 @@ require_once '../includes/sidebar.php';
                 </td>
 
                 <?php if($show_expired_on){ ?>
-                    <td>
-                        <?php if(($row['category_type'] ?? 'non_stock') === 'stock_product'){ ?>
-                            <?= htmlspecialchars(app_date($row['expired_on'] ?? '')); ?>
-                        <?php }else{ ?>
-                            N/A
-                        <?php } ?>
-                    </td>
+                    <td><?= htmlspecialchars(app_date($row['expired_on'] ?? '')); ?></td>
                 <?php } ?>
 
                 <td>
-                    <?= ($row['category_type'] ?? 'non_stock') === 'stock_product'
-                        ? number_format($row['current_stock'], 0)
-                        : 'N/A'; ?>
+                    <?= number_format($row['current_stock'], 0); ?>
                 </td>
 
                 <td>
@@ -183,7 +169,7 @@ require_once '../includes/sidebar.php';
 
                 </td>
 
-                <?php if(manager_can_modify()){ ?>
+                <?php if(manager_can_modify() && stock_can_manage_warehouse($conn)){ ?>
                 <td>
 
                     <?php if(!$product_has_transactions){ ?>

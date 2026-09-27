@@ -192,8 +192,8 @@ function record_supplier_payment_expense($conn, $user_id, $wallet_id, $amount, $
     $insert_stmt = mysqli_prepare(
         $conn,
         "INSERT INTO expenses
-         (txn_no, user_id, wallet_id, category_id, staff_id, txn_date, amount, note, source_type, source_id, approval_status, created_by, approved_by, approved_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+         (branch_id, txn_no, user_id, wallet_id, category_id, staff_id, txn_date, amount, note, source_type, source_id, approval_status, created_by, approved_by, approved_at)
+         VALUES ((SELECT branch_id FROM wallets WHERE id=" . (int)$wallet_id . " AND user_id=" . (int)$user_id . "), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     $bind_types = 's' . str_repeat('i', 4) . 's' . 'd' . 's' . 's' . 'i' . 's' . str_repeat('i', 2) . 's';
     mysqli_stmt_bind_param(

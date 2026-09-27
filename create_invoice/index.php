@@ -5,16 +5,29 @@ require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/customer_portal_helper.php';
 
 require_sales_access();
 
 $user_id = (int)$_SESSION['user_id'];
 $created_by_user_id = (int)($_SESSION['login_user_id'] ?? $user_id);
+$branch_id = selected_branch_id($conn, true);
+$branch_scope = branch_scope_sql($conn, 'bi');
 
 ensure_project_package_tables($conn);
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
+ensure_invoice_request_table($conn);
 $project_package_labels = project_package_labels($conn, $user_id);
+
+if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reject_invoice_request'){
+    $reject_request_id = (int)($_POST['invoice_request_id'] ?? 0);
+    $reject_stmt = mysqli_prepare($conn, "UPDATE invoice_requests SET status='rejected' WHERE id=? AND user_id=? AND status='pending'");
+    mysqli_stmt_bind_param($reject_stmt, 'ii', $reject_request_id, $user_id);
+    mysqli_stmt_execute($reject_stmt);
+    header('Location: index.php?request_rejected=1');
+    exit;
+}
 
 $invoice_types = booking_invoice_types($conn, $user_id);
 $total_invoice_type_keys = booking_invoice_total_type_keys($conn, $user_id, $invoice_types);
@@ -25,15 +38,25 @@ $total_invoice_type_sql = "'" . implode("','", array_map(static function($type_k
 $payment_type_customers = [];
 $customer_projects = [];
 $customer_packages = [];
-$ptc = mysqli_query($conn, "SELECT DISTINCT customer_id, invoice_type FROM booking_invoices WHERE user_id={$user_id} AND status='confirmed'");
+$ptc = mysqli_query($conn, "SELECT DISTINCT customer_id, invoice_type FROM booking_invoices bi WHERE user_id={$user_id} AND status='confirmed'{$branch_scope}");
 while($ptc && $pr = mysqli_fetch_assoc($ptc)){ $payment_type_customers[$pr['invoice_type']][] = (int)$pr['customer_id']; }
-$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed' AND bi.invoice_type IN ({$total_invoice_type_sql}) ORDER BY bi.invoice_date DESC");
+$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.branch_id=bi.branch_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed'{$branch_scope} AND bi.invoice_type IN ({$total_invoice_type_sql}) ORDER BY bi.invoice_date DESC");
 while($purchase_map && $pm = mysqli_fetch_assoc($purchase_map)){ $c=(int)$pm['customer_id']; $p=(int)$pm['project_id']; $customer_projects[$c][]=$p; $customer_packages[$c][$p][]=['id'=>(int)$pm['package_id'],'date'=>date('d-m-Y',strtotime($pm['invoice_date'])),'name'=>(string)($pm['package_name'] ?? ''),'total'=>(float)$pm['total_amount'],'paid'=>(float)$pm['paid_amount']]; }
 $type = '';
 $display_type = isset($_GET['type']) ? normalize_booking_invoice_type($_GET['type'], $invoice_types) : 'booking';
 
 $message = '';
-$customer_id = (int)($_POST['customer_id'] ?? 0);
+$invoice_request_id = (int)($_POST['invoice_request_id'] ?? $_GET['invoice_request_id'] ?? 0);
+$requested_customer_id = 0;
+if($invoice_request_id > 0){
+    $request_customer_stmt = mysqli_prepare($conn, "SELECT customer_id FROM invoice_requests WHERE id=? AND user_id=? AND status='pending' LIMIT 1");
+    mysqli_stmt_bind_param($request_customer_stmt, 'ii', $invoice_request_id, $user_id);
+    mysqli_stmt_execute($request_customer_stmt);
+    $request_customer = mysqli_fetch_assoc(mysqli_stmt_get_result($request_customer_stmt));
+    $requested_customer_id = (int)($request_customer['customer_id'] ?? 0);
+    if($requested_customer_id <= 0) $invoice_request_id = 0;
+}
+$customer_id = (int)($_POST['customer_id'] ?? $requested_customer_id);
 $project_id = (int)($_POST['project_id'] ?? 0);
 $package_id = (int)($_POST['package_id'] ?? 0);
 $cash_wallet_id = ensure_default_cash_wallet($conn, $user_id);
@@ -67,14 +90,15 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $insert_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO booking_invoices
-             (user_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, total_price, notes, created_by_user_id)
+             (user_id, branch_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, total_price, notes, created_by_user_id)
              VALUES
-             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
         mysqli_stmt_bind_param(
             $insert_stmt,
-            'isiiiissddsi',
+            'iisiiiissddsi',
             $user_id,
+            $branch_id,
             $invoice_no,
             $customer_id,
             $project_id,
@@ -90,6 +114,11 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
         if(mysqli_stmt_execute($insert_stmt)){
             $saved_id = (int)mysqli_insert_id($conn);
+            if($invoice_request_id > 0){
+                $complete_request_stmt = mysqli_prepare($conn, "UPDATE invoice_requests SET status='completed', completed_invoice_id=?, completed_at=NOW() WHERE id=? AND user_id=? AND customer_id=? AND status='pending'");
+                mysqli_stmt_bind_param($complete_request_stmt, 'iiii', $saved_id, $invoice_request_id, $user_id, $customer_id);
+                mysqli_stmt_execute($complete_request_stmt);
+            }
             $charge_insert = mysqli_prepare($conn, "INSERT INTO booking_invoice_charges (booking_invoice_id,charge_type_id,charge_name,charge_type,charge_value_type,input_value,charge_amount) VALUES (?,?,?,?,?,?,?)");
             foreach($charge_calculation['rows'] as $charge_row){ $c=$charge_row['charge']; mysqli_stmt_bind_param($charge_insert,'iisssdd',$saved_id,$c['id'],$c['charge_name'],$c['charge_type'],$c['charge_value_type'],$charge_row['input_value'],$charge_row['amount']); mysqli_stmt_execute($charge_insert); }
             if($save_action === 'save_print'){
@@ -113,7 +142,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 $customers = [];
 $customer_query = mysqli_query(
     $conn,
-    "SELECT id, customer_name
+    "SELECT id, customer_name, customer_code, phone
      FROM customers
      WHERE user_id={$user_id}
      AND status='active'
@@ -157,6 +186,13 @@ while($wallet_result && $row = mysqli_fetch_assoc($wallet_result)){
 $invoice_charges = booking_invoice_active_charges($conn, $user_id);
 
 $recent_invoices = [];
+$pending_invoice_requests = [];
+$pending_request_stmt = mysqli_prepare($conn, "SELECT ir.id, ir.note, ir.photo, ir.created_at, c.customer_name, c.customer_code FROM invoice_requests ir INNER JOIN customers c ON c.id=ir.customer_id AND c.user_id=ir.user_id WHERE ir.user_id=? AND ir.status='pending' ORDER BY ir.created_at ASC");
+mysqli_stmt_bind_param($pending_request_stmt, 'i', $user_id);
+mysqli_stmt_execute($pending_request_stmt);
+$pending_request_result = mysqli_stmt_get_result($pending_request_stmt);
+while($pending_request_result && $request_row = mysqli_fetch_assoc($pending_request_result)) $pending_invoice_requests[] = $request_row;
+
 $recent_stmt = mysqli_prepare(
     $conn,
     "SELECT bi.id,
@@ -164,7 +200,11 @@ $recent_stmt = mysqli_prepare(
             bi.invoice_date,
             bi.amount,
             bi.status,
+            bi.customer_id,
+            bi.project_id,
+            bi.package_id,
             c.customer_name,
+            c.customer_code,
             p.project_name,
             pk.package_name
      FROM booking_invoices bi
@@ -188,6 +228,18 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 ?>
 
+<?php if(!empty($pending_invoice_requests)){ ?>
+<div class="card card-outline card-warning invoice-request-card">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-file-invoice mr-2"></i>Pending Invoice Requests</h3></div>
+    <div class="card-body table-responsive p-0"><table class="table table-bordered table-striped mb-0 invoice-request-table"><thead><tr><th>Photo</th><th>Customer Name &amp; ID</th><th>Note</th><th>Submitted</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        <?php foreach($pending_invoice_requests as $request){ $request_photo_url = invoice_request_photo_url($request['photo']); ?>
+            <tr><td><?php if($request_photo_url !== ''){ ?><button type="button" class="btn p-0 invoice-request-photo" data-toggle="modal" data-target="#invoice-request-photo-modal" data-photo="<?= htmlspecialchars($request_photo_url); ?>" data-customer="<?= htmlspecialchars($request['customer_name']); ?>"><img src="<?= htmlspecialchars($request_photo_url); ?>" alt="Invoice request photo"></button><?php }else{ ?><span class="text-muted">-</span><?php } ?></td><td><strong><?= htmlspecialchars($request['customer_name']); ?></strong><div class="text-muted small">ID: <?= htmlspecialchars($request['customer_code'] ?: '-'); ?></div></td><td class="request-note"><?= htmlspecialchars($request['note'] ?: '-'); ?></td><td><?= htmlspecialchars(date('d-m-Y', strtotime($request['created_at']))); ?></td><td><span class="badge badge-warning">Pending</span></td><td><a href="index.php?invoice_request_id=<?= (int)$request['id']; ?>" class="btn btn-warning btn-sm mr-1"><i class="fas fa-file-invoice"></i> Create Invoice</a><form method="post" class="d-inline" onsubmit="return confirm('Reject this invoice request?');"><input type="hidden" name="action" value="reject_invoice_request"><input type="hidden" name="invoice_request_id" value="<?= (int)$request['id']; ?>"><button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-times"></i> Reject</button></form></td></tr>
+        <?php } ?>
+    </tbody></table></div>
+</div>
+<div class="modal fade" id="invoice-request-photo-modal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Invoice Request Photo</h5><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button></div><div class="modal-body text-center"><img id="invoice-request-photo-preview" class="img-fluid" alt="Invoice request photo"></div></div></div></div>
+<?php } ?>
+
 <div class="card">
     <div class="card-header">
         <h3 class="card-title">
@@ -210,6 +262,7 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <form method="post" id="create-invoice-form">
+            <?php if($invoice_request_id > 0){ ?><input type="hidden" name="invoice_request_id" value="<?= (int)$invoice_request_id; ?>"><?php } ?>
             <div class="row">
                 <div class="col-md-3">
                     <div class="form-group">
@@ -226,11 +279,11 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-3">
                     <div class="form-group">
                         <label>Customer Name</label>
-                        <select name="customer_id" class="form-control" required>
+                        <select id="customer_id" name="customer_id" class="form-control customer-select" required>
                             <option value="">Select Customer</option>
                             <?php foreach($customers as $customer){ ?>
                                 <option value="<?= (int)$customer['id']; ?>" <?= $customer_id === (int)$customer['id'] ? 'selected' : ''; ?>>
-                                    <?= htmlspecialchars($customer['customer_name']); ?>
+                                    <?= htmlspecialchars($customer['customer_name'] . ' [Mob: ' . ($customer['phone'] ?: '-') . '] [ID: ' . ($customer['customer_code'] ?: '-') . ']'); ?>
                                 </option>
                             <?php } ?>
                         </select>
@@ -359,7 +412,7 @@ require_once '../includes/sidebar.php';
                         <tr>
                             <td><?= htmlspecialchars($invoice['invoice_no']); ?></td>
                             <td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td>
-                            <td><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['customer_name'] ? $invoice['customer_name'] . ' [ID: ' . ($invoice['customer_code'] ?: '-') . ']' : ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td>
                             <td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?></td>
                             <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td>
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
@@ -391,6 +444,24 @@ document.addEventListener('DOMContentLoaded', function () {
     const walletSelect = document.getElementById('wallet_id');
     const invoiceDateDisplay = document.getElementById('invoice-date-display');
     const invoiceDatePicker = document.getElementById('invoice-date-picker');
+    const customerSelect = document.getElementById('customer_id');
+
+    $('#invoice-request-photo-modal').on('show.bs.modal', function(event){
+        const trigger = $(event.relatedTarget);
+        $('#invoice-request-photo-preview').attr('src', trigger.data('photo') || '');
+        $(this).find('.modal-title').text((trigger.data('customer') || 'Customer') + ' — Invoice Request Photo');
+    });
+
+    // Select2 provides a searchable customer field while retaining the native
+    // select value used by the existing invoice form logic.
+    if (window.jQuery && $.fn.select2) {
+        $('#customer_id').select2({
+            theme: 'bootstrap4',
+            width: '100%',
+            placeholder: 'Type to search customer',
+            allowClear: true
+        });
+    }
 
     function invoiceDateToDisplay(value) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return '';
@@ -525,7 +596,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateWalletBalance();
     });
     packageSelect.addEventListener('change', updateWalletBalance);
-    document.querySelector('[name="customer_id"]').addEventListener('change', function(){
+    customerSelect.addEventListener('change', function(){
         invoiceTypeSelect.disabled = !this.value;
         projectSelect.value = '';
         packageSelect.value = '';
@@ -538,6 +609,19 @@ document.addEventListener('DOMContentLoaded', function () {
         if(!this.value){ invoiceTypeSelect.value = ''; toggleTotalPrice(); }
         updateWalletBalance();
     });
+
+    // Select2 usually emits a native change event. Handle its own events as
+    // well so Payment Type always unlocks after a searchable selection.
+    if (window.jQuery && $.fn.select2) {
+        $('#customer_id').on('select2:select select2:clear', function(){
+            this.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+
+    // Covers browser form-state restoration after a refresh or Back action.
+    window.setTimeout(function(){
+        invoiceTypeSelect.disabled = !customerSelect.value;
+    }, 0);
 
     document.getElementById('create-invoice-form').addEventListener('submit', function (event) {
         if (event.submitter && event.submitter.value === 'save_print') {
@@ -563,6 +647,10 @@ document.addEventListener('DOMContentLoaded', function () {
 #create-invoice-form > .row > div:nth-child(5) { order: 3; }
 #create-invoice-form > .row > div:nth-child(3) { order: 4; }
 #create-invoice-form > .row > div:nth-child(4) { order: 5; }
+.invoice-request-photo { background:transparent; border:0; }
+.invoice-request-photo img { border:1px solid #e5e7eb; border-radius:8px; height:72px; object-fit:cover; width:72px; }
+.invoice-request-table th { white-space:nowrap; }
+.request-note { min-width:180px; white-space:pre-wrap; }
 </style>
 
 <?php

@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/supplier_label_helper.php';
 
 require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
@@ -72,7 +73,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('company_delete_data', 'Company Delete Data', app_path('super_admin/company_delete_data.php'), 'super_admin', 34),
         sidebar_setting_item('marketing', 'Marketing', app_path('user_management/marketing.php'), 'super_admin', 35),
         sidebar_setting_item('notice_publish', 'Notice Publish', app_path('user_management/notice_publish.php'), '', 40),
-        sidebar_setting_item('sales', 'Sales', '', '', 50),
+        sidebar_setting_item('sales', 'Sales / Invoice', '', '', 50),
         sidebar_setting_item('create_invoice', 'Create Invoice', app_path('create_invoice/index.php'), 'sales', 51),
         sidebar_setting_item('invoice_list', 'Invoice List', app_path('create_invoice/invoice_list.php'), 'sales', 52),
         sidebar_setting_item('manage_payment_type', 'Manage Payment Type', app_path('create_invoice/manage_invoice_types.php'), 'sales', 53),
@@ -93,10 +94,17 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('customer_manage', 'Customer Manage', '', '', 90),
         sidebar_setting_item('create_customer', 'Create Customer', app_path('customers/index.php'), 'customer_manage', 91),
         sidebar_setting_item('customer_form_settings', 'Cus. form settings', app_path('customers/form_settings.php'), 'customer_manage', 92),
-        sidebar_setting_item('suppliers', 'Suppliers', '', '', 100),
-        sidebar_setting_item('supplier_list', 'Suppliers', app_path('suppliers/index.php'), 'suppliers', 101),
+        sidebar_setting_item('customer_login_settings', 'Cus. Login Settings', app_path('user_management/customer_login_settings.php'), 'customer_manage', 93),
+        sidebar_setting_item('suppliers', supplier_display_text('Suppliers'), '', '', 74),
+        sidebar_setting_item('warehouse', 'Main Warehouse', app_path('warehouse/index.php'), '', 75),
+        sidebar_setting_item('stock_sales', 'Sales', '', '', 76),
+        sidebar_setting_item('stock_create', 'Create Invoice', app_path('sales/create_invoice.php'), 'stock_sales', 1),
+        sidebar_setting_item('stock_invoices', 'Invoice List', app_path('sales/invoice_list.php'), 'stock_sales', 2),
+        sidebar_setting_item('stock_due', 'Due Payment', app_path('sales/receive_payment.php'), 'stock_sales', 3),
+        sidebar_setting_item('stock_report', 'Sales Report', app_path('warehouse/sales_report.php'), 'stock_sales', 4),
+        sidebar_setting_item('supplier_list', supplier_display_text('Suppliers'), app_path('suppliers/index.php'), 'suppliers', 101),
         sidebar_setting_item('purchases', 'Purchases', app_path('purchases/index.php'), 'suppliers', 102),
-        sidebar_setting_item('supplier_due_payment', 'Supplier Due Payment', app_path('suppliers/supplier_payment.php'), 'suppliers', 103),
+        sidebar_setting_item('supplier_due_payment', supplier_display_text('Supplier Due Payment'), app_path('suppliers/supplier_payment.php'), 'suppliers', 103),
         sidebar_setting_item('lead_management', 'Lead Management', '', '', 110),
         sidebar_setting_item('new_lead', 'New Lead', app_path('lead_management/index.php?filter=lead'), 'lead_management', 111),
         sidebar_setting_item('qualified_list', 'Qualified List', app_path('lead_management/index.php?filter=successful'), 'lead_management', 112),
@@ -169,6 +177,23 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         $default_map[$id]['visible'] = !isset($saved_item['visible']) || (int)$saved_item['visible'] === 1 ? 1 : 0;
     }
 
+    // Products are the primary catalogue for Stock Product companies. A saved
+    // sidebar preference must not make the only product add/list entry vanish.
+    if(function_exists('project_package_company_type')
+        && project_package_company_type($conn, (int)$user_id) === 'Stock Product'){
+        foreach(['products', 'product_categories', 'product_list'] as $required_product_item){
+            if(isset($default_map[$required_product_item])){
+                $default_map[$required_product_item]['visible'] = 1;
+            }
+        }
+        // Stock Sales Report is temporarily rendered inside the Admin tree.
+        // Prevent an older saved layout from moving it back under Sales.
+        if(isset($default_map['stock_report'])){
+            $default_map['stock_report']['parent'] = '_fixed_admin';
+            $default_map['stock_report']['visible'] = 1;
+        }
+    }
+
     $items = array_values($default_map);
     usort($items, static function($a, $b){
         return ((int)$a['sort'] <=> (int)$b['sort']) ?: strcmp($a['label'], $b['label']);
@@ -234,7 +259,7 @@ function sidebar_layout_items_for_current_user($items)
             continue;
         }
 
-        if(in_array($id, ['products', 'product_categories', 'product_list', 'expired_product'], true) && !products_module_enabled()){
+        if(in_array($id, ['products', 'product_categories', 'product_list', 'expired_product', 'suppliers', 'warehouse', 'stock_sales', 'stock_create', 'stock_invoices', 'stock_due', 'stock_report'], true) && !products_module_enabled() && !($id === 'suppliers' && $is_housing_company)){
             continue;
         }
 

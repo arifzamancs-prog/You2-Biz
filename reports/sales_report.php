@@ -3,11 +3,13 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/branch_context_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
-$user_id=(int)$_SESSION['user_id']; ensure_invoice_posting_columns($conn); ensure_booking_invoice_table($conn); ensure_booking_invoice_type_table($conn, $user_id);
+$user_id=(int)$_SESSION['user_id']; ensure_invoice_posting_columns($conn); ensure_booking_invoice_table($conn); ensure_booking_invoice_type_table($conn, $user_id); ensure_branch_accounting_columns($conn, $user_id);
+$booking_scope=branch_scope_sql($conn,'bi'); $wallet_scope=branch_scope_sql($conn,'w');
 $month=isset($_GET['month'])?(int)$_GET['month']:(int)date('m');
 $year=isset($_GET['year'])?(int)$_GET['year']:(int)date('Y');
 if($month<1||$month>12) $month=(int)date('m'); if($year<2020||$year>2100) $year=(int)date('Y');
@@ -19,14 +21,14 @@ $sql="SELECT COALESCE(w.wallet_name,'Unassigned') AS wallet_name,
     FROM booking_invoices bi
     LEFT JOIN wallets w ON w.id=bi.wallet_id
     LEFT JOIN booking_invoice_types bit ON bit.user_id=bi.user_id AND bit.type_key=bi.invoice_type
-    WHERE bi.user_id=? AND bi.status='confirmed' AND COALESCE(bit.behavior,'income')='income'
+    WHERE bi.user_id=? {$booking_scope} AND bi.status='confirmed' AND COALESCE(bit.behavior,'income')='income'
     AND MONTH(bi.invoice_date)=? AND YEAR(bi.invoice_date)=?
     GROUP BY bi.wallet_id,w.wallet_name ORDER BY total_sales DESC,wallet_name";
 $stmt=mysqli_prepare($conn,$sql); mysqli_stmt_bind_param($stmt,'iii',$user_id,$month,$year); mysqli_stmt_execute($stmt); $result=mysqli_stmt_get_result($stmt);
 $summary=[]; $labels=[]; $values=[]; $sales_total=0; $paid_total=0; $invoice_total=0;
 while($row=mysqli_fetch_assoc($result)){ $summary[]=$row; $labels[]=$row['wallet_name']; $values[]=(float)$row['total_sales']; $sales_total+=(float)$row['total_sales']; $paid_total+=(float)$row['total_paid']; $invoice_total+=(int)$row['invoice_count']; }
 
-$wallet_stmt=mysqli_prepare($conn,"SELECT wallet_name,balance,status FROM wallets WHERE user_id=? ORDER BY status='active' DESC,wallet_name"); mysqli_stmt_bind_param($wallet_stmt,'i',$user_id); mysqli_stmt_execute($wallet_stmt); $wallet_result=mysqli_stmt_get_result($wallet_stmt);
+$wallet_stmt=mysqli_prepare($conn,"SELECT wallet_name,balance,status FROM wallets w WHERE w.user_id=? {$wallet_scope} ORDER BY status='active' DESC,wallet_name"); mysqli_stmt_bind_param($wallet_stmt,'i',$user_id); mysqli_stmt_execute($wallet_stmt); $wallet_result=mysqli_stmt_get_result($wallet_stmt);
 $wallets=[]; $wallet_balance=0; while($wallet=mysqli_fetch_assoc($wallet_result)){ $wallet_balance+=(float)$wallet['balance']; $wallets[]=$wallet; }
 ?>
 <section class="content"><div class="container-fluid">

@@ -19,12 +19,15 @@ function ensure_company_setting_columns($conn)
 
 function normalize_company_type($company_type)
 {
-    return trim((string)$company_type) === 'Others' ? 'Others' : 'Housing';
+    $company_type = trim((string)$company_type);
+    return in_array($company_type, ['Housing', 'Others', 'Stock Product'], true)
+        ? $company_type
+        : 'Housing';
 }
 
 function valid_company_type($company_type)
 {
-    return in_array(trim((string)$company_type), ['Housing', 'Others'], true);
+    return in_array(trim((string)$company_type), ['Housing', 'Others', 'Stock Product'], true);
 }
 
 function normalize_company_currency($currency)

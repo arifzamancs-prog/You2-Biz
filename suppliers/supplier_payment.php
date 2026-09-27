@@ -66,8 +66,8 @@ while($row = mysqli_fetch_assoc($result)){
 <div class="alert alert-success alert-dismissible fade show">
 
     <?= ($_GET['success'] ?? '') === 'deleted'
-        ? 'Supplier due payment deleted successfully. Purchase and wallet balances were adjusted.'
-        : 'Supplier Due Payment Saved Successfully.'; ?>
+        ? supplier_display_text('Supplier due payment deleted successfully. Purchase and wallet balances were adjusted.')
+        : supplier_display_text('Supplier Due Payment Saved Successfully.'); ?>
 
 </div>
 
@@ -88,7 +88,7 @@ while($row = mysqli_fetch_assoc($result)){
     <div class="card-header">
 
         <h3 class="card-title">
-            Supplier Due Payment
+            <?= supplier_display_text('Supplier'); ?> Due Payment
         </h3>
 
     </div>
@@ -105,7 +105,7 @@ while($row = mysqli_fetch_assoc($result)){
 
                 <th>Purchase No</th>
                 <th>Date</th>
-                <th>Supplier</th>
+                <th><?= supplier_display_text('Supplier'); ?></th>
                 <th>Total</th>
                 <th>Paid</th>
                 <th>Due</th>
@@ -131,7 +131,7 @@ while($row = mysqli_fetch_assoc($result)){
                 </td>
 
                 <td>
-                    <?= htmlspecialchars($row['supplier_name'] ?: ('Missing Supplier #' . (int)$row['supplier_id'])); ?>
+                    <?= htmlspecialchars($row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$row['supplier_id'])); ?>
                 </td>
 
                 <td>
@@ -191,7 +191,7 @@ while($row = mysqli_fetch_assoc($result)){
                             href="delete_payment.php?id=<?= (int)$row['latest_payment_id']; ?>&purchase_id=<?= (int)$row['id']; ?>"
                             class="btn btn-danger btn-sm"
                             title="Delete"
-                            onclick="return confirm('Delete the latest supplier due payment for this purchase? Wallet balance and purchase due will be adjusted.');">
+                            onclick="return confirm('Delete the latest <?= supplier_display_text('supplier'); ?> due payment for this purchase? Wallet balance and purchase due will be adjusted.');">
 
                             <i class="fas fa-trash"></i>
 

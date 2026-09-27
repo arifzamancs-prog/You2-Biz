@@ -1,28 +1,34 @@
 <?php
 
+require_once __DIR__ . '/branch_context_helper.php';
+
 function ensure_default_cash_wallet($conn, $user_id)
 {
     $user_id = (int)$user_id;
+    ensure_branch_accounting_columns($conn, $user_id);
+    $branch_id = (int)($GLOBALS['stock_wallet_branch_id'] ?? selected_branch_id($conn, true));
 
     /* Rename legacy system wallets without changing their transaction links. */
     $rename_sql = "UPDATE wallets
                    SET wallet_name='Cash'
                    WHERE user_id=?
+                   AND branch_id=?
                    AND wallet_name='Cash Box'
                    AND is_system=1";
     $rename_stmt = mysqli_prepare($conn, $rename_sql);
-    mysqli_stmt_bind_param($rename_stmt, "i", $user_id);
+    mysqli_stmt_bind_param($rename_stmt, "ii", $user_id, $branch_id);
     mysqli_stmt_execute($rename_stmt);
 
     $sql = "SELECT id, is_system, status
             FROM wallets
             WHERE user_id=?
+            AND branch_id=?
             AND wallet_name='Cash'
             ORDER BY is_system DESC, id ASC
             LIMIT 1";
 
     $stmt = mysqli_prepare($conn, $sql);
-    mysqli_stmt_bind_param($stmt, "i", $user_id);
+    mysqli_stmt_bind_param($stmt, "ii", $user_id, $branch_id);
     mysqli_stmt_execute($stmt);
 
     $result = mysqli_stmt_get_result($stmt);
@@ -47,6 +53,7 @@ function ensure_default_cash_wallet($conn, $user_id)
     $insert_sql = "INSERT INTO wallets
                    (
                        user_id,
+                       branch_id,
                        wallet_name,
                        description,
                        balance,
@@ -55,7 +62,7 @@ function ensure_default_cash_wallet($conn, $user_id)
                    )
                    VALUES
                    (
-                       ?,
+                       ?,?,
                        'Cash',
                        'System Default Cash Wallet',
                        0,
@@ -64,7 +71,7 @@ function ensure_default_cash_wallet($conn, $user_id)
                    )";
 
     $insert_stmt = mysqli_prepare($conn, $insert_sql);
-    mysqli_stmt_bind_param($insert_stmt, "i", $user_id);
+    mysqli_stmt_bind_param($insert_stmt, "ii", $user_id, $branch_id);
     mysqli_stmt_execute($insert_stmt);
 
     return (int)mysqli_insert_id($conn);
@@ -73,6 +80,7 @@ function ensure_default_cash_wallet($conn, $user_id)
 function active_wallets_result($conn, $user_id)
 {
     $user_id = (int)$user_id;
+    $branch_id = (int)($GLOBALS['stock_wallet_branch_id'] ?? selected_branch_id($conn, true));
 
     ensure_default_cash_wallet($conn, $user_id);
 
@@ -85,6 +93,7 @@ function active_wallets_result($conn, $user_id)
             is_system
          FROM wallets
          WHERE user_id={$user_id}
+         " . ($branch_id > 0 ? "AND branch_id={$branch_id}" : '') . "
          AND status='active'
          ORDER BY is_system DESC,
                   wallet_name ASC"
@@ -93,6 +102,7 @@ function active_wallets_result($conn, $user_id)
 
 function debit_wallet($conn, $wallet_id, $user_id, $amount)
 {
+    if (!empty($GLOBALS['stock_request_active']) && $amount > 0) stock_require_wallet($conn, $wallet_id, $user_id, stock_customer_branch($conn));
     if($amount <= 0){
         return;
     }
@@ -125,6 +135,7 @@ function debit_wallet($conn, $wallet_id, $user_id, $amount)
 
 function credit_wallet($conn, $wallet_id, $user_id, $amount)
 {
+    if (!empty($GLOBALS['stock_request_active']) && $amount > 0) stock_require_wallet($conn, $wallet_id, $user_id, stock_customer_branch($conn));
     if($amount <= 0){
         return;
     }

@@ -9,6 +9,7 @@ function returnable_product_system_enabled()
 
 function customer_previous_due_total($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     /*
      * `invoices.due_amount` is a cached per-invoice value.  Older invoices
      * can therefore contain stale values after a payment was corrected.
@@ -25,6 +26,7 @@ function customer_previous_due_total($conn, $user_id, $customer_id, $exclude_inv
 
 function customer_ledger_due_total($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     ensure_customer_opening_due_tables($conn);
 
     if((int)$customer_id <= 0){
@@ -34,7 +36,7 @@ function customer_ledger_due_total($conn, $user_id, $customer_id, $exclude_invoi
     $sales_sql = "SELECT COALESCE(SUM(total_amount),0) AS total_sales
                   FROM invoices
                   WHERE customer_id=?
-                  AND user_id=?
+                  AND user_id=? {$stock_due_scope}
                   AND accounting_status='posted'";
 
     if((int)$exclude_invoice_id > 0){
@@ -61,7 +63,7 @@ function customer_ledger_due_total($conn, $user_id, $customer_id, $exclude_invoi
         "SELECT COALESCE(SUM(amount),0) AS total_sales
          FROM customer_opening_dues
          WHERE customer_id=?
-         AND user_id=?"
+         AND user_id=? {$stock_due_scope}"
     );
     mysqli_stmt_bind_param($opening_stmt, "ii", $customer_id, $user_id);
     mysqli_stmt_execute($opening_stmt);
@@ -71,7 +73,7 @@ function customer_ledger_due_total($conn, $user_id, $customer_id, $exclude_invoi
     $payment_sql = "SELECT COALESCE(SUM(amount),0) AS total_paid
                     FROM customer_payments
                     WHERE customer_id=?
-                    AND user_id=?";
+                    AND user_id=? {$stock_due_scope}";
 
     $payment_stmt = mysqli_prepare($conn, $payment_sql);
     mysqli_stmt_bind_param($payment_stmt, "ii", $customer_id, $user_id);
@@ -86,6 +88,7 @@ function customer_ledger_due_total($conn, $user_id, $customer_id, $exclude_invoi
 
 function customer_signed_balance_total($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     ensure_customer_opening_due_tables($conn);
 
     if((int)$customer_id <= 0){
@@ -95,7 +98,7 @@ function customer_signed_balance_total($conn, $user_id, $customer_id, $exclude_i
     $sales_sql = "SELECT COALESCE(SUM(total_amount),0) AS total_sales
                   FROM invoices
                   WHERE customer_id=?
-                  AND user_id=?
+                  AND user_id=? {$stock_due_scope}
                   AND accounting_status='posted'";
 
     if((int)$exclude_invoice_id > 0){
@@ -122,7 +125,7 @@ function customer_signed_balance_total($conn, $user_id, $customer_id, $exclude_i
         "SELECT COALESCE(SUM(amount),0) AS total_sales
          FROM customer_opening_dues
          WHERE customer_id=?
-         AND user_id=?"
+         AND user_id=? {$stock_due_scope}"
     );
     mysqli_stmt_bind_param($opening_stmt, "ii", $customer_id, $user_id);
     mysqli_stmt_execute($opening_stmt);
@@ -132,7 +135,7 @@ function customer_signed_balance_total($conn, $user_id, $customer_id, $exclude_i
     $payment_sql = "SELECT COALESCE(SUM(amount),0) AS total_paid
                     FROM customer_payments
                     WHERE customer_id=?
-                    AND user_id=?";
+                    AND user_id=? {$stock_due_scope}";
 
     $payment_stmt = mysqli_prepare($conn, $payment_sql);
     mysqli_stmt_bind_param($payment_stmt, "ii", $customer_id, $user_id);
@@ -145,13 +148,14 @@ function customer_signed_balance_total($conn, $user_id, $customer_id, $exclude_i
 
 function latest_existing_customer_invoice_id($conn, $user_id, $customer_id)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if((int)$customer_id <= 0){
         return 0;
     }
 
     $sql = "SELECT MAX(id) AS latest_invoice_id
             FROM invoices
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             AND customer_id=?";
 
     $stmt = mysqli_prepare($conn, $sql);
@@ -164,6 +168,7 @@ function latest_existing_customer_invoice_id($conn, $user_id, $customer_id)
 
 function can_modify_customer_invoice($conn, $user_id, $invoice_id, $customer_id)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if((int)$invoice_id <= 0){
         return false;
     }
@@ -191,6 +196,7 @@ function customer_source_invoice_payment_total(
     $source_invoice_id,
     $source_invoice_no
 ) {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if((int)$customer_id <= 0 || (int)$source_invoice_id <= 0){
         return 0.0;
     }
@@ -200,7 +206,7 @@ function customer_source_invoice_payment_total(
     $sql = "SELECT COALESCE(SUM(amount),0) AS source_paid
             FROM customer_payments
             WHERE customer_id=?
-            AND user_id=?
+            AND user_id=? {$stock_due_scope}
             AND note LIKE CONCAT(?, '%')";
 
     $stmt = mysqli_prepare($conn, $sql);
@@ -224,6 +230,7 @@ function customer_source_invoice_all_payment_total(
     $source_invoice_id,
     $source_invoice_no
 ) {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if((int)$customer_id <= 0 || (int)$source_invoice_id <= 0){
         return 0.0;
     }
@@ -235,7 +242,7 @@ function customer_source_invoice_all_payment_total(
     $sql = "SELECT COALESCE(SUM(amount),0) AS source_paid
             FROM customer_payments
             WHERE customer_id=?
-            AND user_id=?
+            AND user_id=? {$stock_due_scope}
             AND (
                 (invoice_id=? AND note IN (?, ?))
                 OR note LIKE CONCAT(?, '%')
@@ -265,6 +272,7 @@ function customer_source_invoice_all_payment_total(
 
 function customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if(!returnable_product_system_enabled()){
         return [];
     }
@@ -284,7 +292,7 @@ function customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclud
                 ON p.id = ii.product_id
             WHERE i.customer_id=?
             AND i.user_id=?
-            AND i.accounting_status='posted'
+            AND i.accounting_status='posted'" . (function_exists('stock_customer_scope') ? stock_customer_scope($conn, 'i') : '') . "
             AND ii.unit_price = 0";
 
     if((int)$exclude_invoice_id > 0){
@@ -335,6 +343,7 @@ function customer_returnable_balance_rows($conn, $user_id, $customer_id, $exclud
 
 function customer_returnable_balance_summary_text($conn, $user_id, $customer_id, $exclude_invoice_id = 0)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     if(!returnable_product_system_enabled()){
         return '';
     }
@@ -357,6 +366,7 @@ function customer_returnable_balance_summary_text($conn, $user_id, $customer_id,
 
 function customer_due_report_rows($conn, $user_id)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     ensure_customer_opening_due_tables($conn);
 
     $sql = "SELECT
@@ -373,7 +383,7 @@ function customer_due_report_rows($conn, $user_id)
             LEFT JOIN (
                 SELECT customer_id, SUM(total_amount) AS total_sales
                 FROM invoices
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
                 GROUP BY customer_id
             ) inv
@@ -381,21 +391,21 @@ function customer_due_report_rows($conn, $user_id)
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS total_sales
                 FROM customer_opening_dues
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 GROUP BY customer_id
             ) open_total
                 ON open_total.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS total_paid
                 FROM customer_payments
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 GROUP BY customer_id
             ) pay
                 ON pay.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS due_invoice_count
                 FROM invoices
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
                 AND due_amount > 0
                 GROUP BY customer_id
@@ -404,7 +414,7 @@ function customer_due_report_rows($conn, $user_id)
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS due_entry_count
                 FROM customer_opening_dues
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND due_amount > 0
                 GROUP BY customer_id
             ) open_due
@@ -438,6 +448,7 @@ function customer_due_report_rows($conn, $user_id)
 
 function customer_due_report_total($conn, $user_id)
 {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     $rows = customer_due_report_rows($conn, $user_id);
     $total_due = 0.0;
 
@@ -456,6 +467,7 @@ function allocate_customer_previous_due_payment(
     $source_invoice_no,
     $amount
 ) {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     ensure_customer_opening_due_tables($conn);
 
     $amount = round((float)$amount, 2);
@@ -470,11 +482,11 @@ function allocate_customer_previous_due_payment(
     $sql = "SELECT id, invoice_no, invoice_date, paid_amount, due_amount
             FROM invoices
             WHERE customer_id=?
-            AND user_id=?
+            AND user_id=? {$stock_due_scope}
             AND accounting_status='posted'
             AND due_amount > 0
             AND id<>?
-            ORDER BY invoice_date ASC, id ASC";
+            ORDER BY invoice_date ASC, id ASC FOR UPDATE";
 
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param(
@@ -505,9 +517,9 @@ function allocate_customer_previous_due_payment(
         "SELECT id, due_no, entry_date, paid_amount, due_amount
          FROM customer_opening_dues
          WHERE customer_id=?
-         AND user_id=?
+         AND user_id=? {$stock_due_scope}
          AND due_amount > 0
-         ORDER BY entry_date ASC, id ASC"
+         ORDER BY entry_date ASC, id ASC FOR UPDATE"
     );
     mysqli_stmt_bind_param($opening_stmt, "ii", $customer_id, $user_id);
     mysqli_stmt_execute($opening_stmt);
@@ -553,17 +565,14 @@ function allocate_customer_previous_due_payment(
             " (Previous Due - " . $entry['reference_no'] . ")";
 
         if($entry['entry_type'] === 'invoice'){
-            $payment_sql = "INSERT INTO customer_payments
-                            (
+            $payment_sql = "INSERT INTO customer_payments (branch_id,
                                 user_id,
                                 customer_id,
                                 invoice_id,
                                 amount,
                                 payment_date,
                                 note
-                            )
-                            VALUES
-                            (
+                            ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                                 ?,
                                 ?,
                                 ?,
@@ -589,7 +598,7 @@ function allocate_customer_previous_due_payment(
                                due_amount=?,
                                payment_status=?
                            WHERE id=?
-                           AND user_id=?";
+                           AND user_id=? {$stock_due_scope}";
 
             $update_stmt = mysqli_prepare($conn, $update_sql);
             mysqli_stmt_bind_param(
@@ -603,8 +612,7 @@ function allocate_customer_previous_due_payment(
             );
             mysqli_stmt_execute($update_stmt);
         }else{
-            $payment_sql = "INSERT INTO customer_payments
-                            (
+            $payment_sql = "INSERT INTO customer_payments (branch_id,
                                 user_id,
                                 customer_id,
                                 invoice_id,
@@ -612,9 +620,7 @@ function allocate_customer_previous_due_payment(
                                 amount,
                                 payment_date,
                                 note
-                            )
-                            VALUES
-                            (
+                            ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                                 ?,
                                 ?,
                                 NULL,
@@ -641,7 +647,7 @@ function allocate_customer_previous_due_payment(
                                due_amount=?,
                                status=?
                            WHERE id=?
-                           AND user_id=?";
+                           AND user_id=? {$stock_due_scope}";
 
             $update_stmt = mysqli_prepare($conn, $update_sql);
             mysqli_stmt_bind_param(
@@ -673,13 +679,14 @@ function rollback_customer_previous_due_payment_allocation(
     $customer_id,
     $source_invoice_no
 ) {
+    $stock_due_scope = function_exists('stock_customer_scope') ? stock_customer_scope($conn) : '';
     ensure_customer_opening_due_tables($conn);
 
     $payment_note_prefix = "Invoice Payment - " . $source_invoice_no . " (Previous Due - ";
 
     $sql = "SELECT id, invoice_id, opening_due_id, amount
             FROM customer_payments
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             AND customer_id=?
             AND note LIKE CONCAT(?, '%')
             ORDER BY id DESC";
@@ -704,7 +711,7 @@ function rollback_customer_previous_due_payment_allocation(
             $invoice_sql = "SELECT total_amount, paid_amount, due_amount
                             FROM invoices
                             WHERE id=?
-                            AND user_id=?";
+                            AND user_id=? {$stock_due_scope}";
 
             $invoice_stmt = mysqli_prepare($conn, $invoice_sql);
             mysqli_stmt_bind_param($invoice_stmt, "ii", $invoice_id, $user_id);
@@ -732,7 +739,7 @@ function rollback_customer_previous_due_payment_allocation(
                                    due_amount=?,
                                    payment_status=?
                                WHERE id=?
-                               AND user_id=?";
+                               AND user_id=? {$stock_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $update_sql);
                 mysqli_stmt_bind_param(
@@ -750,7 +757,7 @@ function rollback_customer_previous_due_payment_allocation(
             $opening_sql = "SELECT amount, paid_amount, due_amount
                             FROM customer_opening_dues
                             WHERE id=?
-                            AND user_id=?";
+                            AND user_id=? {$stock_due_scope}";
 
             $opening_stmt = mysqli_prepare($conn, $opening_sql);
             mysqli_stmt_bind_param($opening_stmt, "ii", $opening_due_id, $user_id);
@@ -778,7 +785,7 @@ function rollback_customer_previous_due_payment_allocation(
                                    due_amount=?,
                                    status=?
                                WHERE id=?
-                               AND user_id=?";
+                               AND user_id=? {$stock_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $update_sql);
                 mysqli_stmt_bind_param(
@@ -796,7 +803,7 @@ function rollback_customer_previous_due_payment_allocation(
 
         $delete_sql = "DELETE FROM customer_payments
                        WHERE id=?
-                       AND user_id=?";
+                       AND user_id=? {$stock_due_scope}";
 
         $delete_stmt = mysqli_prepare($conn, $delete_sql);
         mysqli_stmt_bind_param(

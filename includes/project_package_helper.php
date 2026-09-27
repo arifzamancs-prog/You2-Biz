@@ -81,12 +81,14 @@ function project_package_company_type($conn, $user_id)
         return normalize_company_type($row['company_type'] ?? 'Housing');
     }
 
-    return (($row['company_type'] ?? 'Housing') === 'Others') ? 'Others' : 'Housing';
+    return in_array(($row['company_type'] ?? 'Housing'), ['Others', 'Stock Product'], true)
+        ? ($row['company_type'] ?? 'Housing')
+        : 'Housing';
 }
 
 function project_package_labels($conn, $user_id)
 {
-    if(project_package_company_type($conn, $user_id) === 'Others'){
+    if(project_package_company_type($conn, $user_id) !== 'Housing'){
         return [
             'module' => 'Service & Category',
             'project' => 'Service Category',

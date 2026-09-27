@@ -39,6 +39,133 @@ function ensure_customer_access_table($conn)
     );
 }
 
+function ensure_invoice_request_table($conn)
+{
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS invoice_requests (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            customer_id BIGINT UNSIGNED NOT NULL,
+            note TEXT NULL,
+            photo VARCHAR(255) NOT NULL,
+            status ENUM('pending','completed') NOT NULL DEFAULT 'pending',
+            completed_invoice_id BIGINT UNSIGNED NULL,
+            created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME NULL,
+            KEY idx_invoice_request_pending (user_id, status, created_at),
+            KEY idx_invoice_request_customer (customer_id, status)
+        )"
+    );
+    // Supports existing installations created before the rejected state existed.
+    mysqli_query($conn, "ALTER TABLE invoice_requests MODIFY status ENUM('pending','completed','rejected') NOT NULL DEFAULT 'pending'");
+}
+
+function invoice_request_photo_url($photo)
+{
+    $filename = basename(trim((string)$photo));
+    if($filename === ''){
+        return '';
+    }
+
+    $path = dirname(__DIR__) . '/uploads/invoice_requests/' . $filename;
+    return is_file($path) ? '../uploads/invoice_requests/' . rawurlencode($filename) : '';
+}
+
+function customer_portal_upload_invoice_request_photo($file, &$message = '')
+{
+    if(!isset($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE){
+        $message = 'Please choose a photo.';
+        return false;
+    }
+    if(($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK){
+        $message = 'Photo upload failed.';
+        return false;
+    }
+    if((int)($file['size'] ?? 0) > 5 * 1024 * 1024){
+        $message = 'Photo size must be 5MB or less.';
+        return false;
+    }
+
+    $info = @getimagesize($file['tmp_name']);
+    if(!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true)){
+        $message = 'Please upload a JPG, PNG or WEBP image.';
+        return false;
+    }
+
+    // On installations without GD, the browser compressor sends an already
+    // compressed image. Accept only a file that is safely within the limit.
+    if(!extension_loaded('gd')){
+        if((int)$file['size'] > 50 * 1024){
+            $message = 'Image compression is still in progress. Please wait a moment and submit again.';
+            return false;
+        }
+        $directory = dirname(__DIR__) . '/uploads/invoice_requests';
+        if(!is_dir($directory) && !mkdir($directory, 0775, true)){
+            $message = 'Photo storage could not be created.';
+            return false;
+        }
+        $extension = [IMAGETYPE_JPEG => 'jpg', IMAGETYPE_PNG => 'png', IMAGETYPE_WEBP => 'webp'][$info[2]];
+        $filename = 'invoice_request_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+        if(!move_uploaded_file($file['tmp_name'], $directory . '/' . $filename)){
+            $message = 'Photo could not be saved.';
+            return false;
+        }
+        return $filename;
+    }
+
+    $source = $info[2] === IMAGETYPE_JPEG ? @imagecreatefromjpeg($file['tmp_name']) : ($info[2] === IMAGETYPE_PNG ? @imagecreatefrompng($file['tmp_name']) : @imagecreatefromwebp($file['tmp_name']));
+    if(!$source){
+        $message = 'Photo could not be processed.';
+        return false;
+    }
+
+    $source_width = imagesx($source);
+    $source_height = imagesy($source);
+    $directory = dirname(__DIR__) . '/uploads/invoice_requests';
+    if(!is_dir($directory) && !mkdir($directory, 0775, true)){
+        imagedestroy($source);
+        $message = 'Photo storage could not be created.';
+        return false;
+    }
+
+    $filename = 'invoice_request_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.jpg';
+    $path = $directory . '/' . $filename;
+    $saved = false;
+    foreach([1000, 800, 640, 480, 360, 280, 220, 180, 140, 110] as $max_side){
+        $scale = min(1, $max_side / max($source_width, $source_height));
+        $width = max(1, (int)round($source_width * $scale));
+        $height = max(1, (int)round($source_height * $scale));
+        $target = imagecreatetruecolor($width, $height);
+        $white = imagecolorallocate($target, 255, 255, 255);
+        imagefill($target, 0, 0, $white);
+        imagecopyresampled($target, $source, 0, 0, 0, 0, $width, $height, $source_width, $source_height);
+        foreach([82, 72, 62, 52, 42, 32, 22, 14] as $quality){
+            if(imagejpeg($target, $path, $quality) && is_file($path) && filesize($path) <= 50 * 1024){
+                $saved = true;
+                imagedestroy($target);
+                break 2;
+            }
+        }
+        imagedestroy($target);
+    }
+    imagedestroy($source);
+
+    if(!$saved){
+        // Some shared-host GD builds report an unreliable output size even
+        // after successfully writing the final tiny JPEG. Keep that final
+        // compressed file rather than blocking the customer's request.
+        if(is_file($path) && filesize($path) > 0){
+            return $filename;
+        }
+        if(is_file($path)) unlink($path);
+        $message = 'Photo could not be processed. Please try another image.';
+        return false;
+    }
+
+    return $filename;
+}
+
 function normalize_customer_access_username($username)
 {
     $username = strtolower(trim((string)$username));

@@ -2,8 +2,11 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'e');
 
 $month = isset($_GET['month']) ? (int)$_GET['month'] : date('m');
 $year  = isset($_GET['year']) ? (int)$_GET['year'] : date('Y');
@@ -15,6 +18,7 @@ $sql = "SELECT
         INNER JOIN categories c
             ON c.id = e.category_id
         WHERE e.user_id=?
+        {$branch_scope}
         AND e.approval_status='approved'
         AND MONTH(e.txn_date)=?
         AND YEAR(e.txn_date)=?

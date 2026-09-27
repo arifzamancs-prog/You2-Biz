@@ -4,12 +4,15 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
+require_once '../includes/branch_context_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'invoices');
 $show_actions = !is_agent_user();
 $agent_user_id = (int)($_SESSION['login_user_id'] ?? 0);
 
@@ -17,6 +20,7 @@ if(is_agent_user()){
     $sql = "SELECT *
             FROM invoices
             WHERE user_id=?
+            {$branch_scope}
             AND created_by_user_id=?
             ORDER BY id DESC";
 
@@ -26,6 +30,7 @@ if(is_agent_user()){
     $sql = "SELECT *
             FROM invoices
             WHERE user_id=?
+            {$branch_scope}
             ORDER BY id DESC";
 
     $stmt = mysqli_prepare($conn, $sql);

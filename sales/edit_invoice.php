@@ -9,6 +9,7 @@ require_once '../includes/pending_invoice_stock_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_charge_columns($conn);
@@ -20,6 +21,7 @@ $table_system_is_enabled = table_system_enabled($conn, $user_id);
 $invoice_id = isset($_GET['id'])
     ? (int)$_GET['id']
     : 0;
+require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
 
 /* Invoice */
 
@@ -152,6 +154,7 @@ $products = mysqli_query(
     "SELECT
         p.id,
         p.product_name,
+        p.sku,
         p.sale_price,
         p.current_stock,
         c.category_type
@@ -309,7 +312,7 @@ require_once '../includes/sidebar.php';
                         value="<?= $p['id']; ?>"
                         <?= ($p['id']==$item['product_id']) ? 'selected' : ''; ?>>
 
-                        <?= htmlspecialchars($p['product_name']); ?>
+                        <?= htmlspecialchars(product_option_label($p['product_name'], $p['sku'] ?? '')); ?>
 
                         </option>
 

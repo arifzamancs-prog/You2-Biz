@@ -14,8 +14,11 @@ require_once '../includes/input_validation_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_id = selected_branch_id($conn, true);
 ensure_invoice_charge_columns($conn);
 ensure_invoice_posting_columns($conn);
 ensure_fifo_inventory_tables($conn);
@@ -280,6 +283,7 @@ try{
     
     $receive_wallet_id =
     (int)($_POST['receive_wallet_id'] ?? 0);
+    if ($receive_wallet_id > 0) stock_require_wallet($conn, $receive_wallet_id, (int)$user_id, $branch_id);
 
     $due_amount =
         (float)$_POST['due_amount'];
@@ -310,7 +314,7 @@ try{
     $product_ids = $_POST['product_id'] ?? [];
     $qtys        = $_POST['qty'] ?? [];
     $prices      = $_POST['price'] ?? [];
-    $totals      = $_POST['line_total'] ?? [];
+    $totals      = stock_line_totals($product_ids, $qtys, $prices);
     $positive_qty_totals = [];
 
     $subtotal = 0;
@@ -481,6 +485,7 @@ try{
     $sql="INSERT INTO invoices(
 
             user_id,
+            branch_id,
             invoice_no,
             customer_id,
             receive_wallet_id,
@@ -518,6 +523,7 @@ try{
             ?,
             ?,
             ?,
+            ?,
             ?
 
         )";
@@ -531,9 +537,10 @@ try{
 
         $stmt,
 
-        "isiisdsiiddsisss",
+        "iisiisdsiiddsisss",
 
         $user_id,
+        $branch_id,
         $invoice_no,
         $customer_id,
         $receive_wallet_id,
@@ -886,15 +893,14 @@ if($should_post && $paid_amount > 0){
 
     if($customer_id > 0){
         if($current_invoice_cash_payment > 0.01){
-            $sql = "INSERT INTO customer_payments(
+            $sql = "INSERT INTO customer_payments (branch_id,
                         user_id,
                         customer_id,
                         invoice_id,
                         amount,
                         payment_date,
                         note
-                    )
-                    VALUES(
+                    ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
@@ -933,15 +939,14 @@ if($should_post && $paid_amount > 0){
 
         if($outstanding_payable > 0.01){
             $advance_note = "Outstanding Amount - " . $invoice_no;
-            $sql = "INSERT INTO customer_payments(
+            $sql = "INSERT INTO customer_payments (branch_id,
                         user_id,
                         customer_id,
                         invoice_id,
                         amount,
                         payment_date,
                         note
-                    )
-                    VALUES(
+                    ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
@@ -977,7 +982,8 @@ if($should_post && $paid_amount > 0){
         $invoice_id,
         $paid_amount,
         'Sales Invoice - '.$invoice_no,
-        date('Y-m-d')
+        date('Y-m-d'),
+        $branch_id
     );
 
     $sql = "UPDATE wallets

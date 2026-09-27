@@ -2,14 +2,16 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $id = (int)$_GET['id'];
+$branch_scope = branch_scope_sql($conn, 'wallets');
 
 $sql = "UPDATE wallets
         SET status='active'
         WHERE id=?
-        AND user_id=?";
+        AND user_id=? {$branch_scope}";
 
 $stmt = mysqli_prepare($conn,$sql);
 

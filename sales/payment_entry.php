@@ -10,6 +10,7 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
+$stock_due_scope = stock_customer_scope($conn);
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 $customer_id = isset($_GET['customer_id']) ? (int)$_GET['customer_id'] : 0;
@@ -29,7 +30,7 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, SUM(total_amount) AS total_amount
                 FROM invoices
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
                 GROUP BY customer_id
             ) inv
@@ -37,21 +38,21 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS total_amount
                 FROM customer_opening_dues
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 GROUP BY customer_id
             ) open_total
                 ON open_total.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS paid_amount
                 FROM customer_payments
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 GROUP BY customer_id
             ) pay
                 ON pay.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS invoice_count
                 FROM invoices
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND accounting_status='posted'
                 AND due_amount > 0
                 GROUP BY customer_id
@@ -60,7 +61,7 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS due_count
                 FROM customer_opening_dues
-                WHERE user_id=?
+                WHERE user_id=? {$stock_due_scope}
                 AND due_amount > 0
                 GROUP BY customer_id
             ) open_due
@@ -96,7 +97,7 @@ if($mode === 'customer'){
     $sql = "SELECT *
             FROM invoices
             WHERE id=?
-            AND user_id=?
+            AND user_id=? {$stock_due_scope}
             AND accounting_status='posted'
             AND due_amount > 0";
 

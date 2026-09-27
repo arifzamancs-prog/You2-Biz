@@ -13,6 +13,7 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -33,13 +34,26 @@ mysqli_begin_transaction($conn);
 try{
 
     $invoice_id     = (int)$_POST['invoice_id'];
+    require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
     $customer_id    = (int)$_POST['customer_id'];
     $invoice_date   = $_POST['invoice_date'];
 
-    $grand_total    = (float)$_POST['grand_total'];
+    $_POST['line_total'] = stock_line_totals($_POST['product_id'] ?? [], $_POST['qty'] ?? [], $_POST['price'] ?? []);
+    $grand_total = array_sum($_POST['line_total']);
+    foreach (($_POST['charge_id'] ?? []) as $key => $charge_id) {
+        $amount = (float)($_POST['charge_amount'][$key] ?? 0);
+        if (!is_finite($amount) || $amount < 0) throw new Exception('Invalid invoice charge.');
+        if ($amount == 0) continue;
+        $charge_stmt = mysqli_prepare($conn, 'SELECT charge_type FROM invoice_charge_types WHERE id=? AND user_id=?');
+        mysqli_stmt_bind_param($charge_stmt, 'ii', $charge_id, $user_id);
+        mysqli_stmt_execute($charge_stmt);
+        $charge = mysqli_fetch_assoc(mysqli_stmt_get_result($charge_stmt));
+        if (!$charge) throw new Exception('Invoice charge not found.');
+        $grand_total += normalize_charge_type($charge['charge_type']) === 'less' ? -$amount : $amount;
+    }
     $paid_amount    = (float)$_POST['paid_amount'];
 
-    if($paid_amount < 0){
+    if(!is_finite($paid_amount) || $paid_amount < 0){
         throw new Exception("Paid Amount cannot be negative.");
     }
 
@@ -74,10 +88,11 @@ try{
     customer_id,
     paid_amount,
     receive_wallet_id,
-    accounting_status
+    accounting_status,
+    branch_id
 FROM invoices
 WHERE id={$invoice_id}
-AND user_id={$user_id}"
+AND user_id={$user_id} FOR UPDATE"
 );
 
 $invoice_row = mysqli_fetch_assoc($invoice_sql);
@@ -673,7 +688,7 @@ mysqli_stmt_execute($stmt);
 
         if($current_invoice_cash_payment > 0){
 
-        $sql = "INSERT INTO customer_payments(
+        $sql = "INSERT INTO customer_payments (branch_id,
 
                     user_id,
                     customer_id,
@@ -682,9 +697,7 @@ mysqli_stmt_execute($stmt);
                     payment_date,
                     note
 
-                )
-
-                VALUES(
+                ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
 
                     ?,
                     ?,
@@ -746,7 +759,7 @@ mysqli_stmt_execute($stmt);
         $payment_note =
         'Outstanding Amount - '.$invoice_no;
 
-        $sql = "INSERT INTO customer_payments(
+        $sql = "INSERT INTO customer_payments (branch_id,
 
                     user_id,
                     customer_id,
@@ -755,9 +768,7 @@ mysqli_stmt_execute($stmt);
                     payment_date,
                     note
 
-                )
-
-                VALUES(
+                ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
 
                     ?,
                     ?,
@@ -884,7 +895,8 @@ if($paid_amount > 0){
         $invoice_id,
         $paid_amount,
         'Sales Invoice - ' . $invoice_no,
-        $invoice_date
+        $invoice_date,
+        (int)$invoice_row['branch_id']
     );
 
 }

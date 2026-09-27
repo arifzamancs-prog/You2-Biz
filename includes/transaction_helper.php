@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/branch_context_helper.php';
+
 function generate_short_unique_txn_no($conn, $prefix, $source_table = '', $source_column = 'txn_no')
 {
     $prefix = preg_replace('/[^A-Z0-9-]/i', '', (string)$prefix);
@@ -60,8 +62,12 @@ function record_wallet_transaction(
     $reference_id,
     $amount,
     $note,
-    $txn_date
+    $txn_date,
+    $source_branch_id = 0
 ){
+    ensure_branch_accounting_columns($conn, (int)$user_id);
+    $branch_id = (int)$source_branch_id > 0 ? (int)$source_branch_id : (int)($GLOBALS['stock_wallet_branch_id'] ?? selected_branch_id($conn, true));
+    if (!empty($GLOBALS['stock_request_active'])) stock_require_wallet($conn, (int)$wallet_id, (int)$user_id, $branch_id);
     if($transaction_type === 'staff_payment'){
         $transaction_type = 'expense';
     }
@@ -77,6 +83,7 @@ function record_wallet_transaction(
         (
             txn_no,
             user_id,
+            branch_id,
             wallet_id,
             transaction_type,
             reference_id,
@@ -86,7 +93,7 @@ function record_wallet_transaction(
         )
         VALUES
         (
-            ?,?,?,?,?,?,?,?
+            ?,?,?,?,?,?,?,?,?
         )";
 
         $stmt = mysqli_prepare($conn,$sql);
@@ -97,9 +104,10 @@ function record_wallet_transaction(
 
         mysqli_stmt_bind_param(
             $stmt,
-            "siisidss",
+            "siiisidss",
             $txn_no,
             $user_id,
+            $branch_id,
             $wallet_id,
             $transaction_type,
             $reference_id,

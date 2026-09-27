@@ -8,6 +8,7 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+$housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
 
 $purchase_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -61,7 +62,8 @@ $products = mysqli_query(
     $conn,
 
     "SELECT id,
-            product_name
+            product_name,
+            sku
 
      FROM products
 
@@ -134,7 +136,7 @@ value="<?= $purchase_id; ?>">
 
 <div class="col-md-4">
 
-<label>Supplier</label>
+<label><?= supplier_display_text('Supplier'); ?></label>
 
 <select
 name="supplier_id"
@@ -227,7 +229,7 @@ value="<?= $product['id']; ?>"
 ? 'selected'
 : ''; ?>>
 
-<?= htmlspecialchars($product['product_name']); ?>
+<?= htmlspecialchars(product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase)); ?>
 
 </option>
 
@@ -429,7 +431,7 @@ Update Purchase
 
 <?php
 
-$page_script = <<<SCRIPT
+$supplier_display_label = supplier_display_text('Supplier'); $page_script = <<<SCRIPT
 <script>
 
 $(function(){
@@ -524,7 +526,7 @@ function initCustomerSupplierSelect(context){
         $(this).select2({
             theme: "bootstrap4",
             width: "100%",
-            placeholder: "Select Supplier",
+            placeholder: "Select {$supplier_display_label}",
             allowClear: true
         });
     });

@@ -5,7 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
-ensure_product_category_type_column($conn);
+ensure_fifo_only_product_categories($conn, $user_id);
 
 $id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -37,10 +37,6 @@ if(!$category){
 
 }
 
-if(product_category_is_default($category['category_name'])){
-    die('Default categories cannot be edited.');
-}
-
 if(product_category_has_usage($conn, $id, $user_id)){
     die('This category cannot be edited because it has products or transactions.');
 }
@@ -53,11 +49,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $category_name =
     trim($_POST['category_name']);
 
-    $category_type = $_POST['category_type'] ?? 'non_stock';
-
-    if(!in_array($category_type, ['non_stock', 'stock_product'], true)){
-        $category_type = 'non_stock';
-    }
+    $category_type = 'stock_product';
 
     $status =
     $_POST['status'];
@@ -149,17 +141,6 @@ require_once '../includes/sidebar.php';
                     class="form-control"
                     value="<?= htmlspecialchars($category['category_name']); ?>"
                     required>
-
-            </div>
-
-            <div class="form-group">
-
-                <label>Category Type</label>
-
-                <select name="category_type" class="form-control" required>
-                    <option value="non_stock" <?= ($category['category_type'] ?? 'non_stock') === 'non_stock' ? 'selected' : ''; ?>>Non Stock/Service</option>
-                    <option value="stock_product" <?= ($category['category_type'] ?? '') === 'stock_product' ? 'selected' : ''; ?>>Stock</option>
-                </select>
 
             </div>
 

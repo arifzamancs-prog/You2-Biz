@@ -25,7 +25,7 @@ function company_multi_branch_enabled($conn, $company_id)
 function require_company_multi_branch($conn, $company_id)
 {
     if (!company_multi_branch_enabled($conn, $company_id)) {
-        http_response_code(403);
-        exit('Multi Branch is inactive for this company.');
+        header('Location: ' . app_path('dashboard.php'));
+        exit;
     }
 }

@@ -23,7 +23,7 @@ $supplier_name = normalize_person_name($supplier_name);
 $phone = normalize_phone_input($phone);
 $email = normalize_email_input($email);
 
-if(($error_message = validate_person_name($supplier_name, 'Supplier name')) !== ''){
+if(($error_message = validate_person_name($supplier_name, supplier_display_text('Supplier name'))) !== ''){
 
     $_SESSION['error'] = $error_message;
     header("Location:create.php");
@@ -52,8 +52,8 @@ $duplicate_message = '';
 if(
     contact_has_company_user_conflict($conn, 'phone', $phone, $user_id, $duplicate_message) ||
     contact_has_company_user_conflict($conn, 'email', $email, $user_id, $duplicate_message) ||
-    contact_has_duplicate_in_table($conn, 'suppliers', 'Supplier', 'phone', $phone, 0, $duplicate_message, $user_id) ||
-    contact_has_duplicate_in_table($conn, 'suppliers', 'Supplier', 'email', $email, 0, $duplicate_message, $user_id)
+    contact_has_duplicate_in_table($conn, 'suppliers', supplier_display_text('Supplier'), 'phone', $phone, 0, $duplicate_message, $user_id) ||
+    contact_has_duplicate_in_table($conn, 'suppliers', supplier_display_text('Supplier'), 'email', $email, 0, $duplicate_message, $user_id)
 ){
     $_SESSION['error'] = $duplicate_message;
     header("Location:create.php");
@@ -88,7 +88,7 @@ mysqli_stmt_bind_param(
 
 if(mysqli_stmt_execute($stmt)){
 
-    $_SESSION['success'] = "Supplier saved successfully.";
+    $_SESSION['success'] = supplier_display_text("Supplier saved successfully.");
     header("Location:index.php");
     exit;
 

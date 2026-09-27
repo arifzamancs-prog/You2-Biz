@@ -9,6 +9,7 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
+$stock_due_scope = stock_customer_scope($conn);
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 $show_actions = !is_agent_user();
@@ -17,7 +18,7 @@ $agent_customer_scope_join = is_agent_user()
     ? " INNER JOIN (
             SELECT DISTINCT customer_id
             FROM invoices
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             AND created_by_user_id=?
             AND customer_id > 0
         ) agent_customer
@@ -46,7 +47,7 @@ $sql = "SELECT
                 COUNT(id) AS invoice_count,
                 SUM(total_amount) AS total_amount
             FROM invoices
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             AND accounting_status='posted'
             AND customer_id > 0
             GROUP BY customer_id
@@ -58,7 +59,7 @@ $sql = "SELECT
                 COUNT(id) AS due_count,
                 SUM(amount) AS total_amount
             FROM customer_opening_dues
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             GROUP BY customer_id
         ) open_due
             ON open_due.customer_id = c.id
@@ -67,7 +68,7 @@ $sql = "SELECT
                 customer_id,
                 SUM(amount) AS total_paid
             FROM customer_payments
-            WHERE user_id=?
+            WHERE user_id=? {$stock_due_scope}
             GROUP BY customer_id
         ) pay
             ON pay.customer_id = c.id
@@ -111,7 +112,7 @@ $sql = "SELECT
             paid_amount,
             due_amount
         FROM invoices
-        WHERE user_id=?
+        WHERE user_id=? {$stock_due_scope}
         AND accounting_status='posted'
         AND customer_id = 0
         AND due_amount > 0

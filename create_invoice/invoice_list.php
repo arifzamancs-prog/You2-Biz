@@ -3,10 +3,15 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/branch_context_helper.php';
+require_once '../includes/customer_portal_helper.php';
 require_sales_access();
 
 $user_id = (int)$_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'bi');
 ensure_booking_invoice_table($conn);
+ensure_invoice_request_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
 $project_package_labels = project_package_labels($conn, $user_id);
 
@@ -23,9 +28,15 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'confir
 
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete'){
     $invoice_id = (int)($_POST['invoice_id'] ?? 0);
-    $delete_stmt = mysqli_prepare($conn, "DELETE FROM booking_invoices WHERE id=? AND user_id=? AND status='pending'");
+    $delete_branch_scope = branch_scope_sql($conn, 'booking_invoices');
+    $delete_stmt = mysqli_prepare($conn, "DELETE FROM booking_invoices WHERE id=? AND user_id=? {$delete_branch_scope} AND status='pending'");
     mysqli_stmt_bind_param($delete_stmt, 'ii', $invoice_id, $user_id);
     mysqli_stmt_execute($delete_stmt);
+    if(mysqli_stmt_affected_rows($delete_stmt) > 0){
+        $request_stmt = mysqli_prepare($conn, "UPDATE invoice_requests SET status='rejected', completed_invoice_id=NULL, completed_at=NULL WHERE completed_invoice_id=? AND user_id=? AND status='completed'");
+        mysqli_stmt_bind_param($request_stmt, 'ii', $invoice_id, $user_id);
+        mysqli_stmt_execute($request_stmt);
+    }
     header('Location: invoice_list.php?deleted=1');
     exit;
 }
@@ -38,12 +49,12 @@ if(!array_key_exists($selected_type, $invoice_types)) $selected_type = '';
 if(!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_from)) $date_from = '';
 if(!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_to)) $date_to = '';
 
-$where = "bi.user_id={$user_id}";
+$where = "bi.user_id={$user_id}{$branch_scope}";
 if($selected_type !== '') $where .= " AND bi.invoice_type='" . mysqli_real_escape_string($conn, $selected_type) . "'";
 if($date_from !== '') $where .= " AND bi.invoice_date >= '" . mysqli_real_escape_string($conn, $date_from) . "'";
 if($date_to !== '') $where .= " AND bi.invoice_date <= '" . mysqli_real_escape_string($conn, $date_to) . "'";
 
-$invoice_result = mysqli_query($conn, "SELECT bi.id, bi.invoice_no, bi.invoice_type, bi.invoice_date, bi.amount, bi.status, bi.customer_id, bi.project_id, bi.package_id, c.customer_name, p.project_name, pk.package_name FROM booking_invoices bi LEFT JOIN customers c ON c.id = bi.customer_id AND c.user_id = bi.user_id LEFT JOIN projects p ON p.id = bi.project_id AND p.user_id = bi.user_id LEFT JOIN packages pk ON pk.id = bi.package_id AND pk.user_id = bi.user_id WHERE {$where} ORDER BY bi.invoice_date DESC, bi.id DESC");
+$invoice_result = mysqli_query($conn, "SELECT bi.id, bi.invoice_no, bi.invoice_type, bi.invoice_date, bi.amount, bi.status, bi.customer_id, bi.project_id, bi.package_id, c.customer_name, c.customer_code, p.project_name, pk.package_name FROM booking_invoices bi LEFT JOIN customers c ON c.id = bi.customer_id AND c.user_id = bi.user_id LEFT JOIN projects p ON p.id = bi.project_id AND p.user_id = bi.user_id LEFT JOIN packages pk ON pk.id = bi.package_id AND pk.user_id = bi.user_id WHERE {$where} ORDER BY bi.invoice_date DESC, bi.id DESC");
 $invoices = [];
 $transaction_count = 0;
 $transaction_total = 0;
@@ -71,7 +82,7 @@ require_once '../includes/sidebar.php';
             <div class="col-md-2 form-group d-flex align-items-end"><button class="btn btn-primary mr-2" type="submit">Search</button><a href="invoice_list.php" class="btn btn-secondary">Reset</a></div>
         </div></form>
         <table id="example1" class="table table-bordered table-striped"><thead><tr><th>Invoice No</th><th>Type</th><th>Date</th><th>Customer</th><th><?= htmlspecialchars($project_package_labels['project']); ?></th><th><?= htmlspecialchars($project_package_labels['package']); ?></th><th>Amount</th><th>Status</th><th width="190">Action</th></tr></thead><tbody>
-            <?php foreach($invoices as $invoice){ $pending = ($invoice['status'] ?? 'pending') === 'pending'; ?><tr><td><?= htmlspecialchars($invoice['invoice_no']); ?></td><td><?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td><td><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td><td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?></td><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td><td>BDT <?= number_format((float)$invoice['amount'], 2); ?></td><td><span class="badge badge-<?= $pending ? 'warning' : 'success'; ?>"><?= $pending ? 'Pending' : 'Confirmed'; ?></span></td><td><?php if($pending){ ?><form method="post" class="d-inline invoice-confirm-form" onsubmit="return confirm('Confirm this invoice and update the wallet?');"><input type="hidden" name="action" value="confirm"><input type="hidden" name="invoice_id" value="<?= (int)$invoice['id']; ?>"><button class="btn btn-success btn-sm" title="Confirm" aria-label="Confirm"><i class="fas fa-check"></i></button></form><?php } ?><a href="edit_invoice.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-warning btn-sm" title="Edit Invoice" aria-label="Edit Invoice"><i class="fas fa-edit"></i></a><a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" title="Print" target="_blank" rel="noopener"><i class="fas fa-print"></i></a><form method="post" action="delete_invoice.php" class="d-inline" onsubmit="return confirm('Delete this invoice? Its wallet effect will be reversed.');"><input type="hidden" name="invoice_id" value="<?= (int)$invoice['id']; ?>"><button class="btn btn-danger btn-sm" title="Delete Invoice" aria-label="Delete Invoice"><i class="fas fa-trash"></i></button></form></td></tr><?php } ?>
+            <?php foreach($invoices as $invoice){ $pending = ($invoice['status'] ?? 'pending') === 'pending'; ?><tr><td><?= htmlspecialchars($invoice['invoice_no']); ?></td><td><?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td><td><?= htmlspecialchars($invoice['customer_name'] ? $invoice['customer_name'] . ' [ID: ' . ($invoice['customer_code'] ?: '-') . ']' : ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td><td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?></td><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td><td>BDT <?= number_format((float)$invoice['amount'], 2); ?></td><td><span class="badge badge-<?= $pending ? 'warning' : 'success'; ?>"><?= $pending ? 'Pending' : 'Confirmed'; ?></span></td><td><?php if($pending){ ?><form method="post" class="d-inline invoice-confirm-form" onsubmit="return confirm('Confirm this invoice and update the wallet?');"><input type="hidden" name="action" value="confirm"><input type="hidden" name="invoice_id" value="<?= (int)$invoice['id']; ?>"><button class="btn btn-success btn-sm" title="Confirm" aria-label="Confirm"><i class="fas fa-check"></i></button></form><?php } ?><a href="edit_invoice.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-warning btn-sm" title="Edit Invoice" aria-label="Edit Invoice"><i class="fas fa-edit"></i></a><a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" title="Print" target="_blank" rel="noopener"><i class="fas fa-print"></i></a><form method="post" action="delete_invoice.php" class="d-inline" onsubmit="return confirm('Delete this invoice? Its wallet effect will be reversed.');"><input type="hidden" name="invoice_id" value="<?= (int)$invoice['id']; ?>"><button class="btn btn-danger btn-sm" title="Delete Invoice" aria-label="Delete Invoice"><i class="fas fa-trash"></i></button></form></td></tr><?php } ?>
         </tbody></table>
     </div>
 </div>

@@ -2,9 +2,12 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_branch_accounting_columns($conn, $user_id);
+$branch_scope = branch_scope_sql($conn, 'e');
 ensure_expense_support_tables($conn, $user_id);
 
 $sql = "SELECT
@@ -23,7 +26,7 @@ $sql = "SELECT
         LEFT JOIN staff s
         ON s.id = e.staff_id
         AND s.user_id = e.user_id
-        WHERE e.user_id=?
+        WHERE e.user_id=? {$branch_scope}
         ORDER BY e.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);

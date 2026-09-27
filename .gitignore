@@ -1,0 +1,5 @@
+# Runtime-generated company backups and user-uploaded files must not be committed.
+backup_data/*.json
+uploads/brands/
+uploads/customer_form/
+uploads/invoice_requests/

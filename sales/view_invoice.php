@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/branch_context_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -13,6 +14,7 @@ ensure_invoice_posting_columns($conn);
 $invoice_id = isset($_GET['id'])
     ? (int)$_GET['id']
     : 0;
+require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
 
 /* Invoice */
 

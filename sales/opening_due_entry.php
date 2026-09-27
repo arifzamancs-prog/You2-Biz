@@ -32,7 +32,7 @@ $recent_entries = mysqli_query(
      INNER JOIN customers c
         ON c.id = od.customer_id
         AND c.user_id = od.user_id
-     WHERE od.user_id={$user_id}
+     WHERE od.user_id={$user_id}" . stock_customer_scope($conn, 'od') . "
      ORDER BY od.id DESC
      LIMIT 50"
 );

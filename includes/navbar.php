@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/lead_management_helper.php';
+require_once __DIR__ . '/branch_context_helper.php';
 
 $avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $has_active_subscription = false;
@@ -35,6 +36,23 @@ if (is_manager_user()) {
 
 $navbar_staff_id = isset($conn) ? current_manager_staff_id($conn) : current_manager_staff_id();
 $followup_notifications = [];
+$navbar_branches = [];
+$navbar_selected_branch = 0;
+
+if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
+    $navbar_company_id = (int)($_SESSION['user_id'] ?? 0);
+    ensure_branch_accounting_columns($conn, $navbar_company_id);
+    $navbar_selected_branch = selected_branch_id($conn, false);
+    $navbar_can_switch_branches = is_admin_user()
+        || (is_manager_user() && manager_can_view_all_branches($conn, $navbar_company_id));
+    if($navbar_can_switch_branches && company_multi_branch_enabled($conn, $navbar_company_id)){
+        $branch_stmt = mysqli_prepare($conn, "SELECT id,branch_name FROM branches WHERE user_id=? AND status='active' ORDER BY CASE WHEN is_head_office=1 THEN 0 WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 1 ELSE 2 END, branch_name ASC");
+        mysqli_stmt_bind_param($branch_stmt, 'i', $navbar_company_id);
+        mysqli_stmt_execute($branch_stmt);
+        $branch_result = mysqli_stmt_get_result($branch_stmt);
+        while($branch_result && ($branch = mysqli_fetch_assoc($branch_result))) $navbar_branches[] = $branch;
+    }
+}
 
 if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
     ensure_lead_management_table($conn);
@@ -117,6 +135,22 @@ if (
     </ul>
 
     <ul class="navbar-nav ml-auto">
+
+        <?php if($navbar_branches){ ?>
+        <li class="nav-item d-flex align-items-center mr-2">
+            <form method="post" action="<?= htmlspecialchars(app_path('branch_context.php')); ?>" class="form-inline">
+                <input type="hidden" name="return_to" value="<?= htmlspecialchars($_SERVER['REQUEST_URI'] ?? app_path('dashboard.php')); ?>">
+                <select name="branch_id" class="form-control form-control-sm" onchange="this.form.submit()" title="View branch">
+                    <option value="0" <?= $navbar_selected_branch === 0 ? 'selected' : ''; ?>>All Branches</option>
+                    <?php foreach($navbar_branches as $branch){ ?>
+                        <option value="<?= (int)$branch['id']; ?>" <?= $navbar_selected_branch === (int)$branch['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($branch['branch_name']); ?></option>
+                    <?php } ?>
+                </select>
+            </form>
+        </li>
+        <?php }elseif(is_manager_user() && isset($conn)){ ?>
+        <li class="nav-item d-flex align-items-center mr-3"><span class="badge badge-primary p-2"><i class="fas fa-code-branch mr-1"></i><?= htmlspecialchars(current_branch_label($conn)); ?></span></li>
+        <?php } ?>
 
         <li class="nav-item dropdown">
             <a class="nav-link position-relative" data-toggle="dropdown" href="#" title="Notifications" aria-label="Notifications">

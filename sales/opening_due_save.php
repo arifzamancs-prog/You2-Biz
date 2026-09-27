@@ -30,7 +30,7 @@ try{
         throw new Exception("Please select a customer.");
     }
 
-    if($amount <= 0){
+    if(!is_finite($amount) || $amount <= 0){
         throw new Exception("Due Amount must be greater than zero.");
     }
 
@@ -56,6 +56,7 @@ try{
 
     $sql = "INSERT INTO customer_opening_dues
             (
+                branch_id,
                 user_id,
                 customer_id,
                 due_no,
@@ -68,6 +69,7 @@ try{
             )
             VALUES
             (
+                " . (int)stock_customer_branch($conn) . ",
                 ?,
                 ?,
                 ?,
