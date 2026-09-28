@@ -370,6 +370,9 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ? 'Branch Dashboard'
                     : 'Dashboard';
                 sidebar_item(app_path('dashboard.php'), $dashboard_menu_label, 'fas fa-home');
+                if(is_manager_user()){
+                    sidebar_item(app_path('staff/leave_application.php'), 'Leave Application', 'fas fa-file-medical');
+                }
                 ?>
 
                 <?php

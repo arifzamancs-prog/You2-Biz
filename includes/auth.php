@@ -377,7 +377,7 @@ function block_manager_restricted_actions()
     if (is_manager_user()) {
         $permissions = $_SESSION['access_permissions'] ?? [];
         if(!empty($_SESSION['permissions_configured'])){
-            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'help/video_tutorial.php', 'logout.php'];
+            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'staff/leave_application.php', 'help/video_tutorial.php', 'logout.php'];
             $permission_paths = [
                 'staff' => ['staff/'],
                 'sales' => ['create_invoice/'],
@@ -439,6 +439,7 @@ function block_manager_restricted_actions()
             'profile/index.php',
             'profile/change_password.php',
             'staff/profile.php',
+            'staff/leave_application.php',
             'logout.php',
         ];
 

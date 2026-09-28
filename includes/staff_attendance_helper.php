@@ -94,6 +94,31 @@ function ensure_staff_attendance_tables($conn)
     if (!$auto_absent_column || mysqli_num_rows($auto_absent_column) === 0) {
         mysqli_query($conn, "ALTER TABLE staff_attendance_logs ADD COLUMN is_auto_absent TINYINT(1) NOT NULL DEFAULT 0 AFTER attendance_status");
     }
+    $login_device_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_logs LIKE 'login_device'");
+    if ($login_device_column && ($login_device_info = mysqli_fetch_assoc($login_device_column))
+        && stripos($login_device_info['Type'], "'leave_application'") === false) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_logs MODIFY login_device ENUM('desktop','mobile','leave_application') NOT NULL DEFAULT 'desktop'");
+    }
+
+    mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_leave_applications (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT UNSIGNED NOT NULL,
+        staff_id BIGINT UNSIGNED NOT NULL,
+        login_user_id BIGINT UNSIGNED NOT NULL,
+        application_date DATE NOT NULL,
+        leave_type ENUM('late','absent','casual_leave','medical_leave') NOT NULL,
+        photo_path VARCHAR(255) NULL,
+        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+        reviewed_by BIGINT UNSIGNED NULL,
+        reviewed_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_leave_user_status (user_id, status),
+        INDEX idx_leave_staff_date (staff_id, application_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // Mark existing approved leave records as non-login attendance too, so their
+    // time is consistently displayed as Not Applicable.
+    mysqli_query($conn, "UPDATE staff_attendance_logs a INNER JOIN staff_leave_applications la ON la.user_id=a.user_id AND la.staff_id=a.staff_id AND la.application_date=a.attendance_date AND la.status='approved' SET a.login_ip='', a.login_device='leave_application'");
 
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS staff_monthly_salaries (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
