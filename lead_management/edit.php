@@ -50,7 +50,6 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if($duplicate_phone_lead){
             $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$duplicate_phone_lead['id']) . '.';
         }else{
-            $note = $note ?: 'General';
             $update_stmt = mysqli_prepare(
                 $conn,
                 "UPDATE leads

@@ -37,6 +37,10 @@ function ensure_booking_invoice_table($conn)
             customer_id BIGINT UNSIGNED NOT NULL,
             project_id BIGINT UNSIGNED NOT NULL,
             package_id BIGINT UNSIGNED NOT NULL,
+            block_name VARCHAR(100) NULL,
+            road_no VARCHAR(100) NULL,
+            plot_no VARCHAR(100) NULL,
+            file_no VARCHAR(100) NULL,
             wallet_id BIGINT UNSIGNED NOT NULL,
             invoice_type VARCHAR(100) NOT NULL DEFAULT 'booking',
             invoice_date DATE NOT NULL,
@@ -91,6 +95,32 @@ function ensure_booking_invoice_table($conn)
         mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN total_price DECIMAL(12,2) NULL AFTER amount");
     }
 
+    foreach([
+        'block_name' => 'VARCHAR(100) NULL AFTER package_id',
+        'road_no' => 'VARCHAR(100) NULL AFTER block_name',
+        'plot_no' => 'VARCHAR(100) NULL AFTER road_no',
+        'file_no' => 'VARCHAR(100) NULL AFTER plot_no',
+    ] as $field => $definition){
+        $field_column = mysqli_query($conn, "SHOW COLUMNS FROM booking_invoices LIKE '" . mysqli_real_escape_string($conn, $field) . "'");
+        if(!$field_column || mysqli_num_rows($field_column) === 0){
+            mysqli_query($conn, "ALTER TABLE booking_invoices ADD COLUMN {$field} {$definition}");
+        }
+    }
+
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS booking_property_options (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            field_key ENUM('block_name','road_no','plot_no','file_no') NOT NULL,
+            option_value VARCHAR(100) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_booking_property_option (user_id, field_key, option_value),
+            INDEX idx_booking_property_option_user_field (user_id, field_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
+    mysqli_query($conn, "ALTER TABLE booking_property_options MODIFY field_key ENUM('block_name','road_no','plot_no','file_no') NOT NULL");
+
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS booking_invoice_charges (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         booking_invoice_id BIGINT UNSIGNED NOT NULL,
@@ -103,6 +133,35 @@ function ensure_booking_invoice_table($conn)
         INDEX idx_booking_invoice_charge (booking_invoice_id),
         INDEX idx_booking_charge_type (charge_type_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+function booking_invoice_property_options($conn, $user_id)
+{
+    $options = ['block_name' => [], 'road_no' => [], 'plot_no' => [], 'file_no' => []];
+    $stmt = mysqli_prepare($conn, "SELECT field_key, option_value FROM booking_property_options WHERE user_id=? ORDER BY option_value ASC");
+    if(!$stmt){ return $options; }
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    while($result && $row = mysqli_fetch_assoc($result)){
+        $field = (string)$row['field_key'];
+        if(isset($options[$field])) $options[$field][] = (string)$row['option_value'];
+    }
+    mysqli_stmt_close($stmt);
+    return $options;
+}
+
+function booking_invoice_store_property_options($conn, $user_id, $values)
+{
+    $stmt = mysqli_prepare($conn, "INSERT IGNORE INTO booking_property_options (user_id, field_key, option_value) VALUES (?, ?, ?)");
+    if(!$stmt){ return; }
+    foreach(['block_name', 'road_no', 'plot_no', 'file_no'] as $field){
+        $value = trim((string)($values[$field] ?? ''));
+        if($value === '') continue;
+        mysqli_stmt_bind_param($stmt, 'iss', $user_id, $field, $value);
+        mysqli_stmt_execute($stmt);
+    }
+    mysqli_stmt_close($stmt);
 }
 
 function booking_invoice_active_charges($conn, $user_id)

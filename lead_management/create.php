@@ -15,6 +15,9 @@ mysqli_stmt_bind_param($creator_stmt, 'i', $creator_user_id);
 mysqli_stmt_execute($creator_stmt);
 $creator = mysqli_fetch_assoc(mysqli_stmt_get_result($creator_stmt));
 $creator_name = trim((string)($creator['name'] ?? ''));
+$reference_options = lead_reference_options($conn, $user_id, $creator_user_id, $creator_name);
+$reference_user_id = (int)($_POST['reference_user_id'] ?? $creator_user_id);
+$reference_name = trim((string)($reference_options[$reference_user_id]['name'] ?? ''));
 $message = '';
 $today = date('Y-m-d');
 $name = trim($_POST['name'] ?? '');
@@ -24,8 +27,8 @@ $note = trim($_POST['note'] ?? '');
 $followup_date = trim($_POST['followup_date'] ?? '');
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    if($name === '' || $phone === '' || $followup_date === ''){
-        $message = 'Name, Phone and Followup Date are required.';
+    if($name === '' || $phone === '' || $followup_date === '' || $reference_name === ''){
+        $message = 'Name, Ref., Phone and Followup Date are required.';
     } elseif($followup_date < $today){
         $message = 'Followup Date cannot be earlier than today.';
     } else {
@@ -38,17 +41,16 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if($existing_lead){
             $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$existing_lead['id']) . '.';
         }else{
-            $note = $note ?: 'General';
             $date_value = $followup_date;
 
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO leads
-                 (user_id, name, phone, email, note, followup_date, status, created_by_user_id, created_by_name)
+                 (user_id, name, phone, email, note, followup_date, status, created_by_user_id, created_by_name, reference_user_id, reference_name)
                  VALUES
-                 (?, ?, ?, ?, ?, ?, 'lead', ?, ?)"
+                 (?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?, ?)"
             );
-            mysqli_stmt_bind_param($stmt, 'isssssis', $user_id, $name, $phone, $email, $note, $date_value, $creator_user_id, $creator_name);
+            mysqli_stmt_bind_param($stmt, 'isssssisis', $user_id, $name, $phone, $email, $note, $date_value, $creator_user_id, $creator_name, $reference_user_id, $reference_name);
 
             if(mysqli_stmt_execute($stmt)){
                 header('Location: index.php?filter=lead');
@@ -81,6 +83,18 @@ require_once '../includes/sidebar.php';
             <div class="form-group">
                 <label>Name</label>
                 <input type="text" name="name" class="form-control" value="<?= htmlspecialchars($name); ?>" required>
+            </div>
+
+            <div class="form-group">
+                <label>Ref.</label>
+                <select name="reference_user_id" class="form-control" required>
+                    <option value="">Select Ref.</option>
+                    <?php foreach($reference_options as $option){ ?>
+                        <option value="<?= (int)$option['login_user_id']; ?>" <?= $reference_user_id === (int)$option['login_user_id'] ? 'selected' : ''; ?>>
+                            <?= htmlspecialchars($option['name'] . (!empty($option['designation']) ? ' (' . $option['designation'] . ')' : '')); ?>
+                        </option>
+                    <?php } ?>
+                </select>
             </div>
 
             <div class="form-group">

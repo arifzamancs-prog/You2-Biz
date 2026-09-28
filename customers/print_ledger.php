@@ -6,11 +6,20 @@ require_once '../includes/printing_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/project_package_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 ensure_booking_invoice_table($conn);
+ensure_booking_invoice_type_table($conn, $user_id);
+
+$invoice_types = booking_invoice_types($conn, $user_id);
+$project_package_labels = project_package_labels($conn, $user_id);
+$is_housing_company = project_package_company_type($conn, $user_id) === 'Housing';
+$package_label = $project_package_labels['package'] ?? 'Package';
+$package_details_label = $package_label === 'Service' ? 'Service Details' : 'Package Details';
+$package_count_label = $package_label === 'Service' ? 'Total Service' : 'Total Package';
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -221,25 +230,43 @@ while($row=mysqli_fetch_assoc($result)){
 /* Confirmed Invoice Wallet Transactions */
 
 $wallet_transaction_sql = "SELECT
-        t.id,
+        COALESCE(t.id, bi.id) AS ledger_reference_id,
+        t.id AS transaction_id,
         t.txn_no,
-        t.txn_date,
+        COALESCE(t.txn_date, bi.invoice_date) AS ledger_date,
         t.transaction_type,
-        t.amount,
+        COALESCE(t.amount, bi.amount) AS ledger_amount,
+        t.note,
         bi.invoice_no,
+        bi.invoice_type,
+        bi.notes AS invoice_note,
+        bi.invoice_date,
+        bi.file_no,
+        bi.block_name,
+        bi.road_no,
+        bi.plot_no,
+        COALESCE(NULLIF(bi.total_price, 0), pk.price, bi.amount) AS package_price,
+        p.project_name,
+        pk.package_name,
         w.wallet_name
     FROM transactions t
-    INNER JOIN booking_invoices bi
+    RIGHT JOIN booking_invoices bi
         ON bi.id=t.reference_id
         AND bi.user_id=t.user_id
+        AND t.transaction_type IN ('invoice_income', 'invoice_expense')
+    LEFT JOIN projects p
+        ON p.id=bi.project_id
+        AND p.user_id=bi.user_id
+    LEFT JOIN packages pk
+        ON pk.id=bi.package_id
+        AND pk.user_id=bi.user_id
     LEFT JOIN wallets w
         ON w.id=t.wallet_id
         AND w.user_id=t.user_id
     WHERE bi.customer_id=?
     AND bi.user_id=?
     AND bi.status='confirmed'
-    AND t.transaction_type IN ('invoice_income', 'invoice_expense')
-    ORDER BY t.txn_date, t.id";
+    ORDER BY COALESCE(t.txn_date, bi.invoice_date), COALESCE(t.id, bi.id)";
 
 $wallet_transaction_stmt = mysqli_prepare($conn, $wallet_transaction_sql);
 mysqli_stmt_bind_param($wallet_transaction_stmt, 'ii', $customer_id, $user_id);
@@ -247,18 +274,34 @@ mysqli_stmt_execute($wallet_transaction_stmt);
 $wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
 
 while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
-    $is_refund = $row['transaction_type'] === 'invoice_expense';
+    $invoice_type_key = normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types);
+    $transaction_type = trim((string)($row['transaction_type'] ?? ''));
+    $is_refund = $transaction_type !== ''
+        ? $transaction_type === 'invoice_expense'
+        : booking_invoice_behavior($conn, $user_id, $invoice_type_key) === 'expense';
 
     $ledger[] = [
-        'trx_date' => $row['txn_date'],
+        'trx_date' => $row['ledger_date'],
         'type' => $is_refund ? 'Wallet Refund' : 'Wallet Received',
         'reference' => trim((string)$row['invoice_no']),
         'invoice_no' => trim((string)$row['invoice_no']),
         'wallet_name' => (string)($row['wallet_name'] ?? ''),
+        'payment_type' => booking_invoice_type_label($row['invoice_type'] ?? '', $invoice_types),
+        'invoice_type_key' => $invoice_type_key,
+        'note' => trim((string)($row['invoice_note'] ?? '')),
+        'project_details' => trim((string)($row['project_name'] ?? '') . (($row['project_name'] ?? '') !== '' && ($row['package_name'] ?? '') !== '' ? ' - ' : '') . (string)($row['package_name'] ?? '')),
+        'booking_date' => $row['invoice_date'],
+        'file_no' => trim((string)($row['file_no'] ?? '')),
+        'plot_details' => trim(implode(', ', array_filter([
+            trim((string)($row['block_name'] ?? '')) !== '' ? 'Block: ' . trim((string)$row['block_name']) : '',
+            trim((string)($row['road_no'] ?? '')) !== '' ? 'Road No: ' . trim((string)$row['road_no']) : '',
+            trim((string)($row['plot_no'] ?? '')) !== '' ? 'Plot No: ' . trim((string)$row['plot_no']) : '',
+        ]))),
+        'total_amount' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
         'sort_order' => $is_refund ? 3 : 2,
-        'reference_id' => (int)$row['id'],
-        'debit' => $is_refund ? (float)$row['amount'] : 0,
-        'credit' => $is_refund ? 0 : (float)$row['amount'],
+        'reference_id' => (int)$row['ledger_reference_id'],
+        'debit' => $is_refund ? (float)$row['ledger_amount'] : 0,
+        'credit' => $is_refund ? 0 : (float)$row['ledger_amount'],
     ];
 }
 
@@ -361,13 +404,72 @@ usort($ledger,function($a,$b){
 
 });
 
-$total_paid  = 0;
+/* Group housing transactions by File No. so each purchased plot prints as
+   one complete statement, with its booking, installments and returns. */
+$ledger_groups = [];
 
-foreach($ledger as $entry){
+foreach($ledger as $row){
+    $project_details = trim((string)($row['project_details'] ?? ''));
+    $file_no = trim((string)($row['file_no'] ?? ''));
+    $total_amount = (float)($row['total_amount'] ?? 0);
 
-    $total_paid  += $entry['credit'];
+    if($project_details === '' && $total_amount <= 0){
+        continue;
+    }
 
+    $group_key = ($is_housing_company && $file_no !== '')
+        ? 'file-' . md5($file_no)
+        : 'invoice-' . md5(trim((string)($row['invoice_no'] ?? '')) . '|' . $project_details);
+
+    if(!isset($ledger_groups[$group_key])){
+        $ledger_groups[$group_key] = [
+            'file_no' => $file_no,
+            'project_details' => $project_details !== '' ? $project_details : '-',
+            'plot_details' => trim((string)($row['plot_details'] ?? '')),
+            'booking_date' => trim((string)($row['booking_date'] ?? '')),
+            'total_amount' => 0,
+            'total_paid' => 0,
+            'latest_time' => strtotime((string)$row['trx_date']) ?: 0,
+            'rows' => [],
+        ];
+    }
+
+    $ledger_groups[$group_key]['total_amount'] += $total_amount;
+    $ledger_groups[$group_key]['total_paid'] += (float)$row['credit'] - (float)$row['debit'];
+    $ledger_groups[$group_key]['latest_time'] = max($ledger_groups[$group_key]['latest_time'], strtotime((string)$row['trx_date']) ?: 0);
+
+    if($ledger_groups[$group_key]['plot_details'] === '' && trim((string)($row['plot_details'] ?? '')) !== ''){
+        $ledger_groups[$group_key]['plot_details'] = trim((string)$row['plot_details']);
+    }
+    if($ledger_groups[$group_key]['booking_date'] === '' && trim((string)($row['booking_date'] ?? '')) !== ''){
+        $ledger_groups[$group_key]['booking_date'] = trim((string)$row['booking_date']);
+    }
+    $ledger_groups[$group_key]['rows'][] = $row;
 }
+
+foreach($ledger_groups as &$group){
+    $running_paid = 0;
+    foreach($group['rows'] as &$row){
+        $running_paid += (float)$row['credit'] - (float)$row['debit'];
+        $row['due'] = max(0, (float)$group['total_amount'] - $running_paid);
+    }
+    unset($row);
+    $group['total_due'] = max(0, (float)$group['total_amount'] - (float)$group['total_paid']);
+}
+unset($group);
+
+uasort($ledger_groups, function($a, $b){
+    return (int)$b['latest_time'] <=> (int)$a['latest_time'];
+});
+
+$total_paid = 0;
+$total_amount = 0;
+foreach($ledger_groups as $group){
+    $total_paid += (float)$group['total_paid'];
+    $total_amount += (float)$group['total_amount'];
+}
+$total_due = max(0, $total_amount - $total_paid);
+$purchased_package_count = count($ledger_groups);
 
 $custom_printing = is_custom_printing($conn);
 $custom_size = current_printing_custom_size($conn);
@@ -652,7 +754,7 @@ body{
 .customer-summary{
     display:grid;
     gap:12px;
-    grid-template-columns:2fr 1fr;
+    grid-template-columns:3fr 2fr;
     margin:18px 0;
 }
 
@@ -674,6 +776,11 @@ body{
 
 .customer-item + .customer-item{
     border-left:1px solid #dbe5f1;
+}
+
+.customer-item:nth-child(3),
+.customer-item:nth-child(4){
+    border-top:1px solid #dbe5f1;
 }
 
 .meta-label{
@@ -702,6 +809,55 @@ body{
 .total-card .meta-value{
     color:#1463c3;
     font-size:20px;
+}
+
+.totals-grid{
+    display:grid;
+    gap:8px;
+    grid-template-columns:repeat(2, 1fr);
+}
+
+.totals-grid .total-card{ min-height:64px; }
+
+.file-statement{
+    border:1px solid #dbe5f1;
+    border-radius:7px;
+    margin-top:18px;
+    overflow:hidden;
+}
+
+.file-heading{
+    align-items:center;
+    background:#f0f7ff;
+    border-bottom:1px solid #bdd7f5;
+    color:#102a43;
+    display:flex;
+    font-size:14px;
+    font-weight:700;
+    justify-content:space-between;
+    padding:10px 13px;
+}
+
+.file-details{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+}
+
+.file-detail{
+    border-bottom:1px solid #e2e8f0;
+    padding:8px 13px;
+}
+
+.file-detail:nth-child(odd){ border-right:1px solid #e2e8f0; }
+.file-detail .meta-value{ font-size:12px; }
+
+.file-statement .ledger-table th,
+.file-statement .ledger-table td{ padding:7px 9px; }
+
+.file-total-row td{
+    background:#f8fafc;
+    border-top:1px solid #dbe5f1;
+    font-weight:700;
 }
 
 .table-title{
@@ -838,83 +994,79 @@ h3{
 <section class="customer-summary">
     <div class="customer-card">
         <div class="customer-item">
-            <span class="meta-label">Customer</span>
+            <span class="meta-label">Customer ID</span>
+            <span class="meta-value"><?php echo htmlspecialchars((string)($customer['customer_code'] ?? $customer['id'])); ?></span>
+        </div>
+        <div class="customer-item">
+            <span class="meta-label">Customer Name</span>
             <span class="meta-value"><?php echo htmlspecialchars($customer['customer_name']); ?></span>
         </div>
         <div class="customer-item">
             <span class="meta-label">Phone</span>
             <span class="meta-value"><?php echo htmlspecialchars($customer['phone']); ?></span>
         </div>
+        <div class="customer-item">
+            <span class="meta-label">Address</span>
+            <span class="meta-value"><?php echo htmlspecialchars((string)($customer['address'] ?? '-')); ?></span>
+        </div>
     </div>
-    <div class="total-card">
-        <span class="meta-label">Total Paid</span>
-        <span class="meta-value">BDT <?php echo number_format($total_paid,2); ?></span>
+    <div class="totals-grid">
+        <div class="total-card">
+            <span class="meta-label"><?php echo htmlspecialchars($package_count_label); ?></span>
+            <span class="meta-value"><?php echo number_format($purchased_package_count); ?></span>
+        </div>
+        <div class="total-card">
+            <span class="meta-label">Total Amount</span>
+            <span class="meta-value">BDT <?php echo number_format($total_amount,2); ?></span>
+        </div>
+        <div class="total-card">
+            <span class="meta-label">Total Paid</span>
+            <span class="meta-value">BDT <?php echo number_format($total_paid,2); ?></span>
+        </div>
+        <div class="total-card">
+            <span class="meta-label">Total Due</span>
+            <span class="meta-value">BDT <?php echo number_format($total_due,2); ?></span>
+        </div>
     </div>
 </section>
 
-<div class="table-title">Transaction History</div>
+<div class="table-title">File-wise Ledger Details</div>
 
-<table class="ledger-table">
-
-<thead>
-
-<tr>
-
-<th>Date</th>
-<th>Invoice No.</th>
-<th>Type</th>
-<th>Amount</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-<?php
-
-if(empty($ledger)){
-?>
-
-<tr>
-<td colspan="4" class="text-right">
-No ledger entries found.
-</td>
-
-</tr>
-
-<?php
-}
-
-foreach($ledger as $row){
-
-?>
-
-<tr>
-
-<td>
-<?php echo app_datetime($row['trx_date']); ?>
-</td>
-
-<td>
-<?php echo htmlspecialchars($row['invoice_no'] !== '' ? $row['invoice_no'] : $row['reference']); ?>
-</td>
-
-<td>
-<?php echo htmlspecialchars(($row['wallet_name'] ?? '') !== '' ? $row['wallet_name'] : '-'); ?>
-</td>
-
-<td class="text-right">
-<?php echo number_format((float)$row['debit'] > 0 ? $row['debit'] : $row['credit'],2); ?>
-</td>
-
-</tr>
-
+<?php if(empty($ledger_groups)){ ?>
+    <p class="muted">No package or file ledger entries found.</p>
 <?php } ?>
 
-</tbody>
-
-</table>
+<?php foreach($ledger_groups as $group){ ?>
+<section class="file-statement">
+    <div class="file-heading">
+        <span>File No: <?php echo htmlspecialchars($group['file_no'] !== '' ? $group['file_no'] : '-'); ?></span>
+        <span>Due: BDT <?php echo number_format((float)$group['total_due'], 2); ?></span>
+    </div>
+    <div class="file-details">
+        <div class="file-detail"><span class="meta-label"><?php echo htmlspecialchars($package_details_label); ?></span><span class="meta-value"><?php echo htmlspecialchars($group['project_details']); ?></span></div>
+        <div class="file-detail"><span class="meta-label">Plot Details</span><span class="meta-value"><?php echo htmlspecialchars($group['plot_details'] !== '' ? $group['plot_details'] : '-'); ?></span></div>
+        <div class="file-detail"><span class="meta-label">Booking Date</span><span class="meta-value"><?php echo $group['booking_date'] !== '' ? htmlspecialchars(app_date($group['booking_date'])) : '-'; ?></span></div>
+        <div class="file-detail"><span class="meta-label">File Summary</span><span class="meta-value">Amount: BDT <?php echo number_format((float)$group['total_amount'],2); ?> &nbsp;|&nbsp; Paid: BDT <?php echo number_format((float)$group['total_paid'],2); ?></span></div>
+    </div>
+    <table class="ledger-table">
+        <thead><tr><th>Date</th><th>Invoice No.</th><th>Payment Type</th><th>Note</th><th>Payment By</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead>
+        <tbody>
+        <?php foreach($group['rows'] as $row){ $paid = (float)$row['credit'] - (float)$row['debit']; ?>
+            <tr>
+                <td><?php echo htmlspecialchars(app_date($row['trx_date'])); ?></td>
+                <td><?php echo htmlspecialchars((string)($row['invoice_no'] ?? '-')); ?></td>
+                <td><?php echo htmlspecialchars((string)($row['payment_type'] ?? $row['type'] ?? '-')); ?></td>
+                <td><?php echo htmlspecialchars(trim((string)($row['note'] ?? '')) !== '' ? (string)$row['note'] : '-'); ?></td>
+                <td><?php echo htmlspecialchars(trim((string)($row['wallet_name'] ?? '')) !== '' ? (string)$row['wallet_name'] : '-'); ?></td>
+                <td class="text-right"><?php echo number_format($paid, 2); ?></td>
+                <td class="text-right"><?php echo number_format((float)$row['due'], 2); ?></td>
+            </tr>
+        <?php } ?>
+        <tr class="file-total-row"><td colspan="5" class="text-right">File Total</td><td class="text-right"><?php echo number_format((float)$group['total_paid'],2); ?></td><td class="text-right"><?php echo number_format((float)$group['total_due'],2); ?></td></tr>
+        </tbody>
+    </table>
+</section>
+<?php } ?>
 
 <div class="document-footer">This is a system-generated customer ledger statement.</div>
 

@@ -39,17 +39,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'change
         $_SESSION['lead_management_flash_message'] = 'A valid Admin Password and staff reference are required.';
         $_SESSION['lead_management_flash_type'] = 'danger';
     }else{
-        $reference_stmt = mysqli_prepare(
-            $conn,
-            "SELECT u.id, s.name
-             FROM users u
-             INNER JOIN staff s ON s.id=u.staff_id AND s.user_id=u.owner_id
-             WHERE u.id=? AND u.owner_id=? AND u.role='manager' AND u.status='active' AND s.status='active'
-             LIMIT 1"
-        );
-        mysqli_stmt_bind_param($reference_stmt, 'ii', $reference_user_id, $user_id);
-        mysqli_stmt_execute($reference_stmt);
-        $reference_staff = mysqli_fetch_assoc(mysqli_stmt_get_result($reference_stmt));
+        $available_reference_staff = lead_reference_options($conn, $user_id, $user_id, (string)($_SESSION['login_name'] ?? ''));
+        $reference_staff = $available_reference_staff[$reference_user_id] ?? null;
 
         if(!$reference_staff){
             $_SESSION['lead_management_flash_message'] = 'Selected staff reference is not available.';
@@ -58,7 +49,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'change
             mysqli_begin_transaction($conn);
             try {
                 $reference_name = trim((string)$reference_staff['name']);
-                $lead_update_stmt = mysqli_prepare($conn, "UPDATE leads SET created_by_user_id=?, created_by_name=? WHERE id=? AND user_id=?");
+                $lead_update_stmt = mysqli_prepare($conn, "UPDATE leads SET reference_user_id=?, reference_name=? WHERE id=? AND user_id=?");
                 mysqli_stmt_bind_param($lead_update_stmt, 'isii', $reference_user_id, $reference_name, $reference_lead_id, $user_id);
                 mysqli_stmt_execute($lead_update_stmt);
 
@@ -111,10 +102,6 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inline
             echo json_encode(['success' => false, 'message' => 'Followup Date cannot be earlier than today.']);
             exit;
         }
-    }
-
-    if($field === 'note'){
-        $value = $value ?: 'General';
     }
 
     $sql = $field === 'followup_date'
@@ -216,23 +203,9 @@ while($result && $row = mysqli_fetch_assoc($result)){
     $leads[] = $row;
 }
 
-$reference_staff_options = [];
-if(is_admin_user()){
-    $reference_options_stmt = mysqli_prepare(
-        $conn,
-        "SELECT u.id AS login_user_id, s.name, s.designation
-         FROM users u
-         INNER JOIN staff s ON s.id=u.staff_id AND s.user_id=u.owner_id
-         WHERE u.owner_id=? AND u.role='manager' AND u.status='active' AND s.status='active'
-         ORDER BY s.name ASC"
-    );
-    mysqli_stmt_bind_param($reference_options_stmt, 'i', $user_id);
-    mysqli_stmt_execute($reference_options_stmt);
-    $reference_options_result = mysqli_stmt_get_result($reference_options_stmt);
-    while($reference_options_result && $reference_staff = mysqli_fetch_assoc($reference_options_result)){
-        $reference_staff_options[] = $reference_staff;
-    }
-}
+$reference_staff_options = is_admin_user()
+    ? lead_reference_options($conn, $user_id, $lead_owner_id, $lead_owner_name)
+    : [];
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -305,11 +278,11 @@ require_once '../includes/sidebar.php';
                             </td>
                             <?php if($show_lead_reference){ ?>
                                 <td>
-                                    <?= htmlspecialchars($lead['created_by_name'] ?: '-'); ?>
+                                    <?= htmlspecialchars($lead['reference_name'] ?: $lead['created_by_name'] ?: '-'); ?>
                                     <button type="button"
                                             class="btn btn-outline-secondary btn-xs lead-reference-change"
                                             data-id="<?= (int)$lead['id']; ?>"
-                                            data-name="<?= htmlspecialchars($lead['created_by_name'] ?: '-'); ?>"
+                                            data-name="<?= htmlspecialchars($lead['reference_name'] ?: $lead['created_by_name'] ?: '-'); ?>"
                                             title="Change Ref">
                                         <i class="fas fa-user-edit"></i>
                                     </button>
@@ -322,9 +295,9 @@ require_once '../includes/sidebar.php';
                                 <?php } ?>
                             </td>
                             <td>
-                                <span class="lead-edit-value"><?= htmlspecialchars($lead['note'] ?: 'General'); ?></span>
+                                <span class="lead-edit-value"><?= htmlspecialchars($lead['note'] ?? ''); ?></span>
                                 <?php if($can_manage_leads){ ?>
-                                    <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="note" data-value="<?= htmlspecialchars($lead['note'] ?: 'General'); ?>" title="Edit Note"><i class="fas fa-edit"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary btn-xs lead-inline-edit" data-id="<?= (int)$lead['id']; ?>" data-field="note" data-value="<?= htmlspecialchars($lead['note'] ?? ''); ?>" title="Edit Note"><i class="fas fa-edit"></i></button>
                                 <?php } ?>
                             </td>
                             <td>

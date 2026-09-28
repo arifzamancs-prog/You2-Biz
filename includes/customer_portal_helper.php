@@ -388,6 +388,10 @@ function customer_portal_ledger_rows($conn, $user_id, $customer_id)
         "SELECT
             bi.invoice_date,
             bi.invoice_no,
+            bi.block_name,
+            bi.road_no,
+            bi.plot_no,
+            bi.file_no,
             COALESCE(NULLIF(bi.total_price, 0), pk.price, bi.amount) AS package_price,
             bi.invoice_type
          FROM booking_invoices bi
@@ -474,6 +478,15 @@ function customer_portal_admin_style_ledger_rows($conn, $user_id, $customer_id, 
                 (($row['project_name'] ?? '') !== '' && ($row['package_name'] ?? '') !== '' ? ' - ' : '') .
                 (string)($row['package_name'] ?? '')
             );
+            $property_details = array_filter([
+                trim((string)($row['file_no'] ?? '')) !== '' ? 'File: ' . trim((string)$row['file_no']) : '',
+                trim((string)($row['block_name'] ?? '')) !== '' ? 'Block: ' . trim((string)$row['block_name']) : '',
+                trim((string)($row['road_no'] ?? '')) !== '' ? 'Road: ' . trim((string)$row['road_no']) : '',
+                trim((string)($row['plot_no'] ?? '')) !== '' ? 'Plot: ' . trim((string)$row['plot_no']) : '',
+            ]);
+            if(!empty($property_details)){
+                $project_details .= ($project_details !== '' ? ' | ' : '') . implode(' | ', $property_details);
+            }
 
             $ledger[] = [
                 'trx_date' => $row['txn_date'],

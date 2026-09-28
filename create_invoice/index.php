@@ -19,6 +19,7 @@ ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
 ensure_invoice_request_table($conn);
 $project_package_labels = project_package_labels($conn, $user_id);
+$is_housing_company = project_package_company_type($conn, $user_id) === 'Housing';
 
 if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reject_invoice_request'){
     $reject_request_id = (int)($_POST['invoice_request_id'] ?? 0);
@@ -66,6 +67,12 @@ $amount = trim($_POST['amount'] ?? '');
 $total_price = trim($_POST['total_price'] ?? '');
 $notes = trim($_POST['notes'] ?? '');
 $charge_inputs = $_POST['charge_value'] ?? [];
+$property_values = [
+    'block_name' => trim($_POST['block_name'] ?? $_POST['block_name_select'] ?? ''),
+    'road_no' => trim($_POST['road_no'] ?? $_POST['road_no_select'] ?? ''),
+    'plot_no' => trim($_POST['plot_no'] ?? $_POST['plot_no_select'] ?? ''),
+    'file_no' => trim($_POST['file_no'] ?? $_POST['file_no_select'] ?? ''),
+];
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $save_action = $_POST['save_action'] ?? 'save';
@@ -81,28 +88,95 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $numeric_total_price = $type_establishes_total ? (float)$total_price : 0;
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
     $final_amount = $charge_calculation['total'];
+    $requires_existing_file_number = $is_housing_company && in_array($type, ['installment', 'cancel_return'], true);
+    $file_number_is_new = in_array($type, ['booking', 'full_payment'], true);
 
-    if($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type_establishes_total && $numeric_total_price <= 0)){
+    // An adjustment always follows the package originally assigned to its File No.
+    // Resolve it on the server too, so submitted values cannot point at another package.
+    if($requires_existing_file_number && $property_values['file_no'] !== ''){
+        $file_source_stmt = mysqli_prepare(
+            $conn,
+            "SELECT project_id, package_id, block_name, road_no, plot_no
+             FROM booking_invoices
+             WHERE user_id=? AND branch_id=? AND file_no=? AND customer_id=? AND status='confirmed'
+               AND invoice_type IN ('booking', 'full_payment')
+             ORDER BY id DESC LIMIT 1"
+        );
+        mysqli_stmt_bind_param($file_source_stmt, 'iisi', $user_id, $branch_id, $property_values['file_no'], $customer_id);
+        mysqli_stmt_execute($file_source_stmt);
+        $file_source = mysqli_fetch_assoc(mysqli_stmt_get_result($file_source_stmt));
+        if($file_source){
+            $project_id = (int)$file_source['project_id'];
+            $package_id = (int)$file_source['package_id'];
+            foreach(['block_name', 'road_no', 'plot_no'] as $field){
+                $property_values[$field] = trim((string)($file_source[$field] ?? ''));
+            }
+        } else {
+            $message = 'Select a File No. created by a Booking or Full Payment invoice.';
+        }
+    }
+
+    if($is_housing_company && $property_values['file_no'] !== ''){
+        $file_check_stmt = mysqli_prepare($conn, "SELECT id FROM booking_invoices WHERE user_id=? AND file_no=? LIMIT 1");
+        mysqli_stmt_bind_param($file_check_stmt, 'is', $user_id, $property_values['file_no']);
+        mysqli_stmt_execute($file_check_stmt);
+        $file_number_exists = mysqli_fetch_assoc(mysqli_stmt_get_result($file_check_stmt));
+
+        if(($file_number_is_new && $file_number_exists) || ($requires_existing_file_number && !$file_number_exists)){
+            $message = $file_number_is_new
+                ? 'This File No. is already used. Select a non-used File No.'
+                : 'Select an existing File No. for Installment or Cancel/Return.';
+        }
+    }
+
+    // A plot allocation is unique too: a different File No. must not create a
+    // second Booking/Full Payment for the same project, package and plot.
+    if($message === '' && $is_housing_company && $file_number_is_new && $project_id > 0 && $package_id > 0){
+        $plot_duplicate_stmt = mysqli_prepare(
+            $conn,
+            "SELECT id, file_no FROM booking_invoices
+             WHERE user_id=? AND project_id=? AND package_id=?
+               AND block_name=? AND road_no=? AND plot_no=?
+               AND invoice_type IN ('booking', 'full_payment')
+             LIMIT 1"
+        );
+        mysqli_stmt_bind_param($plot_duplicate_stmt, 'iiisss', $user_id, $project_id, $package_id, $property_values['block_name'], $property_values['road_no'], $property_values['plot_no']);
+        mysqli_stmt_execute($plot_duplicate_stmt);
+        $plot_duplicate = mysqli_fetch_assoc(mysqli_stmt_get_result($plot_duplicate_stmt));
+        if($plot_duplicate){
+            $message = 'This Project, Package and Plot Details are already assigned to File No. ' . trim((string)($plot_duplicate['file_no'] ?? '-')) . '.';
+        }
+    }
+
+    if($message !== ''){
+        // Keep the more specific File No. validation message.
+    } elseif($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $type === '' || $normalized_date === '' || $numeric_amount <= 0 || $final_amount <= 0 || ($type_establishes_total && $numeric_total_price <= 0)){
         $message = 'Customer, ' . $project_package_labels['project'] . ', ' . $project_package_labels['package'] . ', Payment Type, Date and valid Amount are required.';
+    } elseif($is_housing_company && (!$property_values['block_name'] || !$property_values['road_no'] || !$property_values['plot_no'] || !$property_values['file_no'])){
+        $message = 'Block, Road No., Plot No. and File No. are required for Housing invoices.';
     } else {
         $invoice_no = generate_booking_invoice_no($conn);
 
         $insert_stmt = mysqli_prepare(
             $conn,
             "INSERT INTO booking_invoices
-             (user_id, branch_id, invoice_no, customer_id, project_id, package_id, wallet_id, invoice_type, invoice_date, amount, total_price, notes, created_by_user_id)
+             (user_id, branch_id, invoice_no, customer_id, project_id, package_id, block_name, road_no, plot_no, file_no, wallet_id, invoice_type, invoice_date, amount, total_price, notes, created_by_user_id)
              VALUES
-             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
         mysqli_stmt_bind_param(
             $insert_stmt,
-            'iisiiiissddsi',
+            'iisiiissssissddsi',
             $user_id,
             $branch_id,
             $invoice_no,
             $customer_id,
             $project_id,
             $package_id,
+            $property_values['block_name'],
+            $property_values['road_no'],
+            $property_values['plot_no'],
+            $property_values['file_no'],
             $wallet_id,
             $type,
             $normalized_date,
@@ -114,6 +188,9 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 
         if(mysqli_stmt_execute($insert_stmt)){
             $saved_id = (int)mysqli_insert_id($conn);
+            if($is_housing_company){
+                booking_invoice_store_property_options($conn, $user_id, $property_values);
+            }
             if($invoice_request_id > 0){
                 $complete_request_stmt = mysqli_prepare($conn, "UPDATE invoice_requests SET status='completed', completed_invoice_id=?, completed_at=NOW() WHERE id=? AND user_id=? AND customer_id=? AND status='pending'");
                 mysqli_stmt_bind_param($complete_request_stmt, 'iiii', $saved_id, $invoice_request_id, $user_id, $customer_id);
@@ -184,6 +261,51 @@ while($wallet_result && $row = mysqli_fetch_assoc($wallet_result)){
     $wallets[] = $row;
 }
 $invoice_charges = booking_invoice_active_charges($conn, $user_id);
+$property_options = $is_housing_company ? booking_invoice_property_options($conn, $user_id) : [];
+$used_file_numbers = [];
+if($is_housing_company){
+    $used_file_stmt = mysqli_prepare($conn, "SELECT DISTINCT file_no FROM booking_invoices WHERE user_id=? AND invoice_type IN ('booking', 'full_payment') AND file_no IS NOT NULL AND TRIM(file_no)<>'' ORDER BY file_no");
+    mysqli_stmt_bind_param($used_file_stmt, 'i', $user_id);
+    mysqli_stmt_execute($used_file_stmt);
+    $used_file_result = mysqli_stmt_get_result($used_file_stmt);
+    while($used_file_result && $used_file_row = mysqli_fetch_assoc($used_file_result)){
+        $used_file_numbers[] = (string)$used_file_row['file_no'];
+    }
+    $property_options['file_no'] = array_values(array_unique(array_merge($property_options['file_no'], $used_file_numbers)));
+    sort($property_options['file_no'], SORT_NATURAL | SORT_FLAG_CASE);
+}
+$file_property_map = [];
+if($is_housing_company){
+    $booking_property_query = mysqli_query(
+        $conn,
+        "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.block_name, bi.road_no, bi.plot_no, bi.file_no,
+                COALESCE(NULLIF(bi.total_price, 0), 0) AS total_amount,
+                COALESCE((SELECT SUM(CASE WHEN related.invoice_type='cancel_return' THEN -related.amount ELSE related.amount END)
+                          FROM booking_invoices related
+                          WHERE related.user_id=bi.user_id AND related.file_no=bi.file_no AND related.status='confirmed'), 0) AS paid_amount
+         FROM booking_invoices bi
+         WHERE bi.user_id={$user_id} AND bi.branch_id={$branch_id}
+           AND bi.invoice_type IN ('booking', 'full_payment') AND bi.status='confirmed'
+           AND bi.file_no IS NOT NULL AND TRIM(bi.file_no)<>''
+         ORDER BY bi.id DESC"
+    );
+    while($booking_property_query && $property_row = mysqli_fetch_assoc($booking_property_query)){
+        $file_key = trim((string)$property_row['file_no']);
+        if(!isset($file_property_map[$file_key])){
+            $file_property_map[$file_key] = [
+                'file_no' => $file_key,
+                'customer_id' => (string)(int)$property_row['customer_id'],
+                'project_id' => (string)(int)$property_row['project_id'],
+                'package_id' => (string)(int)$property_row['package_id'],
+                'block_name' => (string)($property_row['block_name'] ?? ''),
+                'road_no' => (string)($property_row['road_no'] ?? ''),
+                'plot_no' => (string)($property_row['plot_no'] ?? ''),
+                'total_amount' => (float)($property_row['total_amount'] ?? 0),
+                'paid_amount' => (float)($property_row['paid_amount'] ?? 0),
+            ];
+        }
+    }
+}
 
 $recent_invoices = [];
 $pending_invoice_requests = [];
@@ -203,6 +325,10 @@ $recent_stmt = mysqli_prepare(
             bi.customer_id,
             bi.project_id,
             bi.package_id,
+            bi.block_name,
+            bi.road_no,
+            bi.plot_no,
+            bi.file_no,
             c.customer_name,
             c.customer_code,
             p.project_name,
@@ -292,6 +418,41 @@ require_once '../includes/sidebar.php';
 
                 <div class="col-md-3">
                     <div class="form-group">
+                        <label>Payment Type</label>
+                        <select id="invoice_type" name="invoice_type" class="form-control" required>
+                            <option value="">Select Payment Type</option>
+                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
+                                <option value="<?= htmlspecialchars($type_key); ?>" data-customer-ids="<?= htmlspecialchars(implode(',', $payment_type_customers[$type_key] ?? [])); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
+                                    <?= htmlspecialchars($type_name); ?>
+                                </option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                </div>
+
+                <?php if($is_housing_company){ ?>
+                    <div class="col-md-3 housing-property-group">
+                        <div class="form-group">
+                            <label>File No.</label>
+                            <div class="input-group">
+                                <select id="file_no_select" name="file_no_select" class="form-control housing-property-select" data-property-field="file_no" required>
+                                    <option value="">Select File No.</option>
+                                    <?php foreach($property_options['file_no'] as $property_option){ ?>
+                                        <option value="<?= htmlspecialchars($property_option); ?>" <?= $property_values['file_no'] === $property_option ? 'selected' : ''; ?>><?= htmlspecialchars($property_option); ?></option>
+                                    <?php } ?>
+                                    <?php if($property_values['file_no'] !== '' && !in_array($property_values['file_no'], $property_options['file_no'], true)){ ?>
+                                        <option value="<?= htmlspecialchars($property_values['file_no']); ?>" selected><?= htmlspecialchars($property_values['file_no']); ?></option>
+                                    <?php } ?>
+                                </select>
+                                <div class="input-group-append"><button type="button" class="btn btn-outline-primary add-property-option" data-property-field="file_no" data-property-label="File No." title="Add new File No."><i class="fas fa-plus"></i></button></div>
+                            </div>
+                            <input type="hidden" id="file_no" name="file_no" value="<?= htmlspecialchars($property_values['file_no']); ?>">
+                        </div>
+                    </div>
+                <?php } ?>
+
+                <div class="col-md-3">
+                    <div class="form-group">
                         <label><?= htmlspecialchars($project_package_labels['project']); ?></label>
                         <select id="project_id" name="project_id" class="form-control" required>
                             <option value=""><?= htmlspecialchars($project_package_labels['project_select']); ?></option>
@@ -322,19 +483,30 @@ require_once '../includes/sidebar.php';
                     </div>
                 </div>
 
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label>Payment Type</label>
-                        <select id="invoice_type" name="invoice_type" class="form-control" required <?= $customer_id > 0 ? '' : 'disabled'; ?> >
-                            <option value="">Select Payment Type</option>
-                            <?php foreach($invoice_types as $type_key => $type_name){ ?>
-                                <option value="<?= htmlspecialchars($type_key); ?>" data-customer-ids="<?= htmlspecialchars(implode(',', $payment_type_customers[$type_key] ?? [])); ?>" <?= $type === $type_key ? 'selected' : ''; ?>>
-                                    <?= htmlspecialchars($type_name); ?>
-                                </option>
-                            <?php } ?>
-                        </select>
-                    </div>
-                </div>
+                <?php if($is_housing_company){ ?>
+                    <?php foreach(['block_name' => 'Block', 'road_no' => 'Road No.', 'plot_no' => 'Plot No.'] as $property_field => $property_label){ ?>
+                        <div class="col-md-4 housing-property-group">
+                            <div class="form-group">
+                                <label><?= htmlspecialchars($property_label); ?></label>
+                                <div class="input-group">
+                                    <select id="<?= htmlspecialchars($property_field); ?>_select" name="<?= htmlspecialchars($property_field); ?>_select" class="form-control housing-property-select" data-property-field="<?= htmlspecialchars($property_field); ?>" required>
+                                        <option value="">Select <?= htmlspecialchars($property_label); ?></option>
+                                        <?php foreach($property_options[$property_field] as $property_option){ ?>
+                                            <option value="<?= htmlspecialchars($property_option); ?>" <?= $property_values[$property_field] === $property_option ? 'selected' : ''; ?>><?= htmlspecialchars($property_option); ?></option>
+                                        <?php } ?>
+                                        <?php if($property_values[$property_field] !== '' && !in_array($property_values[$property_field], $property_options[$property_field], true)){ ?>
+                                            <option value="<?= htmlspecialchars($property_values[$property_field]); ?>" selected><?= htmlspecialchars($property_values[$property_field]); ?></option>
+                                        <?php } ?>
+                                    </select>
+                                    <div class="input-group-append">
+                                        <button type="button" class="btn btn-outline-primary add-property-option" data-property-field="<?= htmlspecialchars($property_field); ?>" data-property-label="<?= htmlspecialchars($property_label); ?>" title="Add new <?= htmlspecialchars($property_label); ?>"><i class="fas fa-plus"></i></button>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="<?= htmlspecialchars($property_field); ?>" name="<?= htmlspecialchars($property_field); ?>" value="<?= htmlspecialchars($property_values[$property_field]); ?>">
+                            </div>
+                        </div>
+                    <?php } ?>
+                <?php } ?>
 
                 <div class="col-md-4" id="total-price-group" style="display:none;">
                     <div class="form-group">
@@ -347,6 +519,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Pay Amount (BDT)</label>
                         <input id="amount" type="number" step="0.01" min="0" name="amount" class="form-control" value="<?= htmlspecialchars($amount); ?>" required>
+                        <small id="file-balance-info" class="form-text text-muted"></small>
                     </div>
                 </div>
 
@@ -399,7 +572,7 @@ require_once '../includes/sidebar.php';
                     <th><?= htmlspecialchars($project_package_labels['package']); ?></th>
                     <th>Amount</th>
                     <th>Status</th>
-                    <th width="90">Action</th>
+                    <th width="130">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -414,10 +587,13 @@ require_once '../includes/sidebar.php';
                             <td><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date']))); ?></td>
                             <td><?= htmlspecialchars($invoice['customer_name'] ? $invoice['customer_name'] . ' [ID: ' . ($invoice['customer_code'] ?: '-') . ']' : ('Missing Customer #' . (int)$invoice['customer_id'])); ?></td>
                             <td><?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?></td>
-                            <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td>
+                            <td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?><?php if($is_housing_company){ ?><div class="small text-muted">File: <?= htmlspecialchars($invoice['file_no'] ?: '-'); ?> | Block: <?= htmlspecialchars($invoice['block_name'] ?: '-'); ?> | Road: <?= htmlspecialchars($invoice['road_no'] ?: '-'); ?> | Plot: <?= htmlspecialchars($invoice['plot_no'] ?: '-'); ?></div><?php } ?></td>
                             <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
                             <td><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($invoice['status'] ?? 'pending')); ?></span></td>
                             <td>
+                                <a href="../customers/customer_ledger.php?id=<?= (int)$invoice['customer_id']; ?>" class="btn btn-primary btn-sm" title="Customer Ledger" aria-label="Customer Ledger">
+                                    <i class="fas fa-book"></i>
+                                </a>
                                 <a href="print.php?id=<?= (int)$invoice['id']; ?>" class="btn btn-info btn-sm" target="_blank" rel="noopener" title="Print Invoice" aria-label="Print Invoice">
                                     <i class="fas fa-print"></i>
                                 </a>
@@ -445,6 +621,147 @@ document.addEventListener('DOMContentLoaded', function () {
     const invoiceDateDisplay = document.getElementById('invoice-date-display');
     const invoiceDatePicker = document.getElementById('invoice-date-picker');
     const customerSelect = document.getElementById('customer_id');
+    const filePropertyMap = <?= json_encode($file_property_map); ?>;
+    const plotAssignments = Object.values(filePropertyMap);
+    const usedFileNumbers = <?= json_encode($used_file_numbers); ?>.map(function(value){ return String(value); });
+    const housingPropertySelects = Array.from(document.querySelectorAll('.housing-property-select'));
+
+    function setHousingPropertyValue(field, value) {
+        const select = document.getElementById(field + '_select');
+        const hidden = document.getElementById(field);
+        if (!select || !hidden) return;
+        value = String(value || '').trim();
+        if (value && !Array.from(select.options).some(function(option){ return option.value === value; })) {
+            select.add(new Option(value, value, false, false));
+        }
+        select.value = value;
+        hidden.value = value;
+    }
+
+    function syncHousingProperties() {
+        if (!housingPropertySelects.length) return;
+        const locked = ['installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+        const fileSelect = document.getElementById('file_no_select');
+        const selectedFile = String(fileSelect ? fileSelect.value : '').trim();
+        const fileSource = locked && selectedFile ? filePropertyMap[selectedFile] : null;
+        const lockFields = locked && !!fileSource;
+
+        if (fileSource) {
+            projectSelect.value = fileSource.project_id || '';
+            filterPackages();
+            packageSelect.value = fileSource.package_id || '';
+            ['block_name', 'road_no', 'plot_no'].forEach(function(field){
+                setHousingPropertyValue(field, fileSource[field] || '');
+            });
+        }
+
+        const balanceInfo = document.getElementById('file-balance-info');
+        if (balanceInfo) {
+            if (fileSource) {
+                const paid = Number(fileSource.paid_amount || 0);
+                const due = Math.max(0, Number(fileSource.total_amount || 0) - paid);
+                balanceInfo.textContent = 'Total Paid: BDT ' + paid.toFixed(2) + ' | Due: BDT ' + due.toFixed(2);
+            } else {
+                balanceInfo.textContent = '';
+            }
+        }
+
+        [projectSelect, packageSelect].forEach(function(select){
+            select.classList.toggle('bg-light', lockFields);
+            select.disabled = lockFields;
+            select.tabIndex = lockFields ? -1 : 0;
+            select.setAttribute('aria-readonly', lockFields ? 'true' : 'false');
+        });
+
+        housingPropertySelects.forEach(function(select){
+            const field = select.dataset.propertyField;
+            const addButton = document.querySelector('.add-property-option[data-property-field="' + field + '"]');
+            if (field === 'file_no') {
+                const allowExistingFiles = locked;
+                const selectedCustomerId = String(customerSelect.value || '');
+                Array.from(select.options).forEach(function(option, index){
+                    if (index === 0) return;
+                    const fileSourceOption = filePropertyMap[String(option.value)];
+                    option.hidden = allowExistingFiles
+                        ? !fileSourceOption || String(fileSourceOption.customer_id || '') !== selectedCustomerId
+                        : usedFileNumbers.includes(String(option.value));
+                });
+                if (select.value && select.options[select.selectedIndex] && select.options[select.selectedIndex].hidden) {
+                    setHousingPropertyValue(field, '');
+                }
+                select.disabled = false;
+                if (addButton) addButton.disabled = locked;
+            } else {
+                if (field === 'plot_no') {
+                    const selectedBlock = String((document.getElementById('block_name_select') || {}).value || '').trim();
+                    const selectedRoad = String((document.getElementById('road_no_select') || {}).value || '').trim();
+                    const restrictUsedPlots = ['booking', 'full_payment', 'installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+                    Array.from(select.options).forEach(function(option, index){
+                        if (index === 0) return;
+                        const isUsedPlot = plotAssignments.some(function(item){
+                            return String(item.project_id) === String(projectSelect.value) &&
+                                String(item.package_id) === String(packageSelect.value) &&
+                                String(item.block_name || '') === selectedBlock &&
+                                String(item.road_no || '') === selectedRoad &&
+                                String(item.plot_no || '') === String(option.value);
+                        });
+                        option.hidden = restrictUsedPlots && isUsedPlot && !(fileSource && String(fileSource.plot_no || '') === String(option.value));
+                    });
+                    if (!fileSource && select.value && select.options[select.selectedIndex] && select.options[select.selectedIndex].hidden) {
+                        setHousingPropertyValue(field, '');
+                    }
+                }
+                select.disabled = lockFields;
+                select.classList.toggle('bg-light', lockFields);
+                select.tabIndex = lockFields ? -1 : 0;
+                select.setAttribute('aria-readonly', lockFields ? 'true' : 'false');
+                if (addButton) addButton.disabled = lockFields;
+            }
+            const hidden = document.getElementById(field);
+            if (hidden) hidden.value = select.value || '';
+        });
+    }
+
+    housingPropertySelects.forEach(function(select){
+        select.addEventListener('change', function(){
+            const hidden = document.getElementById(this.dataset.propertyField);
+            if (hidden) hidden.value = this.value || '';
+            syncHousingProperties();
+        });
+    });
+    document.querySelectorAll('.add-property-option').forEach(function(button){
+        button.addEventListener('click', function(){
+            const value = window.prompt('Enter new ' + (this.dataset.propertyLabel || 'value') + ':');
+            if (value === null || !value.trim()) return;
+            if (this.dataset.propertyField === 'plot_no' && ['booking', 'full_payment'].includes(invoiceTypeSelect.value)) {
+                const block = String((document.getElementById('block_name_select') || {}).value || '').trim();
+                const road = String((document.getElementById('road_no_select') || {}).value || '').trim();
+                const duplicatePlot = plotAssignments.find(function(item){
+                    return String(item.project_id) === String(projectSelect.value) &&
+                        String(item.package_id) === String(packageSelect.value) &&
+                        String(item.block_name || '') === block &&
+                        String(item.road_no || '') === road &&
+                        String(item.plot_no || '').trim().toLowerCase() === value.trim().toLowerCase();
+                });
+                if (duplicatePlot) {
+                    const assignedFile = String(duplicatePlot.file_no || '-');
+                    window.alert('This Plot Details are already assigned to File No. ' + assignedFile + '.');
+                    return;
+                }
+            }
+            if (this.dataset.propertyField === 'file_no') {
+                const normalized = value.trim().toLowerCase();
+                const exists = usedFileNumbers.some(function(fileNumber){
+                    return String(fileNumber).trim().toLowerCase() === normalized;
+                });
+                if (exists) {
+                    window.alert('This File No. already exists. File No. must be unique.');
+                    return;
+                }
+            }
+            setHousingPropertyValue(this.dataset.propertyField, value);
+        });
+    });
 
     $('#invoice-request-photo-modal').on('show.bs.modal', function(event){
         const trigger = $(event.relatedTarget);
@@ -574,12 +891,14 @@ document.addEventListener('DOMContentLoaded', function () {
     projectSelect.addEventListener('change', filterPackages);
     packageSelect.addEventListener('change', function(){
         syncPackagePrice();
+        syncHousingProperties();
         const selected = packageSelect.options[packageSelect.selectedIndex];
         const balance = document.getElementById('selected-package-balance');
         if (balance) balance.textContent = adjustmentInvoiceTypes.includes(invoiceTypeSelect.value) && selected && selected.dataset.total
             ? 'Total Amount: ' + Number(selected.dataset.total).toFixed(2) + ' | Total Paid: ' + Number(selected.dataset.paid).toFixed(2) + ' | Total Due: ' + Number(selected.dataset.due).toFixed(2) : '';
     });
     invoiceTypeSelect.addEventListener('change', toggleTotalPrice);
+    invoiceTypeSelect.addEventListener('change', syncHousingProperties);
     walletSelect.addEventListener('change', updateWalletBalance);
     invoiceTypeSelect.addEventListener('change', function(){
         const restrictProjects=adjustmentInvoiceTypes.includes(this.value), c=document.querySelector('[name="customer_id"]').value;
@@ -589,15 +908,17 @@ document.addEventListener('DOMContentLoaded', function () {
         packageSelect.value = '';
         Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden=restrictProjects && !!c && !((customerProjects[c]||[]).includes(Number(o.value))); });
         Array.from(packageSelect.options).forEach(function(o,i){ if(i) o.hidden = i > 0; });
+        syncHousingProperties();
     });
     projectSelect.addEventListener('change', function(){
         const c=document.querySelector('[name="customer_id"]').value;
         if(adjustmentInvoiceTypes.includes(invoiceTypeSelect.value)) filterPackages();
         updateWalletBalance();
+        syncHousingProperties();
     });
     packageSelect.addEventListener('change', updateWalletBalance);
     customerSelect.addEventListener('change', function(){
-        invoiceTypeSelect.disabled = !this.value;
+        invoiceTypeSelect.disabled = false;
         projectSelect.value = '';
         packageSelect.value = '';
         Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden = false; });
@@ -608,6 +929,7 @@ document.addEventListener('DOMContentLoaded', function () {
         Array.from(projectSelect.options).forEach(function(o,i){ if(i) o.hidden=restrictProjects && !!this.value && !((customerProjects[this.value]||[]).includes(Number(o.value))); }, this);
         if(!this.value){ invoiceTypeSelect.value = ''; toggleTotalPrice(); }
         updateWalletBalance();
+        syncHousingProperties();
     });
 
     // Select2 usually emits a native change event. Handle its own events as
@@ -620,7 +942,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Covers browser form-state restoration after a refresh or Back action.
     window.setTimeout(function(){
-        invoiceTypeSelect.disabled = !customerSelect.value;
+        invoiceTypeSelect.disabled = false;
     }, 0);
 
     document.getElementById('create-invoice-form').addEventListener('submit', function (event) {
@@ -638,15 +960,10 @@ document.addEventListener('DOMContentLoaded', function () {
     filterPackages();
     toggleTotalPrice();
     updateWalletBalance();
+    syncHousingProperties();
 });
 </script>
 <style>
-#create-invoice-form > .row > div { order: 6; }
-#create-invoice-form > .row > div:nth-child(1) { order: 1; }
-#create-invoice-form > .row > div:nth-child(2) { order: 2; }
-#create-invoice-form > .row > div:nth-child(5) { order: 3; }
-#create-invoice-form > .row > div:nth-child(3) { order: 4; }
-#create-invoice-form > .row > div:nth-child(4) { order: 5; }
 .invoice-request-photo { background:transparent; border:0; }
 .invoice-request-photo img { border:1px solid #e5e7eb; border-radius:8px; height:72px; object-fit:cover; width:72px; }
 .invoice-request-table th { white-space:nowrap; }

@@ -49,7 +49,7 @@ $lead_ref_name = '';
 if($lead_id > 0){
     $lead_stmt = mysqli_prepare(
         $conn,
-        "SELECT id, name, phone, email, note, created_by_name
+        "SELECT id, name, phone, email, note, created_by_name, reference_name
          FROM leads
          WHERE id=?
          AND user_id=?
@@ -67,7 +67,7 @@ if($lead_id > 0){
         $lead_id = 0;
         $message = 'This pending lead is not available for conversion.';
     } else {
-        $lead_ref_name = trim((string)($pending_lead['created_by_name'] ?? ''));
+        $lead_ref_name = trim((string)($pending_lead['reference_name'] ?? $pending_lead['created_by_name'] ?? ''));
     }
 }
 
@@ -441,7 +441,7 @@ require_once '../includes/sidebar.php';
                         <?php if($lead_id > 0){ ?>
                             <input type="hidden" name="ref_staff_id" value="0">
                             <input type="text" class="form-control" value="<?= htmlspecialchars($lead_ref_name ?: 'General'); ?>" readonly>
-                            <small class="text-muted">Fixed from the staff member who created this lead.</small>
+                            <small class="text-muted">Fixed from the Ref. selected for this lead.</small>
                         <?php } else { ?>
                             <select name="ref_staff_id" class="form-control" required>
                                 <option value="">Select General Staff</option>

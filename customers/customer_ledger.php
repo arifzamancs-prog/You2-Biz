@@ -17,6 +17,7 @@ ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, (int)$_SESSION['user_id']);
 $invoice_types = booking_invoice_types($conn, (int)$_SESSION['user_id'], false);
 $project_package_labels = project_package_labels($conn, (int)$user_id);
+$is_housing_company = project_package_company_type($conn, (int)$user_id) === 'Housing';
 
 $customer_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -321,6 +322,10 @@ $wallet_transaction_sql = "SELECT
         bi.invoice_type,
         bi.notes AS invoice_note,
         bi.invoice_date,
+        bi.file_no,
+        bi.block_name,
+        bi.road_no,
+        bi.plot_no,
         bi.amount AS invoice_amount,
         COALESCE(NULLIF(bi.total_price, 0), pk.price, bi.amount) AS package_price,
         p.project_name,
@@ -372,6 +377,12 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
             (string)($row['package_name'] ?? '')
         ),
         'booking_date' => $row['invoice_date'],
+        'file_no' => trim((string)($row['file_no'] ?? '')),
+        'plot_details' => trim(implode(', ', array_filter([
+            trim((string)($row['block_name'] ?? '')) !== '' ? 'Block: ' . trim((string)$row['block_name']) : '',
+            trim((string)($row['road_no'] ?? '')) !== '' ? 'Road No: ' . trim((string)$row['road_no']) : '',
+            trim((string)($row['plot_no'] ?? '')) !== '' ? 'Plot No: ' . trim((string)$row['plot_no']) : '',
+        ]))),
         // Booking, Full Payment, and custom income types establish a new
         // package/service total. Installment/refund types adjust an existing segment.
         'total_amount' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
@@ -554,13 +565,16 @@ foreach($ledger as $row){
     $row_project_details = trim((string)($row['project_details'] ?? ''));
     $row_booking_date = trim((string)($row['booking_date'] ?? ''));
     $row_invoice_no = trim((string)($row['invoice_no'] ?? ''));
+    $row_file_no = trim((string)($row['file_no'] ?? ''));
     $row_type_key = normalize_booking_invoice_type($row['invoice_type_key'] ?? '', $invoice_types);
     $is_package_adjustment = booking_invoice_is_adjustment_type($conn, $user_id, $row_type_key);
-    // Adjustments belong to the customer's existing project/package segment;
-    // total-establishing payment types always start their own segment by invoice.
-    $group_key = (!$is_package_adjustment && $row_invoice_no !== '')
-        ? 'invoice-' . md5($row_invoice_no)
-        : '';
+    // Housing payments are one allocation per File No.; Booking, Installment
+    // and Cancel/Return entries for that file must stay in one ledger group.
+    $group_key = ($is_housing_company && $row_file_no !== '')
+        ? 'file-' . md5($row_file_no)
+        : (( !$is_package_adjustment && $row_invoice_no !== '')
+            ? 'invoice-' . md5($row_invoice_no)
+            : '');
 
     if($group_key === '' && $row_project_details !== ''){
         $group_key = $is_package_adjustment && isset($package_origin_groups[$row_project_details])
@@ -580,6 +594,8 @@ foreach($ledger as $row){
             'booking_date' => trim((string)($row['booking_date'] ?? '')) !== ''
                 ? app_date($row['booking_date'])
                 : '-',
+            'file_no' => trim((string)($row['file_no'] ?? '')),
+            'plot_details' => trim((string)($row['plot_details'] ?? '')),
             'booking_dates' => [],
             'total_amount' => 0,
             'total_paid' => 0,
@@ -609,6 +625,20 @@ foreach($ledger as $row){
         $ledger_groups[$group_key]['booking_date'] = app_date($row_booking_date);
     }
 
+    if(
+        trim((string)($ledger_groups[$group_key]['file_no'] ?? '')) === '' &&
+        trim((string)($row['file_no'] ?? '')) !== ''
+    ){
+        $ledger_groups[$group_key]['file_no'] = trim((string)$row['file_no']);
+    }
+
+    if(
+        trim((string)($ledger_groups[$group_key]['plot_details'] ?? '')) === '' &&
+        trim((string)($row['plot_details'] ?? '')) !== ''
+    ){
+        $ledger_groups[$group_key]['plot_details'] = trim((string)$row['plot_details']);
+    }
+
     if($row_booking_date !== ''){
         $ledger_groups[$group_key]['booking_dates'][$row_booking_date] = app_date($row_booking_date);
     }
@@ -636,7 +666,9 @@ foreach($ledger_groups as &$group){
         $group_rows[] = $row;
     }
 
-    $group['rows'] = array_reverse($group_rows);
+    // Keep the first transaction (usually Booking) at the top, then show
+    // each later payment/return below it in chronological order.
+    $group['rows'] = $group_rows;
     $group['total_due'] = max(0, (float)$group['total_amount'] - (float)$group['total_paid']);
 }
 
@@ -729,7 +761,12 @@ $show_grand_summary = $purchased_package_count > 1;
 <table class="table table-bordered">
 
 <tr>
-<th>Customer</th>
+<th>Customer ID</th>
+<td><?php echo htmlspecialchars((string)($customer['customer_code'] ?? '') !== '' ? (string)$customer['customer_code'] : (string)$customer['id']); ?></td>
+</tr>
+
+<tr>
+<th>Customer Name</th>
 <td><?php echo htmlspecialchars($customer['customer_name']); ?></td>
 </tr>
 
@@ -828,10 +865,24 @@ No ledger entries found.
 
 <table class="table table-bordered">
 
+<?php if($is_housing_company && trim((string)($group['file_no'] ?? '')) !== ''){ ?>
+<tr>
+<th>File No.</th>
+<td><?php echo htmlspecialchars((string)$group['file_no']); ?></td>
+</tr>
+<?php } ?>
+
 <tr>
 <th><?php echo htmlspecialchars($package_details_label); ?></th>
 <td><?php echo htmlspecialchars($group['project_details']); ?></td>
 </tr>
+
+<?php if($is_housing_company && trim((string)($group['plot_details'] ?? '')) !== ''){ ?>
+<tr>
+<th>Plot Details</th>
+<td><?php echo htmlspecialchars((string)$group['plot_details']); ?></td>
+</tr>
+<?php } ?>
 
 <tr>
 <th>Booking Date</th>
