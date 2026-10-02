@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/company_settings_helper.php';
+
 function ensure_product_expiry_column($conn)
 {
     $result = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'expired_on'");
@@ -42,6 +44,7 @@ function current_product_expiry_option($conn)
     }
 
     ensure_product_management_columns($conn);
+    ensure_company_setting_columns($conn);
 
     $user_id = (int)($_SESSION['user_id'] ?? 0);
 
@@ -51,7 +54,7 @@ function current_product_expiry_option($conn)
 
     $stmt = mysqli_prepare(
         $conn,
-        "SELECT product_expiry_option
+        "SELECT product_expiry_option,company_type
          FROM users
          WHERE id=?
          LIMIT 1"
@@ -64,6 +67,10 @@ function current_product_expiry_option($conn)
     mysqli_stmt_bind_param($stmt, "i", $user_id);
     mysqli_stmt_execute($stmt);
     $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+    if(normalize_company_type($row['company_type'] ?? 'Housing') === 'Fashion house'){
+        return 'inactive';
+    }
 
     return normalize_product_expiry_option($row['product_expiry_option'] ?? 'active');
 }

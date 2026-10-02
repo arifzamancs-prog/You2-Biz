@@ -563,9 +563,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!hash_equals($_SESSION['multi_branch_csrf'], (string)($_POST['csrf_token'] ?? ''))) {
             super_admin_flash_and_redirect('Invalid request. Please try again.', 'danger');
         }
-        if (!is_super_admin_login(super_admin_notify_email(), (string)($_POST['super_admin_password'] ?? ''))) {
-            super_admin_flash_and_redirect('Super Admin password is incorrect.', 'danger');
-        }
         $enabled = (string)($_POST['multi_branch_enabled'] ?? '');
         if ($company_id <= 0 || !in_array($enabled, ['0', '1'], true)) {
             super_admin_flash_and_redirect('Invalid company or Multi Branch status.', 'danger');
@@ -592,7 +589,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $company_type = normalize_company_type($company_type);
 
-        $stock_enabled = $company_type === 'Stock Product' ? 1 : 0;
+        $stock_enabled = company_type_uses_stock_products($company_type) ? 1 : 0;
         $type_stmt = mysqli_prepare(
             $conn,
             "UPDATE users
@@ -790,7 +787,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $company_type = normalize_company_type($company_type);
-        $stock_enabled = $company_type === 'Stock Product' ? 1 : 0;
+        $stock_enabled = company_type_uses_stock_products($company_type) ? 1 : 0;
         $password_hash = password_hash($company_password, PASSWORD_DEFAULT);
         $avatar = branding_company_default_avatar_filename($conn);
         $create_stmt = mysqli_prepare(
@@ -884,6 +881,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $company_name = trim((string)($_POST['company_name'] ?? ''));
         $company_email = trim((string)($_POST['company_email'] ?? ''));
         $company_phone = trim((string)($_POST['company_phone'] ?? ''));
+        $company_password = (string)($_POST['company_password'] ?? '');
+        $company_password_confirm = (string)($_POST['company_password_confirm'] ?? '');
+        $password_reset_requested = $company_password !== '' || $company_password_confirm !== '';
 
         if($company_id <= 0){
             super_admin_flash_and_redirect('Invalid company selected.', 'danger');
@@ -899,6 +899,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if($company_phone === ''){
             super_admin_flash_and_redirect('Company phone number is required.', 'danger');
+        }
+
+        if($password_reset_requested && strlen($company_password) < 6){
+            super_admin_flash_and_redirect('New password must be at least 6 characters.', 'danger');
+        }
+
+        if($password_reset_requested && !hash_equals($company_password, $company_password_confirm)){
+            super_admin_flash_and_redirect('New password and confirmation do not match.', 'danger');
         }
 
         $company_check_stmt = mysqli_prepare(
@@ -948,30 +956,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect($duplicate_message, 'danger');
         }
 
-        $contact_stmt = mysqli_prepare(
-            $conn,
-            "UPDATE users
-             SET name=?,
-                 email=?,
-                 phone=?,
-                 status='active',
-                 email_verified=1,
-                 email_verified_at=NOW(),
-                 email_verification_token_hash=NULL,
-                 email_verification_expires_at=NULL
-             WHERE id=?
-             AND role='admin'
-             LIMIT 1"
-        );
+        $contact_sql = "UPDATE users
+                        SET name=?,
+                            email=?,
+                            phone=?";
+
+        if($password_reset_requested){
+            $contact_sql .= ", password=?";
+        }
+
+        $contact_sql .= ", status='active',
+                           email_verified=1,
+                           email_verified_at=NOW(),
+                           email_verification_token_hash=NULL,
+                           email_verification_expires_at=NULL
+                         WHERE id=?
+                         AND role='admin'
+                         LIMIT 1";
+
+        $contact_stmt = mysqli_prepare($conn, $contact_sql);
 
         if(!$contact_stmt){
             super_admin_flash_and_redirect('Contact update failed.', 'danger');
         }
 
-        mysqli_stmt_bind_param($contact_stmt, "sssi", $company_name, $company_email, $company_phone, $company_id);
+        if($password_reset_requested){
+            $company_password_hash = password_hash($company_password, PASSWORD_DEFAULT);
+            mysqli_stmt_bind_param($contact_stmt, "ssssi", $company_name, $company_email, $company_phone, $company_password_hash, $company_id);
+        }else{
+            mysqli_stmt_bind_param($contact_stmt, "sssi", $company_name, $company_email, $company_phone, $company_id);
+        }
 
         if(mysqli_stmt_execute($contact_stmt)){
-            super_admin_flash_and_redirect('Company profile updated and verified successfully.', 'success');
+            super_admin_flash_and_redirect(
+                $password_reset_requested
+                    ? 'Company profile updated and password changed successfully.'
+                    : 'Company profile updated and verified successfully.',
+                'success'
+            );
         }
 
         super_admin_flash_and_redirect('Contact update failed.', 'danger');
@@ -1463,17 +1485,17 @@ require_once '../includes/sidebar.php';
                                         <option value="Housing" <?= $company_type === 'Housing' ? 'selected' : ''; ?>>Housing</option>
                                         <option value="Others" <?= $company_type === 'Others' ? 'selected' : ''; ?>>Others</option>
                                         <option value="Stock Product" <?= $company_type === 'Stock Product' ? 'selected' : ''; ?>>Stock Product</option>
+                                        <option value="Fashion house" <?= $company_type === 'Fashion house' ? 'selected' : ''; ?>>Fashion house</option>
                                     </select>
                                     <div class="input-group-append">
                                         <button type="submit" class="btn btn-primary">Update</button>
                                     </div>
                                 </div>
                             </form>
-                            <form method="post" class="mt-2" onsubmit="var password = window.prompt('Enter Super Admin password to update Multi Branch.'); if(password === null || password === ''){ return false; } this.elements['super_admin_password'].value = password;">
+                            <form method="post" class="mt-2">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                 <input type="hidden" name="form_action" value="update_multi_branch">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['multi_branch_csrf']) ?>">
-                                <input type="hidden" name="super_admin_password" value="">
                                 <label class="small mb-1 d-block">Multi Branch</label>
                                 <div class="input-group">
                                     <select name="multi_branch_enabled" class="form-control">
@@ -1516,6 +1538,21 @@ require_once '../includes/sidebar.php';
                                         value="<?= htmlspecialchars($row['phone']); ?>"
                                         placeholder="Phone"
                                         required>
+                                    <small class="text-muted d-block mt-2 mb-1">Leave password fields blank to keep the current password.</small>
+                                    <input
+                                        type="password"
+                                        name="company_password"
+                                        class="form-control form-control-sm company-profile-input mb-1"
+                                        placeholder="New password (minimum 6 characters)"
+                                        autocomplete="new-password"
+                                        minlength="6">
+                                    <input
+                                        type="password"
+                                        name="company_password_confirm"
+                                        class="form-control form-control-sm company-profile-input"
+                                        placeholder="Confirm new password"
+                                        autocomplete="new-password"
+                                        minlength="6">
                                 </div>
                                 <div class="mt-2">
                                     <button
@@ -1902,6 +1939,10 @@ require_once '../includes/sidebar.php';
                     <div class="custom-control custom-radio">
                         <input type="radio" id="create_company_type_stock_product" name="company_type" value="Stock Product" class="custom-control-input" required>
                         <label class="custom-control-label" for="create_company_type_stock_product">Stock Product</label>
+                    </div>
+                    <div class="custom-control custom-radio">
+                        <input type="radio" id="create_company_type_fashion_house" name="company_type" value="Fashion house" class="custom-control-input" required>
+                        <label class="custom-control-label" for="create_company_type_fashion_house">Fashion house</label>
                     </div>
                 </div>
                 <div class="form-group">

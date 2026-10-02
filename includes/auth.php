@@ -384,6 +384,7 @@ function block_manager_restricted_actions()
                 'stock_sales' => ['sales/', 'warehouse/sales_report.php'],
                 'products' => ['products/', 'product_categories/'],
                 'warehouse' => ['warehouse/', 'inventory/'],
+                'stock_live_report' => ['warehouse/live_report.php'],
                 'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
                 'projects' => ['project_package/'],
                 'land_ledger' => ['land/'],

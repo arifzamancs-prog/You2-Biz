@@ -217,6 +217,32 @@ mysqli_stmt_bind_param($transfer_stmt, "i", $user_id);
 mysqli_stmt_execute($transfer_stmt);
 $transfers = mysqli_stmt_get_result($transfer_stmt);
 
+$expense_history_sql = "SELECT e.txn_no,e.txn_date,e.amount,e.note,e.approved_at,w.wallet_name,c.category_name,creator.name AS created_by_name,CASE WHEN e.approved_by=e.user_id THEN 'Admin' ELSE approver.name END AS approved_by_name
+                        FROM expenses e
+                        LEFT JOIN wallets w ON w.id=e.wallet_id
+                        LEFT JOIN categories c ON c.id=e.category_id
+                        LEFT JOIN users creator ON creator.id=e.created_by
+                        LEFT JOIN users approver ON approver.id=e.approved_by
+                        WHERE e.user_id=? AND e.approval_status='approved'
+                        ORDER BY e.approved_at DESC,e.id DESC LIMIT 500";
+$expense_history_stmt = mysqli_prepare($conn, $expense_history_sql);
+mysqli_stmt_bind_param($expense_history_stmt, 'i', $user_id);
+mysqli_stmt_execute($expense_history_stmt);
+$expense_history = mysqli_stmt_get_result($expense_history_stmt);
+
+$transfer_history_sql = "SELECT t.txn_no,t.txn_date,t.amount,t.note,t.approved_at,fw.wallet_name AS from_wallet,tw.wallet_name AS to_wallet,creator.name AS created_by_name,CASE WHEN t.approved_by=t.user_id THEN 'Admin' ELSE approver.name END AS approved_by_name
+                         FROM transfers t
+                         LEFT JOIN wallets fw ON fw.id=t.from_wallet_id
+                         LEFT JOIN wallets tw ON tw.id=t.to_wallet_id
+                         LEFT JOIN users creator ON creator.id=t.created_by
+                         LEFT JOIN users approver ON approver.id=t.approved_by
+                         WHERE t.user_id=? AND t.approval_status='approved'
+                         ORDER BY t.approved_at DESC,t.id DESC LIMIT 500";
+$transfer_history_stmt = mysqli_prepare($conn, $transfer_history_sql);
+mysqli_stmt_bind_param($transfer_history_stmt, 'i', $user_id);
+mysqli_stmt_execute($transfer_history_stmt);
+$transfer_history = mysqli_stmt_get_result($transfer_history_stmt);
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -269,6 +295,13 @@ require_once '../includes/sidebar.php';
                         <?php } ?>
                     </tbody>
                 </table>
+                <h5 class="mt-4">Approved History</h5>
+                <div class="table-responsive"><table class="table table-bordered table-striped">
+                    <thead><tr><th>Approved</th><th>Txn No.</th><th>Date</th><th>Wallet</th><th>Category</th><th>Amount</th><th>Created By</th><th>Approved By</th><th>Note</th></tr></thead>
+                    <tbody><?php if($expense_history && mysqli_num_rows($expense_history)>0){ while($row=mysqli_fetch_assoc($expense_history)){ ?>
+                        <tr><td><?= htmlspecialchars(app_datetime($row['approved_at'])); ?></td><td><?= htmlspecialchars($row['txn_no']); ?></td><td><?= htmlspecialchars(app_date($row['txn_date'])); ?></td><td><?= htmlspecialchars($row['wallet_name'] ?? '-'); ?></td><td><?= htmlspecialchars($row['category_name'] ?? '-'); ?></td><td><?= number_format((float)$row['amount'],2); ?></td><td><?= htmlspecialchars($row['created_by_name'] ?? '-'); ?></td><td><?= htmlspecialchars($row['approved_by_name'] ?? '-'); ?></td><td><?= htmlspecialchars($row['note']); ?></td></tr>
+                    <?php } } else { ?><tr><td colspan="9" class="text-center text-muted">No approved expenses yet.</td></tr><?php } ?></tbody>
+                </table></div>
             </div>
 
             <div class="tab-pane fade" id="transfers">
@@ -296,6 +329,13 @@ require_once '../includes/sidebar.php';
                         <?php } ?>
                     </tbody>
                 </table>
+                <h5 class="mt-4">Approved History</h5>
+                <div class="table-responsive"><table class="table table-bordered table-striped">
+                    <thead><tr><th>Approved</th><th>Txn No.</th><th>Date</th><th>From</th><th>To</th><th>Amount</th><th>Created By</th><th>Approved By</th><th>Note</th></tr></thead>
+                    <tbody><?php if($transfer_history && mysqli_num_rows($transfer_history)>0){ while($row=mysqli_fetch_assoc($transfer_history)){ ?>
+                        <tr><td><?= htmlspecialchars(app_datetime($row['approved_at'])); ?></td><td><?= htmlspecialchars($row['txn_no']); ?></td><td><?= htmlspecialchars(app_date($row['txn_date'])); ?></td><td><?= htmlspecialchars($row['from_wallet'] ?? '-'); ?></td><td><?= htmlspecialchars($row['to_wallet'] ?? '-'); ?></td><td><?= number_format((float)$row['amount'],2); ?></td><td><?= htmlspecialchars($row['created_by_name'] ?? '-'); ?></td><td><?= htmlspecialchars($row['approved_by_name'] ?? '-'); ?></td><td><?= htmlspecialchars($row['note']); ?></td></tr>
+                    <?php } } else { ?><tr><td colspan="9" class="text-center text-muted">No approved transfers yet.</td></tr><?php } ?></tbody>
+                </table></div>
             </div>
         </div>
     </div>
@@ -324,5 +364,6 @@ function approval_buttons($source, $id)
 <?php
 }
 
+$page_script = '<script src="../assets/js/ajax_page_actions.js?v=' . filemtime(__DIR__ . '/../assets/js/ajax_page_actions.js') . '"></script>';
 require_once '../includes/footer.php';
 ?>

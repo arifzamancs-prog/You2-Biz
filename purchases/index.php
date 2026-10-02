@@ -13,7 +13,15 @@ $sql = "SELECT
             p.*,
             s.supplier_name,
             COALESCE(SUM(pi.quantity), 0) AS total_quantity,
-            GROUP_CONCAT(DISTINCT pr.product_name ORDER BY pr.product_name SEPARATOR ', ') AS product_names
+            GROUP_CONCAT(DISTINCT CONCAT(pr.product_name, ' [', COALESCE(NULLIF(pr.sku, ''), '—'), ']') ORDER BY pr.product_name SEPARATOR ', ') AS product_names,
+            GROUP_CONCAT(
+                CASE
+                    WHEN COALESCE(pi.variant_name, '') <> '' THEN CONCAT(pi.variant_name, ': ', pi.quantity)
+                    ELSE NULL
+                END
+                ORDER BY pr.product_name, pi.variant_name
+                SEPARATOR ' || '
+            ) AS variant_details
 
         FROM purchases p
 
@@ -105,13 +113,13 @@ class="table table-bordered table-striped">
 
 <tr>
 
-<th>Purchase No</th>
-<th>Date</th>
-<th><?= supplier_display_text('Supplier'); ?></th>
-<th>Product</th>
+<th width="16%">Purchase No</th>
+<th width="10%">Date</th>
+<th width="10%"><?= supplier_display_text('Supplier'); ?></th>
+<th width="17%">Product</th>
 <th>Qty</th>
-<th>Total</th>
-<th>Paid</th>
+<th width="12%">Total</th>
+<th width="12%">Paid</th>
 <th>Status</th>
 <th width="130">Action</th>
 
@@ -146,6 +154,9 @@ $row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$ro
 
 <td>
 <?= htmlspecialchars($row['product_names'] ?: 'Missing Product Link'); ?>
+<?php if(!empty($row['variant_details'])){ ?>
+    <div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_details']); ?></div>
+<?php } ?>
 </td>
 
 <td>

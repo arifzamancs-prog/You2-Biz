@@ -67,6 +67,7 @@ try{
         $invoice_item_id = (int)$item['id'];
         $product_id = (int)$item['product_id'];
         $qty = (int)$item['quantity'];
+        $variant_name = trim((string)($item['variant_name'] ?? ''));
 
         if($qty === 0){
             throw new Exception("Quantity cannot be zero.");
@@ -90,7 +91,7 @@ try{
             continue;
         }
 
-        $snapshot = product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $invoice_id);
+        $snapshot = product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $invoice_id, $variant_name);
         if($qty > (float)$snapshot['available_stock']){
             throw new Exception("Insufficient Stock.");
         }
@@ -148,7 +149,8 @@ try{
                 $user_id,
                 $invoice_item_id,
                 $product_id,
-                $qty
+                $qty,
+                $variant_name
             );
 
             if(!$allocation['success']){

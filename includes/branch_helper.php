@@ -33,6 +33,17 @@ function ensure_branches_table($conn)
     if ($brand_column && mysqli_num_rows($brand_column) === 0) {
         mysqli_query($conn, 'ALTER TABLE branches ADD COLUMN brand_id BIGINT UNSIGNED NULL AFTER user_id, ADD KEY idx_branches_brand (user_id, brand_id)');
     }
+
+    $code_column = mysqli_query($conn, "SHOW COLUMNS FROM branches LIKE 'branch_code'");
+    if ($code_column && mysqli_num_rows($code_column) === 0) {
+        mysqli_query($conn, 'ALTER TABLE branches ADD COLUMN branch_code VARCHAR(50) NULL AFTER branch_name');
+        mysqli_query($conn, "UPDATE branches SET branch_code=CASE WHEN is_head_office=1 THEN 'HO' WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 'MWH' ELSE CONCAT('BR-',id) END WHERE branch_code IS NULL OR branch_code=''");
+    }
+    // Older databases may already have the column but lack its unique index.
+    $code_index = mysqli_query($conn, "SHOW INDEX FROM branches WHERE Key_name='uniq_branch_code_per_company'");
+    if ($code_index && mysqli_num_rows($code_index) === 0) {
+        mysqli_query($conn, 'ALTER TABLE branches ADD UNIQUE KEY uniq_branch_code_per_company (user_id, branch_code)');
+    }
 }
 
 function ensure_branch_brand_tables($conn)

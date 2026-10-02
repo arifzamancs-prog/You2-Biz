@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/manager_access_helper.php';
 require_once __DIR__ . '/staff_attendance_helper.php';
+require_once __DIR__ . '/company_settings_helper.php';
 
 function complete_user_login($conn, $user, $account, $owner_id, $role)
 {
@@ -30,7 +31,7 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
 
     $_SESSION['user_id'] = (int)$owner_id;
     $_SESSION['company_type'] = trim((string)($account['company_type'] ?? 'Housing'));
-    $_SESSION['stock_product_enabled'] = $_SESSION['company_type'] === 'Stock Product';
+    $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type']);
     $_SESSION['user_name'] = $account['name'];
     $_SESSION['avatar'] =
         !empty($account['avatar'])

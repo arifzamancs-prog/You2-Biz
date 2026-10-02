@@ -7,6 +7,8 @@ require_once '../includes/product_category_helper.php';
 $user_id = $_SESSION['user_id'];
 
 ensure_fifo_only_product_categories($conn, $user_id);
+ensure_product_variant_schema($conn);
+ensure_product_subcategory_schema($conn);
 
 $sql = "SELECT *
         FROM product_categories
@@ -74,6 +76,8 @@ require_once '../includes/sidebar.php';
             <tr>
 
                 <th>Category Name</th>
+                <th>Sub Category</th>
+                <th>Variants</th>
                 <th>Status</th>
                 <th>Created</th>
                 <?php if(manager_can_modify()){ ?>
@@ -91,6 +95,8 @@ require_once '../includes/sidebar.php';
             <tr>
 
                 <td><?= htmlspecialchars($row['category_name']); ?></td>
+                <td><?= htmlspecialchars($row['sub_category'] ?: '-'); ?></td>
+                <td><?= htmlspecialchars($row['variant_options'] ?: '-'); ?></td>
 
                 <td>
 

@@ -20,18 +20,18 @@ if (!$branch) {
     exit;
 }
 
-$sql = "SELECT p.id, p.product_name, p.sku,
+$sql = "SELECT p.id, p.product_name, p.sku, sb.variant_name,
     COALESCE(SUM(sb.remaining_quantity),0) AS on_hand,
     (SELECT COALESCE(SUM(ii.quantity),0)
        FROM invoice_items ii
        INNER JOIN invoices i ON i.id=ii.invoice_id
       WHERE i.user_id=p.user_id AND i.branch_id={$branch_id}
-        AND i.accounting_status='pending' AND ii.product_id=p.id AND ii.quantity>0) AS reserved
+        AND i.accounting_status='pending' AND ii.product_id=p.id AND COALESCE(ii.variant_name,'')=COALESCE(sb.variant_name,'') AND ii.quantity>0) AS reserved
     FROM products p
     INNER JOIN product_categories c ON c.id=p.category_id
-    LEFT JOIN stock_batches sb ON sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$branch_id}
+    INNER JOIN stock_batches sb ON sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$branch_id} AND sb.remaining_quantity>0
     WHERE p.user_id={$user_id} AND p.status='active' AND c.category_type='stock_product'
-    GROUP BY p.id, p.product_name, p.sku, p.user_id
+    GROUP BY p.id, p.product_name, p.sku, p.user_id, sb.variant_name
     HAVING on_hand > 0
     ORDER BY p.product_name";
 
@@ -40,8 +40,16 @@ $products = [];
 while ($row = $result ? mysqli_fetch_assoc($result) : null) {
     $available = max(0, (float)$row['on_hand'] - (float)$row['reserved']);
     if ($available > 0) {
-        $products[] = ['id' => (int)$row['id'], 'name' => product_option_label($row['product_name'], $row['sku'] ?? ''), 'available' => $available];
+        $product_id = (int)$row['id'];
+        if(!isset($products[$product_id])){
+            $products[$product_id] = ['id' => $product_id, 'name' => product_option_label($row['product_name'], $row['sku'] ?? ''), 'available' => 0, 'variants' => []];
+        }
+        $products[$product_id]['available'] += $available;
+        $variant_name = (string)($row['variant_name'] ?? '');
+        if($variant_name !== ''){
+            $products[$product_id]['variants'][] = ['name' => $variant_name, 'available' => $available];
+        }
     }
 }
 
-echo json_encode($products);
+echo json_encode(array_values($products));

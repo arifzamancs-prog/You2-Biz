@@ -3,6 +3,7 @@
 require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/lead_management_helper.php';
 require_once __DIR__ . '/branch_context_helper.php';
+require_once __DIR__ . '/project_package_helper.php';
 
 $avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $has_active_subscription = false;
@@ -36,6 +37,8 @@ if (is_manager_user()) {
 
 $navbar_staff_id = isset($conn) ? current_manager_staff_id($conn) : current_manager_staff_id();
 $followup_notifications = [];
+$stock_receive_notifications = [];
+$damaged_return_notifications = [];
 $navbar_branches = [];
 $navbar_selected_branch = 0;
 
@@ -46,11 +49,63 @@ if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
     $navbar_can_switch_branches = is_admin_user()
         || (is_manager_user() && manager_can_view_all_branches($conn, $navbar_company_id));
     if($navbar_can_switch_branches && company_multi_branch_enabled($conn, $navbar_company_id)){
-        $branch_stmt = mysqli_prepare($conn, "SELECT id,branch_name FROM branches WHERE user_id=? AND status='active' ORDER BY CASE WHEN is_head_office=1 THEN 0 WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 1 ELSE 2 END, branch_name ASC");
+        $branch_stmt = mysqli_prepare($conn, "SELECT id,branch_name,branch_code FROM branches WHERE user_id=? AND status='active' ORDER BY CASE WHEN is_head_office=1 THEN 0 WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 1 ELSE 2 END, branch_name ASC");
         mysqli_stmt_bind_param($branch_stmt, 'i', $navbar_company_id);
         mysqli_stmt_execute($branch_stmt);
         $branch_result = mysqli_stmt_get_result($branch_stmt);
         while($branch_result && ($branch = mysqli_fetch_assoc($branch_result))) $navbar_branches[] = $branch;
+    }
+}
+
+if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
+    $stock_notification_company_id = (int)($_SESSION['user_id'] ?? 0);
+    $stock_notification_branch_id = $navbar_selected_branch > 0
+        ? $navbar_selected_branch
+        : selected_branch_id($conn, true);
+    if ($stock_notification_company_id > 0 && $stock_notification_branch_id > 0 && company_multi_branch_enabled($conn, $stock_notification_company_id)) {
+        $stock_notification_sql = "SELECT
+                MIN(d.id) AS id,
+                MAX(d.reference_no) AS reference_no,
+                SUM(d.quantity) AS quantity,
+                MAX(d.created_at) AS created_at,
+                COUNT(d.id) AS request_count,
+                p.id AS product_id,
+                p.product_name,
+                p.sku
+            FROM stock_distributions d
+            INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
+            WHERE d.user_id=? AND d.to_branch_id=? AND d.status='pending'
+            GROUP BY p.id,p.product_name,p.sku
+            ORDER BY MAX(d.created_at) ASC";
+        $stock_notification_stmt = mysqli_prepare($conn, $stock_notification_sql);
+        if ($stock_notification_stmt) {
+            mysqli_stmt_bind_param($stock_notification_stmt, 'ii', $stock_notification_company_id, $stock_notification_branch_id);
+            mysqli_stmt_execute($stock_notification_stmt);
+            $stock_notification_result = mysqli_stmt_get_result($stock_notification_stmt);
+            while ($stock_notification_result && ($stock_notification = mysqli_fetch_assoc($stock_notification_result))) $stock_receive_notifications[] = $stock_notification;
+            mysqli_stmt_close($stock_notification_stmt);
+        }
+    }
+}
+
+// Damaged returns are handled by the central warehouse. Keep these visible
+// regardless of the branch currently selected in the navbar.
+if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
+    $damage_notification_company_id = (int)($_SESSION['user_id'] ?? 0);
+    if ($damage_notification_company_id > 0 && stock_can_manage_warehouse($conn) && company_multi_branch_enabled($conn, $damage_notification_company_id) && project_package_company_type($conn, $damage_notification_company_id) === 'Fashion house') {
+        $damage_notification_sql = "SELECT dr.id,dr.quantity,dr.variant_name,dr.created_at,p.product_name,p.sku,b.branch_name,b.is_head_office
+            FROM stock_damage_returns dr
+            INNER JOIN products p ON p.id=dr.product_id AND p.user_id=dr.user_id
+            INNER JOIN branches b ON b.id=dr.branch_id AND b.user_id=dr.user_id
+            WHERE dr.user_id=? AND dr.status='pending' ORDER BY dr.created_at ASC LIMIT 20";
+        $damage_notification_stmt = mysqli_prepare($conn, $damage_notification_sql);
+        if ($damage_notification_stmt) {
+            mysqli_stmt_bind_param($damage_notification_stmt, 'i', $damage_notification_company_id);
+            mysqli_stmt_execute($damage_notification_stmt);
+            $damage_notification_result = mysqli_stmt_get_result($damage_notification_stmt);
+            while ($damage_notification_result && ($damage_notification = mysqli_fetch_assoc($damage_notification_result))) $damaged_return_notifications[] = $damage_notification;
+            mysqli_stmt_close($damage_notification_stmt);
+        }
     }
 }
 
@@ -143,7 +198,7 @@ if (
                 <select name="branch_id" class="form-control form-control-sm" onchange="this.form.submit()" title="View branch">
                     <option value="0" <?= $navbar_selected_branch === 0 ? 'selected' : ''; ?>>All Branches</option>
                     <?php foreach($navbar_branches as $branch){ ?>
-                        <option value="<?= (int)$branch['id']; ?>" <?= $navbar_selected_branch === (int)$branch['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($branch['branch_name']); ?></option>
+                        <option value="<?= (int)$branch['id']; ?>" <?= $navbar_selected_branch === (int)$branch['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($branch['branch_name'] . (!empty($branch['branch_code']) ? ' [' . $branch['branch_code'] . ']' : '')); ?></option>
                     <?php } ?>
                 </select>
             </form>
@@ -155,15 +210,31 @@ if (
         <li class="nav-item dropdown">
             <a class="nav-link position-relative" data-toggle="dropdown" href="#" title="Notifications" aria-label="Notifications">
                 <i class="far fa-bell"></i>
-                <?php if(count($followup_notifications) > 0){ ?>
-                    <span class="badge badge-danger navbar-badge"><?= count($followup_notifications); ?></span>
+                <?php if(count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications) > 0){ ?>
+                    <span class="badge badge-danger navbar-badge"><?= count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications); ?></span>
                 <?php } ?>
             </a>
             <div class="dropdown-menu dropdown-menu-right navbar-followup-dropdown">
                 <div class="navbar-followup-heading">
-                    <span><i class="far fa-bell mr-2"></i>Follow-up Notifications</span>
-                    <span class="badge badge-primary badge-pill"><?= count($followup_notifications); ?></span>
+                    <span><i class="far fa-bell mr-2"></i>Notifications</span>
+                    <span class="badge badge-primary badge-pill"><?= count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications); ?></span>
                 </div>
+                <?php if($damaged_return_notifications){ ?>
+                    <?php foreach($damaged_return_notifications as $notification){ ?>
+                        <a href="<?= htmlspecialchars(app_path('warehouse/damaged_returns.php?return_id=' . (int)$notification['id'] . '#damage-return-' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
+                            <span class="lead-followup-icon bg-danger"><i class="fas fa-exclamation-triangle"></i></span>
+                            <span class="lead-followup-content"><span class="lead-followup-title"><?= htmlspecialchars($notification['product_name']); ?><?= $notification['variant_name'] !== '' ? ' · ' . htmlspecialchars($notification['variant_name']) : ''; ?> · <?= number_format((float)$notification['quantity'], 0); ?> pcs</span><span class="lead-followup-meta">Damaged return request · <?= htmlspecialchars($notification['is_head_office'] ? 'Head Office' : $notification['branch_name']); ?></span><span class="lead-followup-due">Date: <?= htmlspecialchars(app_date($notification['created_at'])); ?></span></span>
+                        </a>
+                    <?php } ?>
+                <?php } ?>
+                <?php if($stock_receive_notifications){ ?>
+                    <?php foreach($stock_receive_notifications as $notification){ ?>
+                        <a href="<?= htmlspecialchars(app_path('sales/receive_stock.php?distribution_id=' . (int)$notification['id'] . '#receive-request-' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
+                            <span class="lead-followup-icon bg-success"><i class="fas fa-truck-loading"></i></span>
+                            <span class="lead-followup-content"><span class="lead-followup-title"><?= htmlspecialchars($notification['product_name']); ?><?= trim((string)($notification['sku'] ?? '')) !== '' ? ' [Code: ' . htmlspecialchars($notification['sku']) . ']' : ''; ?> · <?= number_format((float)$notification['quantity'], 0); ?> pcs</span><span class="lead-followup-meta">Stock receive request<?= (int)$notification['request_count'] > 1 ? ' · ' . (int)$notification['request_count'] . ' items' : ' · ' . htmlspecialchars($notification['reference_no']); ?></span><span class="lead-followup-due">Date: <?= htmlspecialchars(app_date($notification['created_at'])); ?></span></span>
+                        </a>
+                    <?php } ?>
+                <?php } ?>
                 <?php if($followup_notifications){ ?>
                     <?php foreach($followup_notifications as $notification){ ?>
                         <a href="<?= htmlspecialchars(app_path('lead_management/read_followup_notification.php?id=' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
@@ -178,8 +249,8 @@ if (
                             </span>
                         </a>
                     <?php } ?>
-                <?php }else{ ?>
-                    <span class="dropdown-item text-muted py-3"><i class="far fa-bell-slash mr-2"></i>No follow-up for today.</span>
+                <?php }elseif(!$stock_receive_notifications && !$damaged_return_notifications){ ?>
+                    <span class="dropdown-item text-muted py-3"><i class="far fa-bell-slash mr-2"></i>No notifications.</span>
                 <?php } ?>
             </div>
         </li>

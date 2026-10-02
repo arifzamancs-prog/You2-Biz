@@ -29,12 +29,28 @@ function stock_warehouse_id($conn, $company_id)
     return $id;
 }
 
+/**
+ * The central stock location depends on the company's branch setup.
+ * With one branch, Head Office is the actual selling stock location. Once
+ * Multi Branch is enabled, purchases first arrive at Main Warehouse and are
+ * then distributed to the selling branches.
+ */
+function stock_purchase_location_id($conn, $company_id)
+{
+    return company_multi_branch_enabled($conn, (int)$company_id)
+        ? stock_warehouse_id($conn, (int)$company_id)
+        : stock_head_office_id($conn, (int)$company_id);
+}
+
 function stock_migrate_head_office_inventory_to_warehouse($conn, $company_id)
 {
     static $done = [];
     $company_id = (int)$company_id;
     if (isset($done[$company_id])) return;
     $done[$company_id] = true;
+    // A separate warehouse exists only for companies using Multi Branch.
+    // Single-branch stock stays at Head Office so it is immediately sellable.
+    if (!company_multi_branch_enabled($conn, $company_id)) return;
     $head_id = stock_head_office_id($conn, $company_id);
     $warehouse_id = stock_warehouse_id($conn, $company_id);
     mysqli_query($conn, 'CREATE TABLE IF NOT EXISTS stock_warehouse_migrations (user_id BIGINT UNSIGNED PRIMARY KEY, completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
@@ -135,14 +151,18 @@ function ensure_stock_module_feature_column($conn)
 function stock_module_bootstrap($conn)
 {
     require_once __DIR__ . '/company_settings_helper.php';
+    // Branch tables are also required by the login-time stock bootstrap.
+    // Create them before any branch query so a fresh installation can log in.
+    ensure_branches_table($conn);
     ensure_company_setting_columns($conn);
     ensure_stock_module_feature_column($conn);
     $company_id = (int)($_SESSION['user_id'] ?? 0);
     if ($company_id <= 0) return;
+    ensure_head_office_branch($conn, $company_id);
     $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT company_type, fifo_enabled FROM users WHERE id={$company_id}"));
     $_SESSION['company_type'] = normalize_company_type($row['company_type'] ?? 'Housing');
     $_SESSION['fifo_enabled'] = (int)($row['fifo_enabled'] ?? 0);
-    $_SESSION['stock_product_enabled'] = $_SESSION['company_type'] === 'Stock Product'
+    $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type'])
         && $_SESSION['fifo_enabled'] === 1;
 
     // Dashboards and existing financial reports can read stock tables before
@@ -207,8 +227,10 @@ function stock_module_bootstrap($conn)
         exit;
     }
     if (in_array($module, ['purchases', 'suppliers'], true)) {
-        // Do not let a navbar filter send central purchase payments to a branch.
-        $GLOBALS['stock_wallet_branch_id'] = stock_warehouse_id($conn, $company_id);
+        // Vendor payments are always made from Head Office finance. This is
+        // intentionally separate from the stock location: under Multi Branch
+        // purchased stock lands in Main Warehouse, not in a branch wallet.
+        $GLOBALS['stock_wallet_branch_id'] = stock_head_office_id($conn, $company_id);
     }
     if ($module === 'sales' && in_array($file, ['edit_invoice.php', 'update_invoice.php', 'post_invoice.php', 'delete_invoice.php', 'payment_entry.php', 'payment_save.php', 'view_invoice.php', 'print_invoice.php'], true)) {
         $id = (int)($_POST['invoice_id'] ?? $_GET['id'] ?? 0);

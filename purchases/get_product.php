@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -32,11 +33,14 @@ $result = mysqli_stmt_get_result($stmt);
 
 $product = mysqli_fetch_assoc($result);
 
+$variants = $product ? product_variant_names($conn, $product_id, $user_id) : [];
+
 echo json_encode([
 
     "cost_price" => $product['purchase_price'] ?? 0,
     "sale_price" => $product['sale_price'] ?? 0,
 
-    "stock"      => (int)($product['current_stock'] ?? 0)
+    "stock"      => (int)($product['current_stock'] ?? 0),
+    "variants"   => $variants
 
 ]);

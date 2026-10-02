@@ -13,13 +13,25 @@ require_once '../includes/branch_context_helper.php';
 
 $message = '';
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int)$_SESSION['user_id'];
 ensure_branch_accounting_columns($conn, $user_id);
 $branch_id = selected_branch_id($conn, true);
 
 ensure_default_cash_wallet($conn, $user_id);
 ensure_staff_table($conn);
 ensure_expense_support_tables($conn, $user_id);
+
+$receiver_branch_stmt = mysqli_prepare($conn, 'SELECT is_head_office FROM branches WHERE id=? AND user_id=? LIMIT 1');
+mysqli_stmt_bind_param($receiver_branch_stmt, 'ii', $branch_id, $user_id);
+mysqli_stmt_execute($receiver_branch_stmt);
+$receiver_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($receiver_branch_stmt));
+mysqli_stmt_close($receiver_branch_stmt);
+$receiver_scope = "s.user_id={$user_id} AND s.status='active'";
+if (!$receiver_branch || !(int)$receiver_branch['is_head_office']) {
+    // Access Management stores the assigned branch on the linked staff record.
+    $receiver_scope .= ' AND s.branch_id=' . (int)$branch_id
+        . " AND EXISTS (SELECT 1 FROM users u WHERE u.owner_id=s.user_id AND u.staff_id=s.id AND u.role='manager' AND u.status='active')";
+}
 
 if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
@@ -59,7 +71,15 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
 
     $wallet = mysqli_fetch_assoc($result);
 
-    if(!$wallet){
+    $receiver_stmt = mysqli_prepare($conn, "SELECT s.id FROM staff s WHERE {$receiver_scope} AND s.id=? LIMIT 1");
+    mysqli_stmt_bind_param($receiver_stmt, 'i', $staff_id);
+    mysqli_stmt_execute($receiver_stmt);
+    $receiver_allowed = mysqli_num_rows(mysqli_stmt_get_result($receiver_stmt)) > 0;
+    mysqli_stmt_close($receiver_stmt);
+
+    if (!$receiver_allowed) {
+        $message = 'Select an available receiver assigned to this branch.';
+    }elseif(!$wallet){
 
         $message = "Wallet Not Found";
 
@@ -211,11 +231,10 @@ $categories = mysqli_query(
 
 $staffs = mysqli_query(
     $conn,
-    "SELECT id, name, staff_code
-     FROM staff
-     WHERE user_id = $user_id
-     AND status='active'
-     ORDER BY name ASC"
+    "SELECT s.id, s.name, s.staff_code
+     FROM staff s
+     WHERE {$receiver_scope}
+     ORDER BY s.name ASC"
 );
 
 require_once '../includes/header.php';

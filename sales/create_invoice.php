@@ -11,6 +11,7 @@ require_once '../includes/input_validation_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
+require_once '../includes/branch_context_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -75,6 +76,21 @@ $charges = mysqli_query(
      ORDER BY charge_name"
 );
 
+/* Recent invoices: same branch/user scope as Invoice List. */
+$recent_branch_scope = branch_scope_sql($conn, 'invoices');
+$recent_agent_user_id = (int)($_SESSION['login_user_id'] ?? 0);
+if (is_agent_user()) {
+    $recent_sql = "SELECT * FROM invoices WHERE user_id=? {$recent_branch_scope} AND created_by_user_id=? ORDER BY id DESC LIMIT 5";
+    $recent_stmt = mysqli_prepare($conn, $recent_sql);
+    mysqli_stmt_bind_param($recent_stmt, 'ii', $user_id, $recent_agent_user_id);
+} else {
+    $recent_sql = "SELECT * FROM invoices WHERE user_id=? {$recent_branch_scope} ORDER BY id DESC LIMIT 5";
+    $recent_stmt = mysqli_prepare($conn, $recent_sql);
+    mysqli_stmt_bind_param($recent_stmt, 'i', $user_id);
+}
+mysqli_stmt_execute($recent_stmt);
+$recent_invoices = mysqli_stmt_get_result($recent_stmt);
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -98,9 +114,28 @@ require_once '../includes/sidebar.php';
     <div class="card-body">
 
         <?php if(isset($_GET['success'])){ ?>
-            <div class="alert alert-success">
+            <div class="alert alert-success" id="invoiceSuccessAlert">
                 Sales voucher saved successfully.
             </div>
+            <?php unset($_SESSION['error']); ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function(){
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('success');
+                    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+
+                    window.setTimeout(function(){
+                        const alert = document.getElementById('invoiceSuccessAlert');
+                        if(!alert){
+                            return;
+                        }
+
+                        alert.style.transition = 'opacity 0.3s ease';
+                        alert.style.opacity = '0';
+                        window.setTimeout(function(){ alert.remove(); }, 300);
+                    }, 3000);
+                });
+            </script>
         <?php } ?>
 
         <?php if(!empty($_SESSION['error'])){ ?>
@@ -294,6 +329,8 @@ require_once '../includes/sidebar.php';
 
                     </th>
 
+                    <th class="variant-column d-none">Variant</th>
+
                     <th class="stock-column">
 
                         Stock
@@ -362,6 +399,8 @@ require_once '../includes/sidebar.php';
                         </select>
 
                     </td>
+
+                    <td class="variant-column d-none"><select name="variant_name[]" class="form-control product-variant d-none"><option value="">No variant</option></select></td>
 
                     <td class="stock-column">
 
@@ -627,7 +666,7 @@ require_once '../includes/sidebar.php';
     name="action"
     value="save"
     class="btn btn-primary btn-lg mb-2 mb-sm-0"
-    onclick="$(this).closest('form').removeAttr('target'); $('#action').val('save');">
+    onclick="$('#action').val('save');">
 
     <i class="fas fa-save"></i>
 
@@ -642,7 +681,7 @@ require_once '../includes/sidebar.php';
     name="action"
     value="print"
     class="btn btn-success btn-lg ml-sm-2"
-    onclick="$(this).closest('form').attr('target', 'invoicePrintWindow'); $('#action').val('print');">
+    onclick="$('#action').val('print');">
 
     <i class="fas fa-print"></i>
 
@@ -657,6 +696,46 @@ require_once '../includes/sidebar.php';
 
     </div>
 
+</div>
+
+<div class="card" id="recent-invoices-card">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title"><i class="fas fa-history mr-2"></i>Recent 5 Invoices</h3>
+        <a href="invoice_list.php" class="btn btn-sm btn-outline-primary ml-auto">View All Invoices</a>
+    </div>
+    <div class="card-body table-responsive p-0">
+        <table class="table table-bordered table-striped mb-0">
+            <thead>
+                <tr><th>Invoice No</th><th>Date</th><th>Customer</th><th>Total</th><th>Paid</th><th>Due</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody id="recent-invoices-body">
+            <?php while ($recent = mysqli_fetch_assoc($recent_invoices)) {
+                $recent_pending = ($recent['accounting_status'] ?? 'posted') === 'pending';
+                $recent_status = $recent_pending ? 'Pending' : (($recent['payment_status'] ?? '') === 'paid' ? 'Paid' : (($recent['payment_status'] ?? '') === 'partial' ? 'Partial' : 'Due'));
+                $recent_badge = $recent_pending ? 'secondary' : (($recent['payment_status'] ?? '') === 'paid' ? 'success' : (($recent['payment_status'] ?? '') === 'partial' ? 'warning' : 'danger'));
+            ?>
+                <tr data-invoice-id="<?= (int)$recent['id']; ?>">
+                    <td><?= htmlspecialchars($recent['invoice_no']); ?></td>
+                    <td><?= htmlspecialchars(app_date($recent['invoice_date'])); ?></td>
+                    <td><?= htmlspecialchars($recent['customer_name']); ?></td>
+                    <td><?= number_format((float)$recent['total_amount'], 2); ?></td>
+                    <td><?= number_format((float)$recent['paid_amount'], 2); ?></td>
+                    <td><?= number_format((float)$recent['due_amount'], 2); ?></td>
+                    <td><span class="badge badge-<?= $recent_badge; ?>"><?= $recent_status; ?></span></td>
+                    <td class="text-nowrap">
+                        <a href="view_invoice.php?id=<?= (int)$recent['id']; ?>" class="btn btn-info btn-sm">View</a>
+                        <?php if ($recent_pending && !is_agent_user()) { ?>
+                            <a href="post_invoice.php?id=<?= (int)$recent['id']; ?>&reload_parent=create" target="invoicePrintWindow" class="btn btn-success btn-sm">Pay &amp; Print</a>
+                        <?php } elseif (!$recent_pending) { ?>
+                            <a href="print_invoice.php?id=<?= (int)$recent['id']; ?>" target="_blank" class="btn btn-success btn-sm">Print</a>
+                        <?php } ?>
+                    </td>
+                </tr>
+            <?php } ?>
+            <?php if (mysqli_num_rows($recent_invoices) === 0) { ?><tr id="recent-invoices-empty"><td colspan="8" class="text-center text-muted">No invoices created yet.</td></tr><?php } ?>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <?php
@@ -716,6 +795,7 @@ $(document).ready(function(){
 
     initProductSelect($("#productTable"));
     initCustomerSupplierSelect($(document));
+    updateVariantColumnVisibility();
 
     /* Customer Type */
 
@@ -784,13 +864,6 @@ if($(this).val()=="instant"){
         }
 
         if($("#customer_type").val() !== "instant"){
-            if(currentAction === "print"){
-                const reloadUrl = "create_invoice.php?success=1";
-
-                setTimeout(function(){
-                    window.location.href = reloadUrl;
-                }, 250);
-            }
             return true;
         }
 
@@ -807,13 +880,6 @@ if($(this).val()=="instant"){
         }
 
         if(!hasAnyCustomerData){
-            if(currentAction === "print"){
-                const reloadUrl = "create_invoice.php?success=1";
-
-                setTimeout(function(){
-                    window.location.href = reloadUrl;
-                }, 250);
-            }
             return true;
         }
 
@@ -843,15 +909,129 @@ if($(this).val()=="instant"){
             return false;
         }
 
-        if(currentAction === "print"){
-            const reloadUrl = "create_invoice.php?success=1";
+        return true;
+    });
 
-            setTimeout(function(){
-                window.location.href = reloadUrl;
-            }, 250);
+    function showInvoiceAjaxMessage(message, success){
+        let alertBox = $("#invoiceAjaxMessage");
+        if(!alertBox.length){
+            alertBox = $("<div id=\"invoiceAjaxMessage\" role=\"alert\"></div>");
+            $("form[action=\"save_invoice.php\"]").before(alertBox);
+        }
+        alertBox
+            .removeClass("alert-success alert-danger")
+            .addClass("alert " + (success ? "alert-success" : "alert-danger"))
+            .text(message)
+            .stop(true, true)
+            .show();
+        if(success){
+            window.setTimeout(function(){ alertBox.fadeOut(250); }, 3500);
+        }
+    }
+
+    function resetInvoiceFormAfterAjax(){
+        const form = $("form[action=\"save_invoice.php\"]");
+        form[0].reset();
+        $("#productTable tbody tr").slice(1).remove();
+        const firstRow = $("#productTable tbody tr:first");
+        firstRow.removeData("is-stock-product").removeData("has-variants");
+        firstRow.find(".product").val("").trigger("change");
+        firstRow.find(".product-variant")
+            .html("<option value=\"\">No variant</option>")
+            .val("")
+            .prop("required", false)
+            .removeClass("select2-hidden-accessible")
+            .addClass("d-none");
+        firstRow.find(".stock,.price,.line_total").val("");
+        firstRow.find(".qty").val(1);
+        $(".charge").val(0);
+        $(".customer-select").val("").trigger("change");
+        $("#customer_type").trigger("change");
+        $("#reference_staff_id,#reference_table_id").val("").trigger("change");
+        paidAmountManuallyChanged = false;
+        $("#action").val("save");
+        updateStockColumnVisibility();
+        updateVariantColumnVisibility();
+        calculateGrandTotal();
+    }
+
+    function prependRecentInvoice(invoice){
+        if(!invoice) return;
+        const body = $("#recent-invoices-body");
+        body.find("#recent-invoices-empty").remove();
+        const row = $("<tr>").attr("data-invoice-id", invoice.id);
+        $("<td>").text(invoice.invoice_no).appendTo(row);
+        $("<td>").text(invoice.invoice_date).appendTo(row);
+        $("<td>").text(invoice.customer_name).appendTo(row);
+        $("<td>").text(invoice.total_amount).appendTo(row);
+        $("<td>").text(invoice.paid_amount).appendTo(row);
+        $("<td>").text(invoice.due_amount).appendTo(row);
+        $("<td>").append($("<span>").addClass("badge badge-" + invoice.badge).text(invoice.status)).appendTo(row);
+        const actions = $("<td>").addClass("text-nowrap");
+        $("<a>").attr("href", "view_invoice.php?id=" + invoice.id).addClass("btn btn-info btn-sm").text("View").appendTo(actions);
+        if(invoice.print_url){
+            $("<a>").attr({href: invoice.print_url, target: "_blank"}).addClass("btn btn-success btn-sm ml-1").text(invoice.status === "Pending" ? "Pay & Print" : "Print").appendTo(actions);
+        }
+        actions.appendTo(row);
+        body.prepend(row);
+        body.children("tr").slice(5).remove();
+    }
+
+    $("form[action=\"save_invoice.php\"]").on("submit.invoiceAjax", async function(e){
+        if(e.isDefaultPrevented()) return;
+        e.preventDefault();
+
+        const form = this;
+        const submitter = e.originalEvent && e.originalEvent.submitter ? e.originalEvent.submitter : null;
+        const currentAction = submitter && submitter.value ? submitter.value : ($("#action").val() || "save");
+        $("#action").val(currentAction);
+        const buttons = $(form).find("button[type=\"submit\"]");
+        const originalPhone = $.trim($(form).find("input[name=\"customer_phone\"]").val());
+        let printWindow = null;
+
+        if(currentAction === "print"){
+            printWindow = window.open("about:blank", "invoicePrintWindow");
+            if(printWindow){
+                printWindow.document.write("<!doctype html><title>Preparing invoice...</title><p style=\"font-family:Arial;padding:24px\">Preparing invoice...</p>");
+                printWindow.document.close();
+            }
         }
 
-        return true;
+        buttons.prop("disabled", true);
+        const formData = new FormData(form);
+        formData.set("action", currentAction);
+        formData.set("ajax", "1");
+
+        try{
+            const response = await fetch("save_invoice.php", {
+                method: "POST",
+                body: formData,
+                headers: {"X-Requested-With": "XMLHttpRequest"}
+            });
+            const raw = await response.text();
+            let result;
+            try{ result = JSON.parse(raw); }catch(parseError){ throw new Error("Invalid server response. Please try again."); }
+            if(!response.ok || !result.ok) throw new Error(result.message || "Invoice could not be saved.");
+
+            const normalizedPhone = normalizePhoneForCompare(originalPhone);
+            if(normalizedPhone && !existingCustomerPhones.includes(normalizedPhone)) existingCustomerPhones.push(normalizedPhone);
+            prependRecentInvoice(result.invoice);
+            resetInvoiceFormAfterAjax();
+            showInvoiceAjaxMessage(result.message + " Invoice: " + result.invoice_no, true);
+
+            if(currentAction === "print" && result.print_url){
+                if(printWindow && !printWindow.closed){
+                    printWindow.location.replace(result.print_url);
+                }else{
+                    window.open(result.print_url, "_blank");
+                }
+            }
+        }catch(error){
+            if(printWindow && !printWindow.closed) printWindow.close();
+            showInvoiceAjaxMessage(error.message || "Invoice could not be saved.", false);
+        }finally{
+            buttons.prop("disabled", false);
+        }
     });
 
     /* Product Change */
@@ -862,7 +1042,16 @@ if($(this).val()=="instant"){
 
         let product_id = $(this).val();
 
-        if(product_id=="") return;
+        if(product_id==""){
+            row.find(".product-variant")
+                .html("<option value=\"\">No variant</option>")
+                .prop("disabled", false)
+                .prop("required", false)
+                .addClass("d-none");
+            row.removeData("has-variants");
+            updateVariantColumnVisibility();
+            return;
+        }
 
         $.ajax({
 
@@ -883,8 +1072,25 @@ if($(this).val()=="instant"){
             row.find(".stock")
                 .val(res.product.is_stock_product ? res.product.available_stock : "Unlimited");
 
+            let variant = row.find(".product-variant");
+            variant.html("");
+            if((res.product.variants || []).length){
+                variant.append("<option value=\"\">Select variant</option>");
+                res.product.variants.forEach(function(name){ variant.append($("<option>").val(name).text(name)); });
+                variant.prop("disabled", false).prop("required", true).removeClass("d-none");
+                row.find(".stock").val("Select variant");
+                row.data("has-variants", true);
+            }else{
+                variant.append("<option value=\"\">No variant</option>")
+                    .prop("disabled", false)
+                    .prop("required", false)
+                    .addClass("d-none");
+                row.data("has-variants", false);
+            }
+
             row.data("is-stock-product", !!res.product.is_stock_product);
             updateStockColumnVisibility();
+            updateVariantColumnVisibility();
 
             row.find(".price")
                 .val(res.product.sale_price);
@@ -897,6 +1103,14 @@ if($(this).val()=="instant"){
 
 });
 
+    });
+
+    $(document).on("change", ".product-variant", function(){
+        let row=$(this).closest("tr"), productId=row.find(".product").val(), variantName=$(this).val();
+        if(!productId || !variantName){ row.find(".stock").val("Select variant"); return; }
+        $.ajax({url:"get_product.php",type:"POST",data:{product_id:productId,variant_name:variantName},dataType:"json",success:function(res){
+            if(res.success){ row.find(".stock").val(res.product.is_stock_product ? res.product.available_stock : "Unlimited"); }
+        }});
     });
 
     /* Qty / Price Change */
@@ -965,7 +1179,13 @@ $(document).on(
         row.find("input").val("");
 
         row.find(".qty").val(1);
+        row.find(".product-variant")
+            .html("<option value=\"\">No variant</option>")
+            .prop("disabled", false)
+            .prop("required", false)
+            .addClass("d-none");
         row.removeData("is-stock-product");
+        row.removeData("has-variants");
 
         row.find("select")
             .val("")
@@ -977,6 +1197,7 @@ $(document).on(
         $("#productTable tbody").append(row);
 
         initProductSelect(row);
+        updateVariantColumnVisibility();
 
     });
 
@@ -995,6 +1216,7 @@ $(document).on(
                 $(this).closest("tr").remove();
 
                 updateStockColumnVisibility();
+                updateVariantColumnVisibility();
                 calculateGrandTotal();
 
             }
@@ -1044,6 +1266,14 @@ function updateStockColumnVisibility(){
 
     // When every selected product is Non Stock, stock is not relevant to the sale.
     $("#productTable .stock-column").toggle(hasStockProduct || selectedRows.length === 0);
+}
+
+function updateVariantColumnVisibility(){
+    var hasVariantProduct = $("#productTable tbody tr").toArray().some(function(row){
+        return $(row).find(".product").val() !== "" && $(row).data("has-variants") === true;
+    });
+
+    $("#productTable .variant-column").toggleClass("d-none", !hasVariantProduct);
 }
 
 function initCustomerSupplierSelect(context){

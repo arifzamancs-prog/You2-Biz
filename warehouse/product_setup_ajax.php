@@ -4,6 +4,7 @@ require_once '../includes/db.php';
 require_once '../includes/product_expiry_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/product_image_helper.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -23,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !hash_equals((string)($_SESSION['st
 }
 
 ensure_product_management_columns($conn);
+ensure_product_image_column($conn);
 ensure_fifo_inventory_tables($conn);
 ensure_fifo_only_product_categories($conn, $user_id);
 $action = (string)($_POST['action'] ?? '');
@@ -43,27 +45,33 @@ try {
         $category_id = (int)($_POST['category_id'] ?? 0);
         $name = trim((string)($_POST['product_name'] ?? ''));
         $sku = trim((string)($_POST['sku'] ?? ''));
+        if (product_sku_exists($conn, $user_id, $sku)) throw new RuntimeException('This Code is already in use. Enter a unique Code for this company.');
         $purchase_price = max(0, (float)($_POST['purchase_price'] ?? 0));
         $sale_price = max(0, (float)($_POST['sale_price'] ?? 0));
         $opening_stock = max(0, (int)($_POST['opening_stock'] ?? 0));
         $minimum_stock = max(0, (int)($_POST['minimum_stock'] ?? 0));
         $status = (string)($_POST['status'] ?? 'active');
-        $expired_on = trim((string)($_POST['expired_on'] ?? ''));
+        $expired_on = is_product_expiry_enabled($conn)
+            ? trim((string)($_POST['expired_on'] ?? ''))
+            : '';
         $expired_on = $expired_on === '' ? null : $expired_on;
+        $photo_error = '';
+        $photo_path = product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error);
+        if($photo_error !== '') throw new RuntimeException($photo_error);
         if ($name === '') throw new RuntimeException('Product name is required.');
         if (!product_category_is_stock($conn, $category_id, $user_id)) throw new RuntimeException('Select an active FIFO product category.');
         if (!in_array($status, ['active', 'inactive'], true)) $status = 'active';
         $limit = mysqli_fetch_assoc(mysqli_query($conn, "SELECT u.max_products, COUNT(p.id) AS product_count FROM users u LEFT JOIN products p ON p.user_id=u.id WHERE u.id={$user_id} GROUP BY u.id,u.max_products"));
         if ($limit && (int)$limit['product_count'] >= (int)$limit['max_products']) throw new RuntimeException('Product limit reached for your subscription. ' . subscription_support_message());
         mysqli_begin_transaction($conn);
-        $stmt = mysqli_prepare($conn, 'INSERT INTO products (user_id,category_id,product_name,sku,purchase_price,sale_price,expired_on,current_stock,opening_stock_quantity,opening_stock_unit_cost,minimum_stock,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
-        mysqli_stmt_bind_param($stmt, 'iissddsdddis', $user_id, $category_id, $name, $sku, $purchase_price, $sale_price, $expired_on, $opening_stock, $opening_stock, $purchase_price, $minimum_stock, $status);
+        $stmt = mysqli_prepare($conn, 'INSERT INTO products (user_id,category_id,product_name,sku,photo_path,purchase_price,sale_price,expired_on,current_stock,opening_stock_quantity,opening_stock_unit_cost,minimum_stock,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        mysqli_stmt_bind_param($stmt, 'iisssddsdddis', $user_id, $category_id, $name, $sku, $photo_path, $purchase_price, $sale_price, $expired_on, $opening_stock, $opening_stock, $purchase_price, $minimum_stock, $status);
         if (!mysqli_stmt_execute($stmt)) throw new RuntimeException('Product could not be saved.');
         $product_id = (int)mysqli_insert_id($conn);
         if (!fifo_inventory_create_batch($conn, $user_id, $product_id, $opening_stock, $purchase_price, 'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d'))) throw new RuntimeException('Opening stock batch could not be saved.');
         mysqli_commit($conn);
         $category = mysqli_fetch_assoc(mysqli_query($conn, "SELECT category_name FROM product_categories WHERE id={$category_id}"));
-        product_setup_reply(true, 'Product added successfully.', ['product' => ['id' => $product_id, 'name' => $name, 'sku' => $sku, 'category' => $category['category_name'] ?? '-', 'purchase_price' => number_format($purchase_price, 2), 'sale_price' => number_format($sale_price, 2), 'status' => $status]]);
+        product_setup_reply(true, 'Product added successfully.', ['product' => ['id' => $product_id, 'name' => $name, 'sku' => $sku, 'photo_url' => product_image_url($conn, $photo_path), 'category' => $category['category_name'] ?? '-', 'purchase_price' => number_format($purchase_price, 2), 'sale_price' => number_format($sale_price, 2), 'status' => $status]]);
     }
     throw new RuntimeException('Unknown product setup action.');
 } catch (Throwable $e) {

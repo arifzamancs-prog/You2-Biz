@@ -41,6 +41,17 @@ function user_management_flash_and_redirect($message, $type = 'success', $query 
     user_management_redirect($query);
 }
 
+function user_management_ajax_response($message, $success)
+{
+    if (strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) !== 'xmlhttprequest') {
+        return false;
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => (bool)$success, 'message' => (string)$message]);
+    exit;
+}
+
 function normalize_agent_username_base($username)
 {
     $username = strtolower(trim((string)$username));
@@ -269,6 +280,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
     $branch_id = (int)($_POST['branch_id'] ?? 0);
     $name = '';
     $access_permissions = normalize_manager_permissions($_POST['access_permissions'] ?? []);
+    if ($company_type !== 'Fashion house') {
+        $access_permissions = array_values(array_diff($access_permissions, ['stock_live_report']));
+    }
 
     // A single-branch company always operates from Head Office. Do not trust a
     // posted branch or branch-only permissions when Multi Branch is disabled.
@@ -306,13 +320,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
         ));
     }
 
-    // Stock Product companies use the dedicated Sales and Products modules;
+    // Stock companies use the dedicated Sales and Products modules;
     // their service invoice/category module must not be assignable.
-    if($company_type === 'Stock Product'){
+    if(in_array($company_type, ['Stock Product', 'Fashion house'], true)){
         $access_permissions = array_values(array_diff(
             $access_permissions,
             ['sales', 'projects']
         ));
+    }
+
+    // A staff account can open either the company-wide dashboard or its
+    // assigned branch dashboard, but never both at the same time.
+    if(in_array('main_dashboard', $access_permissions, true) && in_array('dashboard', $access_permissions, true)){
+        $access_permissions = array_values(array_diff($access_permissions, ['dashboard']));
     }
 
     $admin_sidebar_permission_keys = array_keys(admin_sidebar_permissions());
@@ -655,8 +675,10 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete
     $manager_id = (int)($_POST['manager_id'] ?? 0);
 
     if($manager_id <= 0){
+        user_management_ajax_response('Invalid staff login access selected.', false);
         user_management_flash_and_redirect('Invalid staff login access selected.', 'danger');
     }elseif(user_management_manager_has_transactions($conn, $manager_id)){
+        user_management_ajax_response('Delete not allowed. This staff login access already has transaction history.', false);
         user_management_flash_and_redirect('Delete not allowed. This staff login access already has transaction history.', 'danger');
     }else{
         $delete_stmt = mysqli_prepare(
@@ -672,11 +694,15 @@ if($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete
             mysqli_stmt_bind_param($delete_stmt, "ii", $manager_id, $user_id);
 
             if(mysqli_stmt_execute($delete_stmt) && mysqli_stmt_affected_rows($delete_stmt) > 0){
+                user_management_ajax_response('Staff login access deleted successfully.', true);
                 user_management_flash_and_redirect('Staff login access deleted successfully.', 'success');
             }else{
+                error_log('Staff access delete failed for manager ' . $manager_id . ': ' . mysqli_stmt_error($delete_stmt));
+                user_management_ajax_response('Staff login access could not be deleted. Please refresh and try again.', false);
                 user_management_flash_and_redirect('Staff login access could not be deleted.', 'danger');
             }
         }else{
+            user_management_ajax_response('Staff login access could not be deleted. Please refresh and try again.', false);
             user_management_flash_and_redirect('Staff login access could not be deleted.', 'danger');
         }
     }
@@ -815,7 +841,7 @@ require_once '../includes/sidebar.php';
                     </div>
                 <?php } ?>
 
-                <form method="post">
+                <form method="post" action="index.php" id="staff-access-form">
                     <input
                         type="hidden"
                         name="manager_id"
@@ -834,7 +860,7 @@ require_once '../includes/sidebar.php';
                     <?php if($multi_branch_enabled){ ?>
                         <div class="form-group">
                             <label>Branch Name</label>
-                            <select name="branch_id" id="access_branch_id" class="form-control" required>
+                            <select name="branch_id" id="access_branch_id" class="form-control access-branch-select" required>
                                 <option value="">Select Branch</option>
                                 <?php while($branch_option = mysqli_fetch_assoc($branch_options)){ ?>
                                     <option value="<?= (int)$branch_option['id']; ?>" data-head-office="<?= (int)$branch_option['is_head_office']; ?>" <?= $selected_branch_id === (int)$branch_option['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($branch_option['branch_name']); ?></option>
@@ -846,7 +872,8 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Others' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Stock Product' && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Others' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if(in_array($company_type, ['Stock Product', 'Fashion house'], true) && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
+                                <?php if ($permission_key === 'stock_live_report' && $company_type !== 'Fashion house') continue; ?>
                                 <div class="col-md-6 mb-2">
                                     <div class="custom-control custom-checkbox">
                                         <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>
@@ -969,9 +996,9 @@ require_once '../includes/sidebar.php';
                                 <td><?= htmlspecialchars($row['username']); ?></td>
                                 <td>
                                     <?php if($row['status'] === 'active'){ ?>
-                                        <span class="badge badge-success">Active</span>
+                                        <span class="badge badge-success ajax-status-badge">Active</span>
                                     <?php }else{ ?>
-                                        <span class="badge badge-secondary">Inactive</span>
+                                        <span class="badge badge-secondary ajax-status-badge">Inactive</span>
                                     <?php } ?>
                                 </td>
                                 <td><?= htmlspecialchars(app_datetime($row['last_login'] ?? null)); ?></td>
@@ -986,13 +1013,13 @@ require_once '../includes/sidebar.php';
                                     <?php if($row['status'] === 'active'){ ?>
                                         <a
                                             href="index.php?id=<?= $row['id']; ?>&status=inactive"
-                                            class="btn btn-sm btn-warning" title="Deactivate Access" aria-label="Deactivate Access">
+                                            class="btn btn-sm btn-warning" title="Deactivate Access" aria-label="Deactivate Access" data-ajax-action-link="true" data-ajax-status="inactive">
                                             <i class="fas fa-ban"></i>
                                         </a>
                                     <?php }else{ ?>
                                         <a
                                             href="index.php?id=<?= $row['id']; ?>&status=active"
-                                            class="btn btn-sm btn-success" title="Activate Access" aria-label="Activate Access">
+                                            class="btn btn-sm btn-success" title="Activate Access" aria-label="Activate Access" data-ajax-action-link="true" data-ajax-status="active">
                                             <i class="fas fa-check"></i>
                                         </a>
                                     <?php } ?>
@@ -1028,7 +1055,89 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
-$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); $('.customer-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select customer'}); }); document.addEventListener('DOMContentLoaded', function(){ const multiBranchEnabled = " . ($multi_branch_enabled ? 'true' : 'false') . "; const sensitive = ['main_dashboard', 'dashboard', 'all_branches', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const branch = document.getElementById('access_branch_id'); const syncBranchPermission = function(){ if(!multiBranchEnabled || !branch){ return; } const option = branch.options[branch.selectedIndex]; const isHeadOffice = option && option.dataset.headOffice === '1'; document.querySelectorAll('[data-head-office-only=\"1\"]').forEach(function(row){ const permission = row.querySelector('input[name=\"access_permissions[]\"]'); row.style.display = isHeadOffice ? '' : 'none'; if(permission){ permission.disabled = !isHeadOffice; if(!isHeadOffice){ permission.checked = false; } } }); }; const sync = function(){ syncBranchPermission(); const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; if(branch){ branch.addEventListener('change', sync); } document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', sync); }); sync(); });</script>";
+$page_script = "<script>$(function(){ $('.staff-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'}); $('.customer-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select customer'}); $('.access-branch-select').select2({theme: 'bootstrap4', width: '100%', placeholder: 'Select Branch', allowClear: true}); }); document.addEventListener('DOMContentLoaded', function(){ const multiBranchEnabled = " . ($multi_branch_enabled ? 'true' : 'false') . "; const sensitive = ['main_dashboard', 'dashboard', 'all_branches', 'projects', 'admin']; const box = document.getElementById('sensitive-permission-password'); const input = box ? box.querySelector('input[name=admin_password]') : null; const branch = document.getElementById('access_branch_id'); const mainDashboard = document.getElementById('permission_main_dashboard'); const branchDashboard = document.getElementById('permission_dashboard'); const syncDashboardChoice = function(changed){ if(!mainDashboard || !branchDashboard){ return; } if(changed === mainDashboard && mainDashboard.checked){ branchDashboard.checked = false; } if(changed === branchDashboard && branchDashboard.checked){ mainDashboard.checked = false; } }; const syncBranchPermission = function(){ if(!multiBranchEnabled || !branch){ return; } const option = branch.options[branch.selectedIndex]; const isHeadOffice = option && option.dataset.headOffice === '1'; document.querySelectorAll('[data-head-office-only=\"1\"]').forEach(function(row){ const permission = row.querySelector('input[name=\"access_permissions[]\"]'); row.style.display = isHeadOffice ? '' : 'none'; if(permission){ permission.disabled = !isHeadOffice; if(!isHeadOffice){ permission.checked = false; } } }); }; const sync = function(){ syncBranchPermission(); const needed = sensitive.some(function(key){ const permission = document.getElementById('permission_' + key); return permission && permission.checked; }); if(box){ box.style.display = needed ? '' : 'none'; } if(input){ input.required = needed; if(!needed){ input.value = ''; } } }; if(branch){ branch.addEventListener('change', sync); } document.querySelectorAll('input[name=\"access_permissions[]\"]').forEach(function(permission){ permission.addEventListener('change', function(){ syncDashboardChoice(permission); sync(); }); }); syncDashboardChoice(null); sync(); });</script>";
 $page_script .= "<script>document.addEventListener('DOMContentLoaded', function(){ var admin = document.getElementById('permission_admin'); var panel = document.getElementById('admin-sidebar-permissions'); if(!admin || !panel){ return; } var options = panel.querySelectorAll('.admin-sidebar-option'); var configured = panel.querySelector('input[value=admin_sidebar_configured]'); function syncAdminSidebar(){ var enabled = admin.checked && !admin.disabled; panel.style.display = enabled ? '' : 'none'; options.forEach(function(option){ option.disabled = !enabled; if(!enabled){ option.checked = false; } }); if(configured){ configured.disabled = !enabled; } } admin.addEventListener('change', syncAdminSidebar); syncAdminSidebar(); });</script>";
+$page_script .= '<script src="../assets/js/ajax_page_actions.js?v=' . filemtime(__DIR__ . '/../assets/js/ajax_page_actions.js') . '"></script>';
+$page_script .= <<<'HTML'
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    var accessForm = document.getElementById('staff-access-form');
+    if (!accessForm) return;
+
+    function replaceAccessRows(source){
+        var sourceRows = source.querySelectorAll('#example1 tbody tr');
+        var table = document.getElementById('example1');
+        if (!table) return;
+
+        if (window.jQuery && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable(table)) {
+            var dataTable = jQuery(table).DataTable();
+            dataTable.clear();
+            sourceRows.forEach(function(row){ dataTable.row.add(row.cloneNode(true)); });
+            dataTable.draw(false);
+        } else {
+            var body = table.querySelector('tbody');
+            if (body) body.replaceChildren.apply(body, Array.from(sourceRows, function(row){ return row.cloneNode(true); }));
+        }
+    }
+
+    function replaceStaffOptions(source){
+        var select = accessForm.querySelector('.staff-select');
+        var sourceSelect = source.querySelector('#staff-access-form .staff-select');
+        if (!select || !sourceSelect) return;
+
+        var current = select.value;
+        var $select = window.jQuery && window.jQuery.fn.select2 ? window.jQuery(select) : null;
+        if ($select && select.classList.contains('select2-hidden-accessible')) $select.select2('destroy');
+
+        select.replaceChildren.apply(select, Array.from(sourceSelect.options, function(option){ return option.cloneNode(true); }));
+        if (Array.from(select.options).some(function(option){ return option.value === current; })) select.value = current;
+
+        if ($select) $select.select2({theme: 'bootstrap4', width: '100%', placeholder: 'Search and select staff'});
+    }
+
+    var refreshSequence = 0;
+    async function refreshAccessPageParts(resetForm){
+        var sequence = ++refreshSequence;
+        var url = new URL('index.php', window.location.href);
+        var managerId = accessForm.querySelector('[name="manager_id"]').value;
+        if (!resetForm && Number(managerId) > 0) url.searchParams.set('edit', managerId);
+        var response = await fetch(url, {cache: 'no-store', credentials: 'same-origin'});
+        if (!response.ok) throw new Error('Staff list could not be refreshed.');
+        var source = new DOMParser().parseFromString(await response.text(), 'text/html');
+        if (sequence !== refreshSequence) return;
+        if (!source.querySelector('#staff-access-form') || !source.querySelector('#example1')) {
+            throw new Error('Access saved, but the staff list could not be refreshed. Please reload the page.');
+        }
+        if (resetForm || source.querySelector('#staff-access-form [name="manager_id"]').value === '0') {
+            accessForm.reset();
+            accessForm.querySelector('[name="manager_id"]').value = '0';
+            accessForm.querySelectorAll('input[type="password"], input[name="username"]').forEach(function(input){ input.value = ''; });
+            accessForm.querySelector('[name="password"]').required = true;
+            accessForm.querySelectorAll('input[type="checkbox"]').forEach(function(input){ input.checked = false; input.dispatchEvent(new Event('change')); });
+            accessForm.querySelectorAll('select').forEach(function(select){ select.value = ''; if(window.jQuery) jQuery(select).trigger('change'); });
+            accessForm.closest('.card').querySelector('.card-title').textContent = 'Create Staff Login Access';
+            accessForm.querySelector('button[type="submit"]').innerHTML = '<i class="fas fa-user-plus"></i> Create Access';
+            accessForm.querySelector('a.btn-secondary')?.remove();
+            accessForm.querySelector('[name="password"]').closest('.form-group').querySelector('label small')?.remove();
+            window.history.replaceState(null, '', 'index.php');
+        }
+        replaceStaffOptions(source);
+        replaceAccessRows(source);
+    }
+
+    document.addEventListener('ajax-page-action-complete', function(event){
+        var sourceForm = event.detail && event.detail.source;
+        if (!sourceForm) return;
+        var action = event.detail && event.detail.action;
+        if (sourceForm !== accessForm && action !== 'delete_manager' && action !== 'status') return;
+        var deletedCurrent = action === 'delete_manager' && sourceForm.querySelector('[name="manager_id"]').value === accessForm.querySelector('[name="manager_id"]').value;
+
+        refreshAccessPageParts(sourceForm === accessForm || deletedCurrent).catch(function(error){
+            if (window.showAjaxActionMessage) window.showAjaxActionMessage(error.message, false);
+        });
+    });
+});
+</script>
+HTML;
 require_once '../includes/footer.php';
 ?>

@@ -47,6 +47,7 @@ function available_manager_permissions($project_package_labels = null)
         'stock_sales' => 'Sales',
         'products' => 'Products',
         'warehouse' => 'Main Warehouse',
+        'stock_live_report' => 'Stock Live Report',
         'wallets' => 'Wallets',
         'projects' => $project_package_label,
         'land_ledger' => 'Land Ledger',

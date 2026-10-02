@@ -78,6 +78,24 @@ $paid_amount = (float)$invoice['paid_amount'];
 $receive_wallet_id =
     (int)$invoice['receive_wallet_id'];
 
+// Validate the cash reversal before touching the invoice, stock, or payment
+// records. A sale cannot be deleted after its collected money has already
+// been spent from the receiving wallet.
+if ($is_posted && $paid_amount > 0) {
+    $wallet_stmt = mysqli_prepare($conn, 'SELECT balance FROM wallets WHERE id=? AND user_id=? AND status=\'active\' LIMIT 1');
+    mysqli_stmt_bind_param($wallet_stmt, 'ii', $receive_wallet_id, $user_id);
+    mysqli_stmt_execute($wallet_stmt);
+    $wallet = mysqli_fetch_assoc(mysqli_stmt_get_result($wallet_stmt));
+    if (!$wallet || (float)$wallet['balance'] + 0.0001 < $paid_amount) {
+        header('Location: invoice_list.php?error=' . urlencode('Invoice cannot be deleted because the received payment is no longer available in its wallet.'));
+        exit;
+    }
+}
+
+mysqli_begin_transaction($conn);
+
+try {
+
 /*
 |--------------------------------------------------
 | Get Invoice Items
@@ -260,5 +278,13 @@ mysqli_query(
      AND user_id='$user_id'"
 );
 
+mysqli_commit($conn);
+
 header("Location: invoice_list.php");
 exit;
+
+} catch (Throwable $e) {
+    mysqli_rollback($conn);
+    header('Location: invoice_list.php?error=' . urlencode('Invoice could not be deleted. ' . $e->getMessage()));
+    exit;
+}

@@ -97,11 +97,15 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('customer_login_settings', 'Cus. Login Settings', app_path('user_management/customer_login_settings.php'), 'customer_manage', 93),
         sidebar_setting_item('suppliers', supplier_display_text('Suppliers'), '', '', 74),
         sidebar_setting_item('warehouse', 'Main Warehouse', app_path('warehouse/index.php'), '', 75),
+        sidebar_setting_item('live_report', 'Stock Live Report', app_path('warehouse/live_report.php'), '', 76),
         sidebar_setting_item('stock_sales', 'Sales', '', '', 76),
         sidebar_setting_item('stock_create', 'Create Invoice', app_path('sales/create_invoice.php'), 'stock_sales', 1),
         sidebar_setting_item('stock_invoices', 'Invoice List', app_path('sales/invoice_list.php'), 'stock_sales', 2),
-        sidebar_setting_item('stock_due', 'Due Payment', app_path('sales/receive_payment.php'), 'stock_sales', 3),
-        sidebar_setting_item('stock_report', 'Sales Report', app_path('warehouse/sales_report.php'), 'stock_sales', 4),
+        sidebar_setting_item('stock_product', 'My Stock', app_path('sales/stock_product.php'), 'stock_sales', 3),
+        sidebar_setting_item('stock_damaged_return', 'Return Damaged', app_path('sales/damaged_return.php'), 'stock_sales', 4),
+        sidebar_setting_item('stock_receive_request', 'Product Receive Req.', app_path('sales/receive_stock.php'), 'stock_sales', 5),
+        sidebar_setting_item('stock_due', 'Due Payment', app_path('sales/receive_payment.php'), 'stock_sales', 6),
+        sidebar_setting_item('stock_report', 'Sales Report', app_path('warehouse/sales_report.php'), 'stock_sales', 7),
         sidebar_setting_item('supplier_list', supplier_display_text('Suppliers'), app_path('suppliers/index.php'), 'suppliers', 101),
         sidebar_setting_item('purchases', 'Purchases', app_path('purchases/index.php'), 'suppliers', 102),
         sidebar_setting_item('supplier_due_payment', supplier_display_text('Supplier Due Payment'), app_path('suppliers/supplier_payment.php'), 'suppliers', 103),
@@ -120,14 +124,16 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('sales_report', 'Sales Report', app_path('reports/sales_report.php'), 'reports', 122),
         sidebar_setting_item('expense_report', 'Expense Report', app_path('reports/category_expense.php'), 'reports', 123),
         sidebar_setting_item('profit_report', 'Profit Report', app_path('reports/profit_report.php'), 'reports', 124),
-        sidebar_setting_item('access_management', 'Access Management', app_path('user_management/index.php'), '', 130),
-        sidebar_setting_item('attendance_settings', 'Attendance Settings', app_path('staff/attendance_settings.php'), '', 131),
-        sidebar_setting_item('branch_manage', 'Branch Management', app_path('user_management/branch_manage.php'), '', 132),
-        sidebar_setting_item('wallet_approvals', 'Wallet Approvals', app_path('user_management/wallet_approvals.php'), '', 133),
-        sidebar_setting_item('invoice_charges', 'Invoice Charges', app_path('user_management/invoice_charges.php'), '', 134),
-        sidebar_setting_item('printing_option', 'Printing Option', app_path('user_management/printing_option.php'), '', 135),
-        sidebar_setting_item('profit_cash_out', 'Profit Cash Out', app_path('profit_cash_out/index.php'), '', 136),
-        sidebar_setting_item('sidebar_settings', 'Slidebar Settings', app_path('user_management/sidebar_settings.php'), '', 137),
+        sidebar_setting_item('admin', 'Admin', '', '', 130),
+        sidebar_setting_item('access_management', 'Access Management', app_path('user_management/index.php'), 'admin', 131),
+        sidebar_setting_item('attendance_settings', 'Attendance Settings', app_path('staff/attendance_settings.php'), 'admin', 132),
+        sidebar_setting_item('branch_manage', 'Branch Management', app_path('user_management/branch_manage.php'), 'admin', 133),
+        sidebar_setting_item('wallet_approvals', 'Wallet Approvals', app_path('user_management/wallet_approvals.php'), 'admin', 134),
+        sidebar_setting_item('dump_approval', 'Dumps Approval', app_path('user_management/dump_approval.php'), 'admin', 135),
+        sidebar_setting_item('invoice_charges', 'Invoice Charges', app_path('user_management/invoice_charges.php'), 'admin', 135),
+        sidebar_setting_item('printing_option', 'Printing Option', app_path('user_management/printing_option.php'), 'admin', 136),
+        sidebar_setting_item('profit_cash_out', 'Profit Cash Out', app_path('profit_cash_out/index.php'), 'admin', 137),
+        sidebar_setting_item('sidebar_settings', 'Slidebar Settings', app_path('user_management/sidebar_settings.php'), 'admin', 138),
         sidebar_setting_item('tools', 'Tools', '', '', 140),
         sidebar_setting_item('export_data', 'Export Data', app_path('tools/export.php'), 'tools', 141),
         sidebar_setting_item('import_data', 'Import Data', app_path('tools/import.php'), 'tools', 142),
@@ -177,24 +183,60 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         $default_map[$id]['visible'] = !isset($saved_item['visible']) || (int)$saved_item['visible'] === 1 ? 1 : 0;
     }
 
-    // Products are the primary catalogue for Stock Product companies. A saved
+    // These are structural children of the Admin menu. Older saved sidebar
+    // layouts stored them as root items, which split the Admin menu in two.
+    $admin_children = [
+        'access_management',
+        'attendance_settings',
+        'branch_manage',
+        'wallet_approvals',
+        'dump_approval',
+        'invoice_charges',
+        'printing_option',
+        'profit_cash_out',
+        'sidebar_settings',
+    ];
+    if(isset($default_map['admin'])){
+        $default_map['admin']['parent'] = '';
+        $default_map['admin']['visible'] = 1;
+    }
+    foreach($admin_children as $admin_child){
+        if(isset($default_map[$admin_child])){
+            $default_map[$admin_child]['parent'] = 'admin';
+        }
+    }
+
+    // Products are the primary catalogue for stock companies. A saved
     // sidebar preference must not make the only product add/list entry vanish.
     if(function_exists('project_package_company_type')
-        && project_package_company_type($conn, (int)$user_id) === 'Stock Product'){
+        && in_array(project_package_company_type($conn, (int)$user_id), ['Stock Product', 'Fashion house'], true)){
         foreach(['products', 'product_categories', 'product_list'] as $required_product_item){
             if(isset($default_map[$required_product_item])){
                 $default_map[$required_product_item]['visible'] = 1;
             }
         }
-        // Stock Sales Report is temporarily rendered inside the Admin tree.
-        // Prevent an older saved layout from moving it back under Sales.
+        // Fashion House uses My Stock for branch inventory. Do not show
+        // the legacy warehouse Sales Report in a saved sidebar layout.
         if(isset($default_map['stock_report'])){
-            $default_map['stock_report']['parent'] = '_fixed_admin';
-            $default_map['stock_report']['visible'] = 1;
+            $default_map['stock_report']['visible'] = 0;
         }
     }
 
     $items = array_values($default_map);
+    // Register the new report beside Warehouse even for older saved layouts.
+    $saved_ids = array_column($saved, 'id');
+    if (!in_array('live_report', $saved_ids, true) && isset($default_map['warehouse'])) {
+        $warehouse_sort = (int)$default_map['warehouse']['sort'];
+        foreach ($items as &$layout_item) {
+            if ($layout_item['id'] === 'live_report') {
+                $layout_item['parent'] = $default_map['warehouse']['parent'];
+                $layout_item['sort'] = $warehouse_sort + 1;
+            } elseif ((int)$layout_item['sort'] > $warehouse_sort) {
+                $layout_item['sort'] = (int)$layout_item['sort'] + 1;
+            }
+        }
+        unset($layout_item);
+    }
     usort($items, static function($a, $b){
         return ((int)$a['sort'] <=> (int)$b['sort']) ?: strcmp($a['label'], $b['label']);
     });
@@ -239,6 +281,9 @@ function sidebar_layout_items_for_current_user($items)
     $is_housing_company = $conn instanceof mysqli
         && function_exists('project_package_company_type')
         && project_package_company_type($conn, $company_id) === 'Housing';
+    $is_fashion_house = $conn instanceof mysqli
+        && function_exists('project_package_company_type')
+        && project_package_company_type($conn, $company_id) === 'Fashion house';
 
     foreach($items as $item){
         $id = (string)($item['id'] ?? '');
@@ -259,7 +304,11 @@ function sidebar_layout_items_for_current_user($items)
             continue;
         }
 
-        if(in_array($id, ['products', 'product_categories', 'product_list', 'expired_product', 'suppliers', 'warehouse', 'stock_sales', 'stock_create', 'stock_invoices', 'stock_due', 'stock_report'], true) && !products_module_enabled() && !($id === 'suppliers' && $is_housing_company)){
+        if(in_array($id, ['dump_approval', 'live_report'], true) && !$is_fashion_house){
+            continue;
+        }
+
+        if(in_array($id, ['products', 'product_categories', 'product_list', 'expired_product', 'suppliers', 'warehouse', 'stock_sales', 'stock_create', 'stock_invoices', 'stock_receive_request', 'stock_due', 'stock_report'], true) && !products_module_enabled() && !($id === 'suppliers' && $is_housing_company)){
             continue;
         }
 

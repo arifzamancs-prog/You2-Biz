@@ -26,6 +26,8 @@ ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
 $table_system_is_enabled = table_system_enabled($conn, $user_id);
+$is_ajax = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest'
+    || (string)($_POST['ajax'] ?? '') === '1';
 
 function sales_generate_unique_invoice_no($conn)
 {
@@ -313,6 +315,7 @@ try{
 
     $product_ids = $_POST['product_id'] ?? [];
     $qtys        = $_POST['qty'] ?? [];
+    $variant_names = $_POST['variant_name'] ?? [];
     $prices      = $_POST['price'] ?? [];
     $totals      = stock_line_totals($product_ids, $qtys, $prices);
     $positive_qty_totals = [];
@@ -328,13 +331,18 @@ try{
 
         $product_id = (int)$product_id;
         $line_qty = (float)($qtys[$key] ?? 0);
+        $variant_name = trim((string)($variant_names[$key] ?? ''));
 
         if($line_qty > 0){
             if(!isset($positive_qty_totals[$product_id])){
-                $positive_qty_totals[$product_id] = 0.0;
+                $positive_qty_totals[$product_id] = [];
             }
 
-            $positive_qty_totals[$product_id] += $line_qty;
+            if(!isset($positive_qty_totals[$product_id][$variant_name])){
+                $positive_qty_totals[$product_id][$variant_name] = 0.0;
+            }
+
+            $positive_qty_totals[$product_id][$variant_name] += $line_qty;
         }
     }
 
@@ -444,23 +452,37 @@ try{
 
     $invoice_no = sales_generate_unique_invoice_no($conn);
 
-    foreach($positive_qty_totals as $product_id => $requested_qty){
-        $product_snapshot = product_stock_snapshot_for_invoice(
-            $conn,
-            $user_id,
-            (int)$product_id
-        );
+    foreach($positive_qty_totals as $product_id => $variant_qty_totals){
+        foreach($variant_qty_totals as $variant_name => $requested_qty){
+            $product_snapshot = product_stock_snapshot_for_invoice(
+                $conn,
+                $user_id,
+                (int)$product_id,
+                0,
+                $variant_name
+            );
 
-        if(!$product_snapshot){
-            throw new Exception("Product Not Found.");
-        }
+            if(!$product_snapshot){
+                throw new Exception("Product Not Found.");
+            }
 
-        if(!$product_snapshot['is_stock_product']){
-            continue;
-        }
+            if(!$product_snapshot['is_stock_product']){
+                continue;
+            }
 
-        if($requested_qty > ((float)$product_snapshot['available_stock'] + 0.0001)){
-            throw new Exception("Not enough available stock for selected product. Pending voucher reserved this product.");
+            if($requested_qty > ((float)$product_snapshot['available_stock'] + 0.0001)){
+                $variant_label = ($variant_name !== '') ? " ({$variant_name})" : '';
+                $message = "Not enough available stock for selected product{$variant_label}. "
+                    . "Available: " . (float)$product_snapshot['available_stock']
+                    . ", requested: " . (float)$requested_qty . ".";
+
+                if((float)$product_snapshot['reserved_stock'] > 0){
+                    $message .= " Pending vouchers reserve "
+                        . (float)$product_snapshot['reserved_stock'] . ".";
+                }
+
+                throw new Exception($message);
+            }
         }
     }
 
@@ -512,8 +534,8 @@ try{
             ?,
             ?,
             ?,
-            CURDATE(),
             ?,
+            CURDATE(),
             ?,
             ?,
             ?,
@@ -584,6 +606,7 @@ foreach($product_ids as $key => $product_id){
 
     $product_id = (int)$product_id;
     $qty        = (int)$qtys[$key];
+    $variant_name = trim((string)($variant_names[$key] ?? ''));
     $price      = (float)$prices[$key];
     $total      = (float)$totals[$key];
 
@@ -619,6 +642,10 @@ foreach($product_ids as $key => $product_id){
 
     }
 
+    if(!product_variant_is_valid($conn, $product_id, $user_id, $variant_name)){
+        throw new Exception('Select a valid variant for the selected product.');
+    }
+
     if($qty === 0){
 
         throw new Exception(
@@ -637,6 +664,7 @@ foreach($product_ids as $key => $product_id){
 
                 invoice_id,
                 product_id,
+                variant_name,
                 quantity,
                 unit_price,
                 total_price
@@ -645,11 +673,7 @@ foreach($product_ids as $key => $product_id){
 
             VALUES(
 
-                ?,
-                ?,
-                ?,
-                ?,
-                ?
+                ?, ?, ?, ?, ?, ?
 
             )";
 
@@ -662,10 +686,11 @@ foreach($product_ids as $key => $product_id){
 
         $stmt,
 
-        "iiddd",
+        "iisidd",
 
         $invoice_id,
         $product_id,
+        $variant_name,
         $qty,
         $price,
         $total
@@ -788,7 +813,8 @@ foreach($product_ids as $key => $product_id){
             $user_id,
             $invoice_item_id,
             $product_id,
-            $qty
+            $qty,
+            $variant_name
         );
 
         if(!$allocation['success']){
@@ -1014,8 +1040,50 @@ COMMIT
 
 mysqli_commit($conn);
 
+unset($_SESSION['error']);
 $_SESSION['success'] =
     "Invoice Created Successfully.";
+
+if($is_ajax){
+    unset($_SESSION['success']);
+    $recent_invoice = null;
+    $recent_stmt = mysqli_prepare($conn, "SELECT id, invoice_no, invoice_date, customer_name, total_amount, paid_amount, due_amount, payment_status, accounting_status FROM invoices WHERE id=? AND user_id=? LIMIT 1");
+    if ($recent_stmt) {
+        mysqli_stmt_bind_param($recent_stmt, 'ii', $invoice_id, $user_id);
+        mysqli_stmt_execute($recent_stmt);
+        $recent_row = mysqli_fetch_assoc(mysqli_stmt_get_result($recent_stmt));
+        if ($recent_row) {
+            $pending = ($recent_row['accounting_status'] ?? 'posted') === 'pending';
+            $status = $pending ? 'Pending' : (($recent_row['payment_status'] ?? '') === 'paid' ? 'Paid' : (($recent_row['payment_status'] ?? '') === 'partial' ? 'Partial' : 'Due'));
+            $badge = $pending ? 'secondary' : (($recent_row['payment_status'] ?? '') === 'paid' ? 'success' : (($recent_row['payment_status'] ?? '') === 'partial' ? 'warning' : 'danger'));
+            $recent_invoice = [
+                'id' => (int)$recent_row['id'],
+                'invoice_no' => (string)$recent_row['invoice_no'],
+                'invoice_date' => app_date($recent_row['invoice_date']),
+                'customer_name' => (string)$recent_row['customer_name'],
+                'total_amount' => number_format((float)$recent_row['total_amount'], 2),
+                'paid_amount' => number_format((float)$recent_row['paid_amount'], 2),
+                'due_amount' => number_format((float)$recent_row['due_amount'], 2),
+                'status' => $status,
+                'badge' => $badge,
+                'print_url' => $pending && !is_agent_user()
+                    ? 'post_invoice.php?id=' . (int)$recent_row['id'] . '&reload_parent=create'
+                    : (!$pending ? 'print_invoice.php?id=' . (int)$recent_row['id'] : null),
+            ];
+        }
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'ok' => true,
+        'message' => $should_post ? 'Invoice paid successfully.' : 'Invoice saved successfully.',
+        'invoice_id' => (int)$invoice_id,
+        'invoice_no' => (string)$invoice_no,
+        'action' => $action,
+        'print_url' => $should_post ? 'print_invoice.php?id=' . (int)$invoice_id : null,
+        'invoice' => $recent_invoice,
+    ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
 
 if(
     isset($_POST['action']) &&
@@ -1048,6 +1116,13 @@ exit;
 
 
 mysqli_rollback($conn);
+
+if($is_ajax){
+    header('Content-Type: application/json; charset=utf-8');
+    http_response_code(422);
+    echo json_encode(['ok' => false, 'message' => $e->getMessage()], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
 
 $_SESSION['error'] = $e->getMessage();
 

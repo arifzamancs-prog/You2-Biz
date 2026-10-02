@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/pending_invoice_stock_helper.php';
+require_once '../includes/product_category_helper.php';
 
 header('Content-Type: application/json');
 
@@ -14,11 +15,13 @@ $product_id = isset($_POST['product_id'])
 $exclude_invoice_id = isset($_POST['exclude_invoice_id'])
     ? (int)$_POST['exclude_invoice_id']
     : 0;
+$variant_name = trim((string)($_POST['variant_name'] ?? ''));
 $product = product_stock_snapshot_for_invoice(
     $conn,
     $user_id,
     $product_id,
-    $exclude_invoice_id
+    $exclude_invoice_id,
+    $variant_name
 );
 
 if($product){
@@ -27,6 +30,7 @@ if($product){
     $product['available_stock'] = $product['is_stock_product']
         ? (float)$product['available_stock']
         : null;
+    $product['variants'] = product_variant_names($conn, $product_id, $user_id);
 
     echo json_encode([
         'success' => true,

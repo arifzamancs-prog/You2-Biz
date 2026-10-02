@@ -20,14 +20,19 @@ function ensure_company_setting_columns($conn)
 function normalize_company_type($company_type)
 {
     $company_type = trim((string)$company_type);
-    return in_array($company_type, ['Housing', 'Others', 'Stock Product'], true)
+    return in_array($company_type, ['Housing', 'Others', 'Stock Product', 'Fashion house'], true)
         ? $company_type
         : 'Housing';
 }
 
 function valid_company_type($company_type)
 {
-    return in_array(trim((string)$company_type), ['Housing', 'Others', 'Stock Product'], true);
+    return in_array(trim((string)$company_type), ['Housing', 'Others', 'Stock Product', 'Fashion house'], true);
+}
+
+function company_type_uses_stock_products($company_type)
+{
+    return in_array(trim((string)$company_type), ['Stock Product', 'Fashion house'], true);
 }
 
 function normalize_company_currency($currency)

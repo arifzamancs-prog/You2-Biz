@@ -144,8 +144,10 @@ require_once '../includes/sidebar.php';
 .child-zone{margin:8px 0 0 34px;background:#f3f6fa;}
 .drop-zone.drag-over{border-color:#007bff;background:#eaf4ff;}
 .builder-item{margin:8px 0;}
-.builder-card{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #d7dde5;border-radius:8px;padding:10px 12px;box-shadow:0 1px 2px rgba(15,23,42,.06);cursor:grab;}
-.builder-item.dragging{opacity:.45;}
+.builder-card{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #d7dde5;border-radius:8px;padding:10px 12px;box-shadow:0 1px 2px rgba(15,23,42,.06);cursor:grab;user-select:none;}
+.builder-card:active{cursor:grabbing;}
+.builder-item.dragging{opacity:.38;}
+.drop-placeholder{height:54px;margin:8px 0;border:2px dashed #007bff;border-radius:8px;background:#eaf4ff;pointer-events:none;}
 .builder-item.is-hidden > .builder-card{background:#f1f3f5;border-style:dashed;color:#6c757d;}
 .builder-item.is-hidden > .builder-card .builder-title strong{text-decoration:line-through;}
 .drag-handle{width:22px;color:#697586;text-align:center;}
@@ -162,6 +164,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const hiddenInputs = document.getElementById('sidebar-hidden-inputs');
     const zones = Array.from(document.querySelectorAll('.drop-zone'));
     let dragging = null;
+    let placeholder = null;
 
     function closestBuilderItem(element) {
         return element ? element.closest('.builder-item') : null;
@@ -197,7 +200,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    function insertByPointer(zone, event) {
+    function clearPlaceholder() {
+        if (placeholder) placeholder.remove();
+        placeholder = null;
+    }
+
+    function placePlaceholder(zone, event) {
         if (!dragging || !canDrop(zone, dragging)) return;
 
         const candidates = Array.from(zone.children).filter(function (child) {
@@ -208,8 +216,11 @@ document.addEventListener('DOMContentLoaded', function () {
             return event.clientY < rect.top + rect.height / 2;
         });
 
-        zone.insertBefore(dragging, next || null);
-        updateBadges();
+        if (!placeholder) {
+            placeholder = document.createElement('div');
+            placeholder.className = 'drop-placeholder';
+        }
+        zone.insertBefore(placeholder, next || null);
     }
 
     document.querySelectorAll('.builder-item').forEach(function (item) {
@@ -223,6 +234,7 @@ document.addEventListener('DOMContentLoaded', function () {
         item.addEventListener('dragend', function () {
             item.classList.remove('dragging');
             dragging = null;
+            clearPlaceholder();
             zones.forEach(function (zone) { zone.classList.remove('drag-over'); });
             updateBadges();
         });
@@ -234,10 +246,11 @@ document.addEventListener('DOMContentLoaded', function () {
             event.preventDefault();
             event.stopPropagation();
             zone.classList.add('drag-over');
-            insertByPointer(zone, event);
+            placePlaceholder(zone, event);
         });
 
-        zone.addEventListener('dragleave', function () {
+        zone.addEventListener('dragleave', function (event) {
+            if (event.relatedTarget && zone.contains(event.relatedTarget)) return;
             zone.classList.remove('drag-over');
         });
 
@@ -245,8 +258,13 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!dragging || !canDrop(zone, dragging)) return;
             event.preventDefault();
             event.stopPropagation();
-            insertByPointer(zone, event);
+            placePlaceholder(zone, event);
+            if (placeholder && placeholder.parentElement === zone) {
+                zone.insertBefore(dragging, placeholder);
+            }
+            clearPlaceholder();
             zone.classList.remove('drag-over');
+            updateBadges();
         });
     });
 

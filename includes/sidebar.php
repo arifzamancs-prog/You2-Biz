@@ -128,6 +128,21 @@ $project_package_labels = !is_super_admin_user() && isset($conn) && $conn instan
         'package_list' => 'Package List',
     ];
 
+$sidebar_stock_receive_pending_count = 0;
+if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
+    $sidebar_company_id = (int)($_SESSION['user_id'] ?? 0);
+    $sidebar_branch_id = selected_branch_id($conn, true);
+    if ($sidebar_company_id > 0 && $sidebar_branch_id > 0 && !empty($_SESSION['stock_product_enabled']) && company_multi_branch_enabled($conn, $sidebar_company_id)) {
+        $sidebar_receive_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS total FROM stock_distributions WHERE user_id=? AND to_branch_id=? AND status='pending'");
+        if ($sidebar_receive_stmt) {
+            mysqli_stmt_bind_param($sidebar_receive_stmt, 'ii', $sidebar_company_id, $sidebar_branch_id);
+            mysqli_stmt_execute($sidebar_receive_stmt);
+            $sidebar_stock_receive_pending_count = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($sidebar_receive_stmt))['total'] ?? 0);
+            mysqli_stmt_close($sidebar_receive_stmt);
+        }
+    }
+}
+
 $sidebar_avatar = app_path('uploads/avatars/you2biz.png');
 
 if(
@@ -221,7 +236,7 @@ function sidebar_is_active($href)
 function sidebar_group_active($items)
 {
     foreach($items as $item){
-        if(sidebar_is_active($item['href'])){
+        if(sidebar_is_active($item['href']) || ($item['href'] === app_path('sales/receive_stock.php') && (int)($item['badge'] ?? 0) > 0)){
             return true;
         }
     }
@@ -229,15 +244,16 @@ function sidebar_group_active($items)
     return false;
 }
 
-function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '')
+function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '', $badge = 0)
 {
-    $active = sidebar_is_active($href) ? ' active' : '';
+    $has_pending_receipt = $href === app_path('sales/receive_stock.php') && (int)$badge > 0;
+    $active = (sidebar_is_active($href) || $has_pending_receipt) ? ' active' : '';
 ?>
     <li class="nav-item">
         <a href="<?= htmlspecialchars($href); ?>"
            class="nav-link<?= $active; ?> <?= htmlspecialchars($class); ?>">
             <i class="nav-icon <?= htmlspecialchars($icon); ?>"></i>
-            <p><?= htmlspecialchars($label); ?></p>
+            <p><?= htmlspecialchars($label); ?><?php if((int)$badge > 0){ ?> <span class="right badge badge-danger" style="right:1.8rem"><?= (int)$badge; ?></span><?php } ?></p>
         </a>
     </li>
 <?php
@@ -264,7 +280,8 @@ function sidebar_tree($label, $icon, $items)
                     $item['href'],
                     $item['label'],
                     $item['icon'] ?? 'far fa-circle',
-                    $item['class'] ?? ''
+                    $item['class'] ?? '',
+                    $item['badge'] ?? 0
                 );
                 ?>
             <?php } ?>
@@ -488,8 +505,25 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(products_module_enabled()){
                         if(manager_has_permission('products')) sidebar_tree('Products', 'fas fa-boxes', $sidebar_product_items);
                         if(manager_has_permission('suppliers') && stock_can_manage_warehouse($conn)) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]]);
-                        if(manager_has_permission('warehouse')) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
-                        if(manager_has_permission('stock_sales')) sidebar_tree('Sales', 'fas fa-cash-register', [['href'=>app_path('sales/create_invoice.php'),'label'=>'Create Invoice'],['href'=>app_path('sales/invoice_list.php'),'label'=>'Invoice List'],['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment']]);
+                        if(manager_has_permission('warehouse') && !(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && !company_multi_branch_enabled($conn, (int)$_SESSION['user_id']))) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                        if(manager_has_permission('stock_live_report') && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
+                        if(manager_has_permission('stock_sales')) {
+                            $stock_sales_items = [
+                                ['href'=>app_path('sales/create_invoice.php'),'label'=>'Create Invoice'],
+                                ['href'=>app_path('sales/invoice_list.php'),'label'=>'Invoice List'],
+                            ];
+                            if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') {
+                                $stock_sales_items[] = ['href'=>app_path('sales/stock_product.php'),'label'=>'My Stock'];
+                                if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $stock_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged'];
+                            }
+                            if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
+                                $stock_sales_items[] = ['href'=>app_path('sales/receive_stock.php'),'label'=>'Product Receive Req.','badge'=>$sidebar_stock_receive_pending_count];
+                            }
+                            if (!company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
+                                $stock_sales_items[] = ['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment'];
+                            }
+                            sidebar_tree('Sales', 'fas fa-cash-register', $stock_sales_items);
+                        }
                     }
                     if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
@@ -504,27 +538,43 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]);
                 }
                 if(sales_module_enabled()){
+                $sidebar_sales_items = [
+                    [
+                        'href' => app_path('sales/create_invoice.php'),
+                        'label' => 'Create Invoice',
+                    ],
+                    [
+                        'href' => app_path('sales/invoice_list.php'),
+                        'label' => 'Invoice List',
+                    ],
+                ];
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') {
+                    $sidebar_sales_items[] = [
+                        'href' => app_path('sales/stock_product.php'),
+                        'label' => 'My Stock',
+                    ];
+                    if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged'];
+                }
+                if (!company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
+                    $sidebar_sales_items[] = [
+                        'href' => app_path('sales/opening_due_entry.php'),
+                        'label' => 'Previous Due Entry',
+                    ];
+                    $sidebar_sales_items[] = [
+                        'href' => app_path('sales/receive_payment.php'),
+                        'label' => 'Due Payment',
+                    ];
+                } else {
+                    $sidebar_sales_items[] = [
+                        'href' => app_path('sales/receive_stock.php'),
+                        'label' => 'Product Receive Req.',
+                        'badge' => $sidebar_stock_receive_pending_count,
+                    ];
+                }
                 sidebar_tree(
                     'Sales',
                     'fas fa-file-invoice',
-                    [
-                        [
-                            'href' => app_path('sales/create_invoice.php'),
-                            'label' => 'Create Invoice',
-                        ],
-                        [
-                            'href' => app_path('sales/invoice_list.php'),
-                            'label' => 'Invoice List',
-                        ],
-                        [
-                            'href' => app_path('sales/opening_due_entry.php'),
-                            'label' => 'Previous Due Entry',
-                        ],
-                        [
-                            'href' => app_path('sales/receive_payment.php'),
-                            'label' => 'Due Payment',
-                        ],
-                    ]
+                    $sidebar_sales_items
                 );
                 }
 
@@ -638,7 +688,8 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                if(!(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && !company_multi_branch_enabled($conn, (int)$_SESSION['user_id']))) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                 }
 
                 if(!products_module_enabled()) sidebar_tree(
@@ -741,11 +792,16 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('attendance_settings')) $sidebar_admin_items[] = ['href' => app_path('staff/attendance_settings.php'), 'label' => 'Attendance Settings', 'icon' => 'fas fa-user-clock'];
                     if((is_admin_user() || manager_has_selected_admin_sidebar_permission('branch_management')) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_admin_items[] = ['href' => app_path('user_management/branch_manage.php'), 'label' => 'Branch Management', 'icon' => 'fas fa-code-branch'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('wallet_approvals')) $sidebar_admin_items[] = ['href' => app_path('user_management/wallet_approvals.php'), 'label' => 'Wallet Approvals', 'icon' => 'fas fa-check-circle'];
+                    if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') $sidebar_admin_items[] = ['href' => app_path('user_management/dump_approval.php'), 'label' => 'Dumps Approval', 'icon' => 'fas fa-dumpster'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('invoice_charges')) $sidebar_admin_items[] = ['href' => app_path('user_management/invoice_charges.php'), 'label' => 'Invoice Charges', 'icon' => 'fas fa-percentage'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('printing_option')) $sidebar_admin_items[] = ['href' => app_path('user_management/printing_option.php'), 'label' => 'Printing Option', 'icon' => 'fas fa-print'];
                     if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Profit Cash Out', 'icon' => 'fas fa-coins'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
-                    if(products_module_enabled() && (is_admin_user() || (manager_has_permission('admin') && manager_has_permission('stock_sales')))) $sidebar_admin_items[] = ['href' => app_path('warehouse/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'];
+                    if(products_module_enabled()
+                        && project_package_company_type($conn, (int)$_SESSION['user_id']) !== 'Fashion house'
+                        && (is_admin_user() || (manager_has_permission('admin') && manager_has_permission('stock_sales')))) {
+                        $sidebar_admin_items[] = ['href' => app_path('warehouse/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'];
+                    }
                     if($sidebar_admin_items) sidebar_tree('Admin', 'fas fa-user-cog', $sidebar_admin_items);
                     if(is_admin_user() || manager_has_permission('tools')) {
                         $sidebar_tools_items = is_super_admin_user()

@@ -1,5 +1,17 @@
 <?php
 
+function product_sku_exists($conn, $user_id, $sku, $exclude_id = 0)
+{
+    $sku = trim((string)$sku);
+    if ($sku === '') return false;
+    $stmt = mysqli_prepare($conn, 'SELECT id FROM products WHERE user_id=? AND UPPER(TRIM(sku))=UPPER(?) AND id<>? LIMIT 1');
+    mysqli_stmt_bind_param($stmt, 'isi', $user_id, $sku, $exclude_id);
+    mysqli_stmt_execute($stmt);
+    $exists = (bool)mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return $exists;
+}
+
 /**
  * Product inventory is FIFO-only.  The legacy category_type column remains
  * for backwards-compatible databases, but every category is now stock based.
@@ -64,6 +76,115 @@ function ensure_product_category_type_column($conn)
         );
     }
 
+}
+
+function ensure_product_variant_schema($conn)
+{
+    $column = mysqli_query($conn, "SHOW COLUMNS FROM product_categories LIKE 'variant_options'");
+    if($column && mysqli_num_rows($column) === 0){
+        mysqli_query($conn, "ALTER TABLE product_categories ADD COLUMN variant_options TEXT NULL AFTER category_name");
+    }
+
+    mysqli_query($conn, "CREATE TABLE IF NOT EXISTS product_variants (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        product_id INT NOT NULL,
+        variant_name VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_product_variant (product_id, variant_name),
+        KEY idx_variant_owner (user_id, product_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+function ensure_product_subcategory_schema($conn)
+{
+    $category_column = mysqli_query($conn, "SHOW COLUMNS FROM product_categories LIKE 'sub_category'");
+    if($category_column && mysqli_num_rows($category_column) === 0){
+        mysqli_query($conn, "ALTER TABLE product_categories ADD COLUMN sub_category VARCHAR(100) NULL AFTER category_name");
+    }
+    $product_column = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'sub_category'");
+    if($product_column && mysqli_num_rows($product_column) === 0){
+        mysqli_query($conn, "ALTER TABLE products ADD COLUMN sub_category VARCHAR(100) NULL AFTER category_id");
+    }
+}
+
+function product_category_subcategory($conn, $category_id, $user_id)
+{
+    ensure_product_subcategory_schema($conn);
+    $stmt = mysqli_prepare($conn, 'SELECT sub_category FROM product_categories WHERE id=? AND user_id=? LIMIT 1');
+    if(!$stmt){ return ''; }
+    mysqli_stmt_bind_param($stmt, 'ii', $category_id, $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return trim((string)($row['sub_category'] ?? ''));
+}
+
+function product_variant_options_from_text($value)
+{
+    $parts = preg_split('/[\r\n,]+/', (string)$value);
+    $options = [];
+    foreach($parts as $part){
+        $part = trim($part);
+        if($part !== '' && mb_strlen($part) <= 100){
+            $options[mb_strtolower($part)] = $part;
+        }
+    }
+    return array_values($options);
+}
+
+function product_category_variant_options($conn, $category_id, $user_id)
+{
+    ensure_product_variant_schema($conn);
+    $stmt = mysqli_prepare($conn, 'SELECT variant_options FROM product_categories WHERE id=? AND user_id=? LIMIT 1');
+    if(!$stmt){ return []; }
+    mysqli_stmt_bind_param($stmt, 'ii', $category_id, $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return product_variant_options_from_text($row['variant_options'] ?? '');
+}
+
+function product_category_name_exists($conn, $user_id, $category_name, $exclude_id = 0)
+{
+    $category_name = trim((string)$category_name);
+    $exclude_id = (int)$exclude_id;
+    if($category_name === ''){ return false; }
+    $sql = 'SELECT id FROM product_categories WHERE user_id=? AND LOWER(TRIM(category_name))=LOWER(TRIM(?))';
+    if($exclude_id > 0){ $sql .= ' AND id<>?'; }
+    $sql .= ' LIMIT 1';
+    $stmt = mysqli_prepare($conn, $sql);
+    if(!$stmt){ return false; }
+    if($exclude_id > 0){
+        mysqli_stmt_bind_param($stmt, 'isi', $user_id, $category_name, $exclude_id);
+    }else{
+        mysqli_stmt_bind_param($stmt, 'is', $user_id, $category_name);
+    }
+    mysqli_stmt_execute($stmt);
+    $exists = mysqli_num_rows(mysqli_stmt_get_result($stmt)) > 0;
+    mysqli_stmt_close($stmt);
+    return $exists;
+}
+
+function product_variant_names($conn, $product_id, $user_id)
+{
+    ensure_product_variant_schema($conn);
+    $stmt = mysqli_prepare($conn, 'SELECT variant_name FROM product_variants WHERE product_id=? AND user_id=? ORDER BY id');
+    if(!$stmt){ return []; }
+    mysqli_stmt_bind_param($stmt, 'ii', $product_id, $user_id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $names = [];
+    while($row = mysqli_fetch_assoc($result)){ $names[] = $row['variant_name']; }
+    mysqli_stmt_close($stmt);
+    return $names;
+}
+
+function product_variant_is_valid($conn, $product_id, $user_id, $variant_name)
+{
+    $variant_name = trim((string)$variant_name);
+    $variants = product_variant_names($conn, $product_id, $user_id);
+    return empty($variants) ? $variant_name === '' : in_array($variant_name, $variants, true);
 }
 
 function product_category_type_label($category_type)

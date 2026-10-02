@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_helper.php';
+require_once '../includes/branch_delete_guard.php';
 
 require_admin_user();
 
@@ -21,13 +22,7 @@ function branch_manage_redirect($message, $type = 'success')
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'brand_settings') {
-    $enabled = isset($_POST['brand_feature_enabled']) ? 1 : 0;
-    $stmt = mysqli_prepare($conn, 'INSERT INTO company_branch_brand_settings (user_id, is_enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE is_enabled=VALUES(is_enabled)');
-    if ($stmt) {
-        mysqli_stmt_bind_param($stmt, 'ii', $user_id, $enabled);
-        mysqli_stmt_execute($stmt);
-    }
-    branch_manage_redirect($enabled ? 'Brand option is active.' : 'Brand option is inactive.');
+    branch_manage_redirect('Brand settings updates are currently disabled.', 'warning');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_brand') {
@@ -59,6 +54,7 @@ $brands_enabled = branch_brands_enabled($conn, $user_id);
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 'branch') {
     $branch_id = (int)($_POST['branch_id'] ?? 0);
     $branch_name = trim((string)($_POST['branch_name'] ?? ''));
+    $branch_code = strtoupper(trim((string)($_POST['branch_code'] ?? '')));
     $address = trim((string)($_POST['address'] ?? ''));
     $phone = trim((string)($_POST['phone'] ?? ''));
     $brand_id = (int)($_POST['brand_id'] ?? 0);
@@ -66,8 +62,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
     if ($branch_name === '') {
         branch_manage_redirect('Branch name is required.', 'danger');
     }
+    if ($branch_code === '' || !preg_match('/^[A-Z0-9_-]{2,50}$/', $branch_code)) {
+        branch_manage_redirect('Branch code is required and may contain only letters, numbers, hyphens, or underscores.', 'danger');
+    }
 
-    if (branch_name_is_reserved($branch_name)) {
+    if ($branch_id === 0 && branch_name_is_reserved($branch_name)) {
         branch_manage_redirect('Main Warehouse is managed automatically at Head Office and cannot be created as a branch.', 'danger');
     }
 
@@ -86,19 +85,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
     }
 
     if ($branch_id > 0) {
-        $head_office_stmt = mysqli_prepare($conn, 'SELECT is_head_office, branch_name, brand_id FROM branches WHERE id=? AND user_id=? LIMIT 1');
+        $head_office_stmt = mysqli_prepare($conn, 'SELECT is_head_office, branch_name, brand_id, branch_code FROM branches WHERE id=? AND user_id=? LIMIT 1');
         mysqli_stmt_bind_param($head_office_stmt, 'ii', $branch_id, $user_id);
         mysqli_stmt_execute($head_office_stmt);
         $branch_record = mysqli_fetch_assoc(mysqli_stmt_get_result($head_office_stmt));
         if (!$branch_record) {
             branch_manage_redirect('Branch not found.', 'danger');
         }
+        // Main Warehouse is a system location. Its inventory lookup relies on
+        // the fixed name, but its operational details and code remain editable.
+        if (branch_name_is_reserved((string)$branch_record['branch_name'])) $branch_name = (string)$branch_record['branch_name'];
+        $code_check = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND branch_code=? AND id<>? LIMIT 1');
+        mysqli_stmt_bind_param($code_check, 'isi', $user_id, $branch_code, $branch_id); mysqli_stmt_execute($code_check);
+        if (mysqli_fetch_assoc(mysqli_stmt_get_result($code_check))) branch_manage_redirect('This branch code is already in use.', 'danger');
         $stmt = mysqli_prepare(
             $conn,
-            'UPDATE branches SET branch_name=?, address=?, phone=?, brand_id=? WHERE id=? AND user_id=?'
+            'UPDATE branches SET branch_name=?, branch_code=?, address=?, phone=?, brand_id=? WHERE id=? AND user_id=?'
         );
         $brand_value = branch_is_fixed_location($branch_record) ? null : ($brands_enabled ? ($brand_id > 0 ? $brand_id : null) : ($branch_record['brand_id'] !== null ? (int)$branch_record['brand_id'] : null));
-        mysqli_stmt_bind_param($stmt, 'sssiii', $branch_name, $address, $phone, $brand_value, $branch_id, $user_id);
+        mysqli_stmt_bind_param($stmt, 'ssssiii', $branch_name, $branch_code, $address, $phone, $brand_value, $branch_id, $user_id);
         if (mysqli_stmt_execute($stmt)) {
             if ((int)$branch_record['is_head_office'] === 1) {
                 $profile_sync = mysqli_prepare($conn, 'UPDATE users SET address=?, phone=? WHERE id=?');
@@ -110,13 +115,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
             branch_manage_redirect('Branch updated successfully.');
         }
     } else {
+        $code_check = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND branch_code=? LIMIT 1');
+        mysqli_stmt_bind_param($code_check, 'is', $user_id, $branch_code); mysqli_stmt_execute($code_check);
+        if (mysqli_fetch_assoc(mysqli_stmt_get_result($code_check))) branch_manage_redirect('This branch code is already in use.', 'danger');
         $stmt = mysqli_prepare(
             $conn,
-            "INSERT INTO branches (user_id, brand_id, branch_name, address, phone, status)
-             VALUES (?, ?, ?, ?, ?, 'active')"
+            "INSERT INTO branches (user_id, brand_id, branch_name, branch_code, address, phone, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'active')"
         );
         $brand_value = $brand_id > 0 ? $brand_id : null;
-        mysqli_stmt_bind_param($stmt, 'iisss', $user_id, $brand_value, $branch_name, $address, $phone);
+        mysqli_stmt_bind_param($stmt, 'iissss', $user_id, $brand_value, $branch_name, $branch_code, $address, $phone);
         if (mysqli_stmt_execute($stmt)) {
             branch_manage_redirect('New branch created successfully.');
         }
@@ -140,9 +148,28 @@ if (isset($_GET['delete'])) {
         branch_manage_redirect('Head Office and Main Warehouse cannot be deleted.', 'danger');
     }
 
+    mysqli_begin_transaction($conn);
+    mysqli_query($conn, 'SELECT id FROM branches WHERE id=' . $branch_id . ' AND user_id=' . $user_id . ' FOR UPDATE');
+    mysqli_query($conn, 'SELECT id FROM wallets WHERE branch_id=' . $branch_id . ' FOR UPDATE');
+    $block_reason = branch_delete_block_reason($conn, $branch_id);
+    if ($block_reason !== '') {
+        mysqli_rollback($conn);
+        branch_manage_redirect($block_reason, 'danger');
+    }
+
+    try {
+    $wallet_delete = mysqli_prepare($conn, 'DELETE FROM wallets WHERE branch_id=? AND user_id=? AND is_system=1 AND balance=0');
+    mysqli_stmt_bind_param($wallet_delete, 'ii', $branch_id, $user_id);
+    if (!mysqli_stmt_execute($wallet_delete)) throw new RuntimeException('Cannot remove unused default wallet.');
     $delete = mysqli_prepare($conn, 'DELETE FROM branches WHERE id=? AND user_id=?');
     mysqli_stmt_bind_param($delete, 'ii', $branch_id, $user_id);
-    mysqli_stmt_execute($delete);
+    if (!mysqli_stmt_execute($delete) || mysqli_stmt_affected_rows($delete) !== 1) throw new RuntimeException('Cannot delete branch.');
+    mysqli_commit($conn);
+    } catch (Throwable $error) {
+        mysqli_rollback($conn);
+        error_log('Branch deletion: ' . $error->getMessage());
+        branch_manage_redirect('Branch could not be deleted. Please try again.', 'danger');
+    }
     branch_manage_redirect('Branch deleted successfully.');
 }
 
@@ -163,7 +190,7 @@ $edit_branch_is_fixed = $edit_branch && branch_is_fixed_location($edit_branch);
 $brands = mysqli_query($conn, "SELECT * FROM branch_brands WHERE user_id=" . $user_id . " ORDER BY brand_name ASC");
 $branches = mysqli_query(
     $conn,
-    "SELECT b.*, bb.brand_name, bb.logo_path FROM branches b LEFT JOIN branch_brands bb ON bb.id=b.brand_id AND bb.user_id=b.user_id WHERE b.user_id=" . $user_id . " ORDER BY b.is_head_office DESC, b.branch_name ASC"
+    "SELECT b.*, bb.brand_name, bb.logo_path FROM branches b LEFT JOIN branch_brands bb ON bb.id=b.brand_id AND bb.user_id=b.user_id WHERE b.user_id=" . $user_id . " ORDER BY CASE WHEN b.is_head_office=1 THEN 0 WHEN b.branch_name='Main Warehouse' THEN 1 ELSE 2 END ASC, b.id DESC"
 );
 
 require_once '../includes/header.php';
@@ -180,7 +207,7 @@ require_once '../includes/sidebar.php';
                 <input type="checkbox" class="custom-control-input" id="brand_feature_enabled" name="brand_feature_enabled" value="1" <?= $brands_enabled ? 'checked' : ''; ?>>
                 <label class="custom-control-label" for="brand_feature_enabled">Enable brands for branches</label>
             </div>
-            <button type="submit" class="btn btn-sm btn-primary">Update</button>
+            <button type="submit" class="btn btn-sm btn-primary" disabled title="Brand settings updates are currently disabled">Update</button>
         </form>
         <?php if ($brands_enabled) { ?>
             <form method="post" enctype="multipart/form-data" class="row align-items-end border-top pt-3">
@@ -206,11 +233,11 @@ require_once '../includes/sidebar.php';
 
 <div class="row">
     <div class="col-lg-4">
-        <div class="card card-primary card-outline">
+        <div class="card card-primary card-outline" id="branch-editor">
             <div class="card-header">
                 <h3 class="card-title"><?= $edit_branch ? 'Edit Branch' : 'Add New Branch'; ?></h3>
             </div>
-            <form method="post">
+            <form method="post" action="branch_manage.php" id="branch-form">
                 <div class="card-body">
                     <input type="hidden" name="action" value="branch">
                     <input type="hidden" name="branch_id" value="<?= (int)($edit_branch['id'] ?? 0); ?>">
@@ -232,7 +259,13 @@ require_once '../includes/sidebar.php';
                     <?php } ?>
                     <div class="form-group">
                         <label for="branch_name">Branch Name</label>
-                        <input type="text" class="form-control" id="branch_name" name="branch_name" maxlength="150" required value="<?= htmlspecialchars($edit_branch['branch_name'] ?? ''); ?>" placeholder="e.g. Gulshan Branch">
+                        <input type="text" class="form-control" id="branch_name" name="branch_name" maxlength="150" required value="<?= htmlspecialchars($edit_branch['branch_name'] ?? ''); ?>" placeholder="e.g. Gulshan Branch" <?= $edit_branch && branch_name_is_reserved((string)$edit_branch['branch_name']) ? 'readonly' : ''; ?>>
+                        <?php if ($edit_branch && branch_name_is_reserved((string)$edit_branch['branch_name'])) { ?><small class="text-muted">Main Warehouse name is system-managed; its code, address and phone can be updated.</small><?php } ?>
+                    </div>
+                    <div class="form-group">
+                        <label for="branch_code">Branch Code</label>
+                        <input type="text" class="form-control text-uppercase" id="branch_code" name="branch_code" maxlength="50" pattern="[A-Za-z0-9_-]{2,50}" required value="<?= htmlspecialchars($edit_branch['branch_code'] ?? ''); ?>" placeholder="e.g. GLS-01">
+                        <small class="text-muted">Must be unique within your company. Use letters, numbers, hyphens, or underscores.</small>
                     </div>
                     <div class="form-group">
                         <label for="address">Address <small class="text-muted">(Optional)</small></label>
@@ -259,18 +292,22 @@ require_once '../includes/sidebar.php';
             <div class="card-body">
                 <?php if ($message) { ?><div class="alert alert-<?= htmlspecialchars($message_type); ?>"><?= htmlspecialchars($message); ?></div><?php } ?>
                 <div class="table-responsive">
-                    <table class="table table-bordered table-hover mb-0">
-                        <thead><tr><?php if ($brands_enabled) { ?><th>Brand</th><?php } ?><th>Branch</th><th>Address</th><th>Phone</th><th class="text-center" style="width: 145px;">Action</th></tr></thead>
+                    <table id="branch-management-table" class="table table-bordered table-hover mb-0">
+                        <thead><tr><?php if ($brands_enabled) { ?><th>Brand</th><?php } ?><th>Branch</th><th>Branch Code</th><th>Address</th><th>Phone</th><th class="text-center" style="width: 145px;">Action</th></tr></thead>
                         <tbody>
                         <?php while ($row = mysqli_fetch_assoc($branches)) { ?>
                             <tr>
                                 <?php if ($brands_enabled) { ?><td><?php if (branch_is_fixed_location($row)) { ?><strong>All Brand</strong><?php } else { ?><?php if (!empty($row['logo_path'])) { ?><img src="../<?= htmlspecialchars($row['logo_path']); ?>" alt="" style="width:28px;height:28px;object-fit:contain" class="mr-1"><?php } ?><strong><?= htmlspecialchars($row['brand_name'] ?: '-'); ?></strong><?php } ?></td><?php } ?>
                                 <td><strong><?= htmlspecialchars($row['branch_name']); ?></strong><?php if ((int)$row['is_head_office'] === 1) { ?><span class="badge badge-primary ml-2">Default</span><?php } ?></td>
+                                <td><code><?= htmlspecialchars($row['branch_code'] ?: '-'); ?></code></td>
                                 <td><?= htmlspecialchars($row['address'] ?: '-'); ?></td>
                                 <td><?= htmlspecialchars($row['phone'] ?: '-'); ?></td>
                                 <td class="text-center">
                                     <a href="branch_manage.php?edit=<?= (int)$row['id']; ?>" class="btn btn-sm btn-warning" title="Edit"><i class="fas fa-edit"></i></a>
-                                    <?php if (!branch_is_fixed_location($row)) { ?><a href="branch_manage.php?delete=<?= (int)$row['id']; ?>" class="btn btn-sm btn-danger ml-1" title="Delete" onclick="return confirm('Delete this branch?');"><i class="fas fa-trash"></i></a><?php } ?>
+                                    <?php if (!branch_is_fixed_location($row)) { $block_reason = branch_delete_block_reason($conn, (int)$row['id']); ?>
+                                        <?php if ($block_reason !== '') { ?><span title="<?= htmlspecialchars($block_reason); ?>"><button type="button" class="btn btn-sm btn-danger ml-1" disabled aria-label="Delete unavailable: linked records exist"><i class="fas fa-trash"></i></button></span>
+                                        <?php } else { ?><a href="branch_manage.php?delete=<?= (int)$row['id']; ?>" class="btn btn-sm btn-danger ml-1" title="Delete" data-ajax-action-link="true" data-ajax-remove="true" data-confirm="Delete this branch?"><i class="fas fa-trash"></i></a><?php } ?>
+                                    <?php } ?>
                                 </td>
                             </tr>
                         <?php } ?>
@@ -282,4 +319,27 @@ require_once '../includes/sidebar.php';
     </div>
 </div>
 
-<?php require_once '../includes/footer.php'; ?>
+<?php
+$page_script = '<script src="../assets/js/ajax_page_actions.js?v=' . filemtime(__DIR__ . '/../assets/js/ajax_page_actions.js') . '"></script>';
+$page_script .= <<<'HTML'
+<script>
+document.addEventListener('ajax-page-action-complete', function(event){
+    var detail = event.detail;
+    if (!detail || !detail.source || detail.source.id !== 'branch-form') return;
+    var source = new DOMParser().parseFromString(detail.result.html || '', 'text/html');
+    var updatedTable = source.querySelector('#branch-management-table');
+    var updatedEditor = source.querySelector('#branch-editor');
+    var table = document.getElementById('branch-management-table');
+    var editor = document.getElementById('branch-editor');
+    if (!updatedTable || !updatedEditor || !table || !editor) {
+        window.showAjaxActionMessage('Branch saved, but the list could not be refreshed. Please reload the page.', false);
+        return;
+    }
+    table.replaceWith(updatedTable.cloneNode(true));
+    editor.replaceWith(updatedEditor.cloneNode(true));
+    window.history.replaceState(null, '', 'branch_manage.php');
+});
+</script>
+HTML;
+require_once '../includes/footer.php';
+?>

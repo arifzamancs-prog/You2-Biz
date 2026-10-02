@@ -8,6 +8,11 @@ $user_id = (int)$_SESSION['user_id'];
 
 ensure_product_management_columns($conn);
 
+if(!is_product_expiry_enabled($conn)){
+    header('Location: index.php');
+    exit;
+}
+
 $sql = "SELECT
             p.*,
             c.category_name
@@ -52,7 +57,7 @@ require_once '../includes/sidebar.php';
             <tr>
                 <th>Product</th>
                 <th>Category</th>
-                <th>SKU</th>
+                <th>Code</th>
                 <th>Purchase</th>
                 <th>Sale</th>
                 <th>Expired on</th>

@@ -28,19 +28,47 @@ $products = mysqli_query(
      ORDER BY product_name"
 );
 
-// Keep the products created/used through purchasing visible on this screen so
-// their current default cost can be maintained without opening Product Management.
-$managed_products = mysqli_query(
+$purchase_history = mysqli_query(
     $conn,
-    "SELECT p.id, p.product_name, p.purchase_price
-     FROM products p
-     INNER JOIN product_categories c ON c.id=p.category_id
-     WHERE p.user_id='$user_id'
-     AND p.status='active'
-     ORDER BY p.product_name"
+    "SELECT
+        pu.id,
+        pu.purchase_no,
+        pu.purchase_date,
+        pu.total_amount,
+        pu.paid_amount,
+        pu.due_amount,
+        pu.payment_status,
+        s.supplier_name,
+        GROUP_CONCAT(
+            CONCAT(
+                p.product_name,
+                CASE
+                    WHEN COALESCE(pi.variant_name, '') <> '' THEN CONCAT(' (', pi.variant_name, ')')
+                    ELSE ''
+                END,
+                ' x ', pi.quantity
+            )
+            ORDER BY p.product_name, pi.variant_name
+            SEPARATOR ' || '
+        ) AS products
+     FROM purchases pu
+     LEFT JOIN suppliers s ON s.id=pu.supplier_id
+     LEFT JOIN purchase_items pi ON pi.purchase_id=pu.id
+     LEFT JOIN products p ON p.id=pi.product_id
+     WHERE pu.user_id='$user_id'
+     GROUP BY pu.id, pu.purchase_no, pu.purchase_date, pu.total_amount, pu.paid_amount, pu.due_amount, pu.payment_status, s.supplier_name
+     ORDER BY pu.purchase_date DESC, pu.id DESC
+     LIMIT 100"
 );
 
 $wallets = active_wallets_result($conn, $user_id);
+
+$history_items_stmt = mysqli_prepare($conn, "SELECT pi.product_id, p.product_name, pi.variant_name, SUM(pi.quantity) AS quantity
+    FROM purchase_items pi
+    INNER JOIN purchases pu ON pu.id=pi.purchase_id AND pu.user_id=?
+    LEFT JOIN products p ON p.id=pi.product_id AND p.user_id=pu.user_id
+    WHERE pi.purchase_id=?
+    GROUP BY pi.product_id,p.product_name,pi.variant_name ORDER BY pi.product_id");
 
 $supplier_options_html = '';
 while($supplier = mysqli_fetch_assoc($suppliers)){
@@ -121,17 +149,18 @@ require_once '../includes/sidebar.php';
 <table class="table table-bordered" id="purchaseTable">
 <thead>
 <tr>
-<th width="42%">Product</th>
-<?php if(!$housing_purchase){ ?><th width="13%">Stock</th><?php } ?>
-<th width="16%"><?= $housing_purchase ? 'Price' : 'Purchase Price'; ?></th>
-<?php if(!$housing_purchase){ ?><th width="16%">Sale Price</th><?php } ?>
-<th width="12%">Qty</th>
-<th width="16%">Total</th>
-<th width="8%">Action</th>
+<th width="22%">Product</th>
+<th width="13%" class="variant-column">Variant</th>
+<?php if(!$housing_purchase){ ?><th width="12%">Stock</th><?php } ?>
+<th width="17%"><?= $housing_purchase ? 'Price' : 'Purchase Price'; ?></th>
+<?php if(!$housing_purchase){ ?><th width="17%">Sale Price</th><?php } ?>
+<th width="11%">Qty</th>
+<th width="15%">Total</th>
+<th width="6%">Action</th>
 </tr>
 </thead>
 <tbody>
-<tr>
+<tr data-line-index="0">
 <td>
     <select name="product_id[]" class="form-control product">
         <option value="">Select Product</option>
@@ -143,6 +172,7 @@ require_once '../includes/sidebar.php';
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
     </div>
 </td>
+<td class="variant-column"><div class="product-variant-quantities text-muted small">No variant</div></td>
 <?php if(!$housing_purchase){ ?><td>
     <input type="text" class="form-control product_stock" readonly>
 </td><?php } ?>
@@ -229,58 +259,72 @@ require_once '../includes/sidebar.php';
 </div>
 </section>
 
-<?php if(!$housing_purchase){ ?>
 <section class="content">
 <div class="container-fluid">
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title">Created Products</h3>
+        <h3 class="card-title">Purchase History</h3>
     </div>
     <div class="card-body">
         <div class="table-responsive">
         <table class="table table-bordered table-striped mb-0">
             <thead>
                 <tr>
-                    <th>Product Name</th>
-                    <th width="220">Cost / Price</th>
-                    <th width="150">Action</th>
+                    <th>Purchase No.</th>
+                    <th>Date</th>
+                    <th>Supplier</th>
+                    <th>Products</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Due</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
-            <?php if($managed_products && mysqli_num_rows($managed_products) > 0){ ?>
-                <?php while($managed_product = mysqli_fetch_assoc($managed_products)){ ?>
-                    <?php $managed_product_used = product_has_transactions($conn, (int)$managed_product['id'], $user_id); ?>
+            <?php if($purchase_history && mysqli_num_rows($purchase_history) > 0){ ?>
+                <?php while($purchase = mysqli_fetch_assoc($purchase_history)){ ?>
                     <tr>
-                        <td><?= htmlspecialchars($managed_product['product_name']); ?></td>
+                        <td><?= htmlspecialchars($purchase['purchase_no']); ?></td>
+                        <td><?= htmlspecialchars(date('d-m-Y', strtotime($purchase['purchase_date']))); ?></td>
+                        <td><?= htmlspecialchars($purchase['supplier_name'] ?: '-'); ?></td>
                         <td>
-                            <form method="post" action="update_product_cost.php" class="form-inline">
-                                <input type="hidden" name="product_id" value="<?= (int)$managed_product['id']; ?>">
-                                <div class="input-group input-group-sm">
-                                    <div class="input-group-prepend"><span class="input-group-text">BDT</span></div>
-                                    <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" value="<?= number_format((float)$managed_product['purchase_price'], 2, '.', ''); ?>" required>
-                                    <div class="input-group-append">
-                                        <button type="submit" class="btn btn-primary" title="Save Cost" aria-label="Save Cost"><i class="fas fa-save"></i></button>
-                                    </div>
-                                </div>
-                            </form>
+                        <?php
+                        mysqli_stmt_bind_param($history_items_stmt, 'ii', $user_id, $purchase['id']);
+                        mysqli_stmt_execute($history_items_stmt);
+                        $history_items = mysqli_stmt_get_result($history_items_stmt);
+                        $history_products = [];
+                        while($item = mysqli_fetch_assoc($history_items)){
+                            $history_products[$item['product_id']]['name'] = $item['product_name'] ?? 'Missing Product';
+                            $history_products[$item['product_id']]['quantities'][$item['variant_name']] = $item['quantity'];
+                        }
+                        foreach($history_products as $product_id => $history_product){
+                            $quantities = $history_product['quantities'];
+                            $order = array_unique(array_merge(product_variant_names($conn, (int)$product_id, $user_id), array_keys($quantities)));
+                            $parts = [];
+                            foreach($order as $variant_name){
+                                if($variant_name !== '' && array_key_exists($variant_name, $quantities)){
+                                    $parts[] = $variant_name . ': ' . number_format($quantities[$variant_name], 0);
+                                }
+                            }
+                            ?>
+                            <div><?= htmlspecialchars($history_product['name']); ?><?= isset($quantities['']) ? ' x ' . number_format($quantities[''], 0) : ''; ?>
+                                <?php if($parts){ ?><small class="d-block text-muted"><?= htmlspecialchars(implode(' || ', $parts)); ?></small><?php } ?>
+                            </div>
+                        <?php } ?>
                         </td>
-                        <td>
-                            <?php if(!$managed_product_used){ ?>
-                                <a href="../products/edit.php?id=<?= (int)$managed_product['id']; ?>" class="btn btn-warning btn-sm" title="Edit Product" aria-label="Edit Product"><i class="fas fa-edit"></i></a>
-                                <a href="delete_product.php?id=<?= (int)$managed_product['id']; ?>" class="btn btn-danger btn-sm" title="Delete Product" aria-label="Delete Product" onclick="return confirm('Delete this product?');"><i class="fas fa-trash"></i></a>
-                            <?php }else{ ?>
-                                <button type="button" class="btn btn-danger btn-sm" disabled title="This product is already used and cannot be deleted." aria-label="Delete unavailable"><i class="fas fa-trash"></i></button>
-                            <?php } ?>
-                        </td>
+                        <td>BDT <?= number_format((float)$purchase['total_amount'], 2); ?></td>
+                        <td>BDT <?= number_format((float)$purchase['paid_amount'], 2); ?></td>
+                        <td>BDT <?= number_format((float)$purchase['due_amount'], 2); ?></td>
+                        <td><span class="badge badge-<?= $purchase['payment_status'] === 'paid' ? 'success' : ($purchase['payment_status'] === 'partial' ? 'warning' : 'danger'); ?>"><?= htmlspecialchars(ucfirst($purchase['payment_status'])); ?></span></td>
                     </tr>
                 <?php } ?>
             <?php }else{ ?>
-                <tr><td colspan="3" class="text-center text-muted">No products created yet.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted">No purchase history found.</td></tr>
             <?php } ?>
             </tbody>
         </table>
         </div>
-        <small class="text-muted d-block mt-2">Used products keep their name and other details locked; only the cost/price can be updated.</small>
+        <small class="text-muted d-block mt-2">Latest 100 purchase records.</small>
     </div>
 </div>
 </div>
@@ -288,7 +332,6 @@ require_once '../includes/sidebar.php';
 
 <?php
 
-} // Stock product management panel.
 $supplier_display_label = supplier_display_text('Supplier'); $page_script = <<<SCRIPT
 <script>
 let paidAmountManuallyChanged = false;
@@ -298,6 +341,7 @@ $(function(){
     initCustomerSupplierSelect($(document));
     bindSupplierMode();
     calculateGrandTotal();
+    updateVariantColumnVisibility();
 
     function updatePaymentWalletBalance(){
         let selected = $("#payment_wallet_id option:selected");
@@ -345,6 +389,9 @@ $(function(){
             row.find(".cost_price").val("0");
             row.find(".sale_price").val("0");
             row.find(".product_stock").val(0);
+            row.find(".product-variant-quantities").text("No variant");
+            row.find(".qty").prop("readonly", false).val(1);
+            row.data("has-variants", false); updateVariantColumnVisibility();
             calculateRow(row);
             return;
         }
@@ -356,6 +403,9 @@ $(function(){
             row.find(".cost_price").val("");
             row.find(".sale_price").val("");
             row.find(".product_stock").val("");
+            row.find(".product-variant-quantities").text("No variant");
+            row.find(".qty").prop("readonly", false).val(1);
+            row.data("has-variants", false); updateVariantColumnVisibility();
             row.find(".line_total").val("");
             calculateGrandTotal();
             return;
@@ -370,6 +420,22 @@ $(function(){
                 row.find(".cost_price").val(res.cost_price);
                 row.find(".sale_price").val(res.sale_price);
                 row.find(".product_stock").val(res.stock);
+                let variant = row.find(".product-variant-quantities");
+                variant.empty();
+                if((res.variants || []).length){
+                    row.data("has-variants", true);
+                    row.find(".qty").val(0).prop("readonly", true);
+                    const lineIndex=row.data("line-index");
+                    res.variants.forEach(function(name){
+                        const group=$("<div>").addClass("input-group input-group-sm mb-1");
+                        group.append($("<div>").addClass("input-group-prepend").append($("<span>").addClass("input-group-text").text(name)));
+                        const input=$("<input>",{type:"number",min:0,step:1,value:0}).addClass("form-control variant-qty").attr("name","variant_quantity["+lineIndex+"]["+name+"]");
+                        group.append(input); variant.append(group);
+                    });
+                }else{
+                    variant.text("No variant"); row.find(".qty").val(1).prop("readonly", false); row.data("has-variants", false);
+                }
+                updateVariantColumnVisibility();
                 calculateRow(row);
             },
             error: function(xhr){
@@ -382,6 +448,13 @@ $(function(){
         calculateRow($(this).closest("tr"));
     });
 
+    $(document).on("input change", ".variant-qty", function(){
+        let row=$(this).closest("tr"), total=0;
+        row.find(".variant-qty").each(function(){ total+=Math.max(0,parseInt($(this).val(),10)||0); });
+        row.find(".qty").val(total);
+        calculateRow(row);
+    });
+
     $("#paid_amount").on("keyup change", function(){
         paidAmountManuallyChanged = true;
         calculateDue();
@@ -389,6 +462,7 @@ $(function(){
 
     $("#addRow").click(function(){
         let row = $("#purchaseTable tbody tr:first").clone();
+        row.data("line-index", $("#purchaseTable tbody tr").length);
 
         row.find(".select2-container").remove();
         row.find("select").val("");
@@ -402,7 +476,9 @@ $(function(){
         row.find(".cost_price").val("");
         row.find(".sale_price").val("");
         row.find(".product_stock").val("");
-        row.find(".qty").val(1);
+        row.find(".product-variant-quantities").text("No variant");
+        row.data("has-variants", false);
+        row.find(".qty").val(1).prop("readonly", false);
         row.find(".line_total").val("");
 
         $("#purchaseTable tbody").append(row);
@@ -414,6 +490,7 @@ $(function(){
             $(this).closest("tr").remove();
         }
         calculateGrandTotal();
+        updateVariantColumnVisibility();
     });
 });
 
@@ -438,6 +515,12 @@ function initProductSelect(context){
             allowClear: true
         });
     });
+}
+
+function updateVariantColumnVisibility(){
+    let visible=false;
+    $("#purchaseTable tbody tr").each(function(){ if($(this).data("has-variants")){ visible=true; } });
+    $("#purchaseTable .variant-column").toggle(visible);
 }
 
 function initCustomerSupplierSelect(context){

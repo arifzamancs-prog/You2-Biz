@@ -232,6 +232,16 @@ if(isset($_GET['id'], $_GET['action'])){
         }
     }
 
+    if (strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest') {
+        header('Content-Type: application/json');
+        $success = $message_type !== 'danger';
+        echo json_encode([
+            'success' => $success,
+            'message' => $message !== '' ? $message : ($success ? 'Action completed successfully.' : 'Action could not be completed.')
+        ]);
+        exit;
+    }
+
     header("Location: invoice_charges.php");
     exit;
 }
@@ -294,7 +304,7 @@ require_once '../includes/sidebar.php';
                     </div>
                 <?php } ?>
 
-                <form method="post" id="invoice-charge-form">
+                <form method="post" action="invoice_charges.php" id="invoice-charge-form">
                     <input
                         id="charge_id"
                         type="hidden"
@@ -438,6 +448,43 @@ require_once '../includes/sidebar.php';
 </div>
 
 <script>
+function resetInvoiceChargeForm() {
+    document.getElementById('charge_id').value = '0';
+    document.getElementById('charge_name').value = '';
+    document.getElementById('charge_type').value = 'add';
+    document.getElementById('charge_value_type').value = 'fixed';
+    document.getElementById('invoice-charge-form-title').textContent = 'Add Invoice Charge';
+    document.getElementById('invoice-charge-submit').innerHTML = '<i class="fas fa-save"></i> Add Charge';
+    document.getElementById('invoice-charge-cancel').classList.add('d-none');
+    window.history.replaceState(null, '', 'invoice_charges.php');
+}
+
+document.addEventListener('ajax-page-action-complete', function(event) {
+    const detail = event.detail;
+    if (!detail || detail.source.id !== 'invoice-charge-form') return;
+    const source = new DOMParser().parseFromString(detail.result.html || '', 'text/html');
+    const updated = source.querySelector('#example1 tbody');
+    if (!updated) {
+        window.showAjaxActionMessage('Charge saved, but the list could not be refreshed. Please reload the page.', false);
+        return;
+    }
+    const rows = Array.from(updated.children, row => row.cloneNode(true));
+    if (window.jQuery && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable('#example1')) {
+        const table = jQuery('#example1').DataTable();
+        table.clear();
+        rows.forEach(row => table.row.add(row));
+        table.draw(false);
+    } else {
+        document.querySelector('#example1 tbody').replaceChildren(...rows);
+    }
+    resetInvoiceChargeForm();
+});
+
+document.getElementById('invoice-charge-cancel').addEventListener('click', function(event) {
+    event.preventDefault();
+    resetInvoiceChargeForm();
+});
+
 document.addEventListener('click', async function(event) {
     const button = event.target.closest('.invoice-charge-action');
     if (!button || button.disabled) {
@@ -485,11 +532,13 @@ document.addEventListener('click', async function(event) {
         }
 
         if (action === 'delete') {
+            if (String(document.getElementById('charge_id').value) === String(chargeId)) resetInvoiceChargeForm();
             if (window.jQuery && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable('#example1')) {
                 jQuery('#example1').DataTable().row(row).remove().draw(false);
             } else {
                 row.remove();
             }
+            if (window.showAjaxActionMessage) window.showAjaxActionMessage(data.message || 'Invoice charge deleted successfully.', true);
             return;
         }
 
@@ -503,6 +552,7 @@ document.addEventListener('click', async function(event) {
             button.title = shown ? 'Hide' : 'Show';
             button.className = 'btn btn-sm invoice-charge-action invoice-visibility-action ' + (shown ? 'btn-warning' : 'btn-success');
             button.innerHTML = shown ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+            if (window.showAjaxActionMessage) window.showAjaxActionMessage(data.message || (shown ? 'Invoice charge is now shown on invoices.' : 'Invoice charge is now hidden from invoices.'), true);
         }
 
         if (action === 'active' || action === 'inactive') {
@@ -514,9 +564,17 @@ document.addEventListener('click', async function(event) {
             button.title = active ? 'Make Inactive' : 'Make Active';
             button.className = 'btn btn-sm invoice-charge-action invoice-status-action ' + (active ? 'btn-danger' : 'btn-info');
             button.innerHTML = active ? '<i class="fas fa-toggle-off"></i>' : '<i class="fas fa-toggle-on"></i>';
+            if (window.showAjaxActionMessage) window.showAjaxActionMessage(data.message || (active ? 'Invoice charge activated.' : 'Invoice charge deactivated.'), true);
+        }
+        if (window.jQuery && jQuery.fn.DataTable && jQuery.fn.DataTable.isDataTable('#example1')) {
+            jQuery('#example1').DataTable().row(row).invalidate('dom').draw(false);
         }
     } catch (error) {
-        window.alert(error.message || 'Action could not be completed.');
+        if (window.showAjaxActionMessage) {
+            window.showAjaxActionMessage(error.message || 'Action could not be completed.', false);
+        } else {
+            window.alert(error.message || 'Action could not be completed.');
+        }
     } finally {
         button.disabled = false;
     }
@@ -524,5 +582,6 @@ document.addEventListener('click', async function(event) {
 </script>
 
 <?php
+$page_script = '<script src="../assets/js/ajax_page_actions.js?v=' . filemtime(__DIR__ . '/../assets/js/ajax_page_actions.js') . '"></script>';
 require_once '../includes/footer.php';
 ?>

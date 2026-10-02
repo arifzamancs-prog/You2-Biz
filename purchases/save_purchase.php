@@ -122,6 +122,8 @@ function purchase_prepare_items($conn, $user_id)
     $sale_prices = $_POST['sale_price'] ?? [];
     $totals = $_POST['line_total'] ?? [];
     $new_product_names = $_POST['new_product_name'] ?? [];
+    $variant_names = $_POST['variant_name'] ?? [];
+    $variant_quantities = $_POST['variant_quantity'] ?? [];
 
     $items = [];
     $new_product_count = 0;
@@ -171,6 +173,7 @@ function purchase_prepare_items($conn, $user_id)
         $price = (float)($prices[$key] ?? 0);
         $sale_price = (float)($sale_prices[$key] ?? 0);
         $total = (float)($totals[$key] ?? 0);
+        $variant_name = trim((string)($variant_names[$key] ?? ''));
 
         if($product_choice === '' && trim((string)($new_product_names[$key] ?? '')) === ''){
             continue;
@@ -283,12 +286,41 @@ function purchase_prepare_items($conn, $user_id)
             }
         }
 
+        $product_variants = product_variant_names($conn, $product_id, $user_id);
+        if(!empty($product_variants)){
+            $line_variants = $variant_quantities[$key] ?? [];
+            $variant_total = 0;
+            foreach($product_variants as $variant){
+                $variant_qty = (int)($line_variants[$variant] ?? 0);
+                if($variant_qty < 0){ throw new Exception('Variant quantity cannot be negative.'); }
+                if($variant_qty === 0){ continue; }
+                $variant_total += $variant_qty;
+                $items[] = [
+                    'product_id' => $product_id,
+                    'qty' => $variant_qty,
+                    'price' => $price,
+                    'sale_price' => $sale_price,
+                    'total' => $variant_qty * $price,
+                    'variant_name' => $variant,
+                ];
+            }
+            if($variant_total <= 0 || $variant_total !== $qty){
+                throw new Exception('Enter quantity for at least one variant.');
+            }
+            continue;
+        }
+
+        if(!product_variant_is_valid($conn, $product_id, $user_id, $variant_name)){
+            throw new Exception('Select a valid variant for the selected product.');
+        }
+
         $items[] = [
             'product_id' => $product_id,
             'qty' => $qty,
             'price' => $price,
             'sale_price' => $sale_price,
             'total' => $qty * $price,
+            'variant_name' => $variant_name,
         ];
     }
 
@@ -323,8 +355,13 @@ try{
     $payment_status = $paid_amount <= 0 ? 'due' : ($paid_amount < $grand_total ? 'partial' : 'paid');
     $branch_id = ($_SESSION['company_type'] ?? '') === 'Housing'
         ? selected_branch_id($conn, true)
-        : stock_warehouse_id($conn, (int)$user_id);
-    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $branch_id);
+        : stock_purchase_location_id($conn, (int)$user_id);
+    // Purchasing stock may go to Main Warehouse, but its vendor payment is
+    // always paid from the Head Office wallet.
+    $wallet_branch_id = ($_SESSION['company_type'] ?? '') === 'Housing'
+        ? $branch_id
+        : stock_head_office_id($conn, (int)$user_id);
+    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $wallet_branch_id);
 
     if($paid_amount > 0){
         $wallet_balance_stmt = mysqli_prepare(
@@ -397,6 +434,7 @@ try{
         $qty = (int)$item['qty'];
         $price = (float)$item['price'];
         $total = (float)$item['total'];
+        $variant_name = (string)$item['variant_name'];
 
         $stmt = mysqli_prepare(
             $conn,
@@ -404,17 +442,18 @@ try{
              (
                 purchase_id,
                 product_id,
+                variant_name,
                 quantity,
                 unit_cost,
                 total_cost
              )
              VALUES
              (
-                ?,?,?,?,?
+                ?,?,?,?,?,?
              )"
         );
 
-        mysqli_stmt_bind_param($stmt, "iiddd", $purchase_id, $product_id, $qty, $price, $total);
+        mysqli_stmt_bind_param($stmt, "iisidd", $purchase_id, $product_id, $variant_name, $qty, $price, $total);
         mysqli_stmt_execute($stmt);
 
         if(($_SESSION['company_type'] ?? '') !== 'Housing'){
@@ -428,6 +467,7 @@ try{
             $purchase_id,
             $purchase_no,
             $purchase_date
+            , null, $variant_name
         )){
             throw new Exception("FIFO batch could not be created.");
         }
@@ -505,7 +545,7 @@ try{
     mysqli_commit($conn);
 
     $_SESSION['success'] = "Purchase Saved Successfully.";
-    header("Location:index.php?success=1");
+    header("Location:create.php?success=1");
     exit;
 }catch(Exception $e){
     mysqli_rollback($conn);

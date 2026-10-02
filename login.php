@@ -433,6 +433,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     }
 }
+
+// Failed logins must not leave the browser on a POST response. A 303 redirect
+// gives the login page a normal GET history entry, preventing the form
+// resubmission warning on refresh or navigation.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $message !== '') {
+    $_SESSION['verification_message'] = $message;
+    $_SESSION['verification_message_type'] = $message_type;
+    header('Location: login.php', true, 303);
+    exit;
+}
 ?>
 
 <!DOCTYPE html>

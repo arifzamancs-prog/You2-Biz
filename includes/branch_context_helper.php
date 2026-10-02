@@ -44,7 +44,26 @@ function ensure_branch_accounting_columns($conn, $company_id)
             mysqli_query($conn, "ALTER TABLE `{$table}` ADD INDEX `idx_{$table}_user_branch` (user_id, branch_id)");
         }
         if ($head_id > 0) {
-            mysqli_query($conn, "UPDATE `{$table}` SET branch_id={$head_id} WHERE user_id={$company_id} AND (branch_id IS NULL OR branch_id=0)");
+            if ($table === 'wallets') {
+                // Legacy databases can already contain both an unassigned Cash
+                // wallet and a Head Office Cash wallet. Moving both to the same
+                // branch would violate unique_user_branch_wallet.
+                mysqli_query(
+                    $conn,
+                    "UPDATE wallets legacy
+                     LEFT JOIN wallets assigned
+                       ON assigned.user_id=legacy.user_id
+                      AND assigned.branch_id={$head_id}
+                      AND assigned.wallet_name=legacy.wallet_name
+                      AND assigned.id<>legacy.id
+                     SET legacy.branch_id={$head_id}
+                     WHERE legacy.user_id={$company_id}
+                       AND (legacy.branch_id IS NULL OR legacy.branch_id=0)
+                       AND assigned.id IS NULL"
+                );
+            } else {
+                mysqli_query($conn, "UPDATE `{$table}` SET branch_id={$head_id} WHERE user_id={$company_id} AND (branch_id IS NULL OR branch_id=0)");
+            }
         }
     }
 
@@ -130,6 +149,14 @@ function selected_branch_id($conn, $for_write = false)
     }
 
     $default_branch = 0;
+    if (!is_manager_user() && !array_key_exists('selected_branch_id', $_SESSION)) {
+        $stmt = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND is_head_office=1 LIMIT 1');
+        mysqli_stmt_bind_param($stmt, 'i', $company_id);
+        mysqli_stmt_execute($stmt);
+        $default_branch = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['id'] ?? 0);
+        mysqli_stmt_close($stmt);
+        $_SESSION['selected_branch_id'] = $default_branch;
+    }
     $selected = array_key_exists('selected_branch_id', $_SESSION)
         ? max(0, (int)$_SESSION['selected_branch_id'])
         : $default_branch;
