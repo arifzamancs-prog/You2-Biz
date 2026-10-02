@@ -52,4 +52,12 @@ while ($row = $result ? mysqli_fetch_assoc($result) : null) {
     }
 }
 
+foreach ($products as &$product) {
+    $variant_order = array_flip(product_variant_names($conn, (int)$product['id'], $user_id));
+    usort($product['variants'], static function ($left, $right) use ($variant_order) {
+        return ($variant_order[$left['name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['name']] ?? PHP_INT_MAX);
+    });
+}
+unset($product);
+
 echo json_encode(array_values($products));

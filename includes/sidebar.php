@@ -133,7 +133,7 @@ if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
     $sidebar_company_id = (int)($_SESSION['user_id'] ?? 0);
     $sidebar_branch_id = selected_branch_id($conn, true);
     if ($sidebar_company_id > 0 && $sidebar_branch_id > 0 && !empty($_SESSION['stock_product_enabled']) && company_multi_branch_enabled($conn, $sidebar_company_id)) {
-        $sidebar_receive_stmt = mysqli_prepare($conn, "SELECT COUNT(*) AS total FROM stock_distributions WHERE user_id=? AND to_branch_id=? AND status='pending'");
+        $sidebar_receive_stmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(quantity),0) AS total FROM stock_distributions WHERE user_id=? AND to_branch_id=? AND status='pending'");
         if ($sidebar_receive_stmt) {
             mysqli_stmt_bind_param($sidebar_receive_stmt, 'ii', $sidebar_company_id, $sidebar_branch_id);
             mysqli_stmt_execute($sidebar_receive_stmt);
@@ -517,7 +517,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                                 if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $stock_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged'];
                             }
                             if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
-                                $stock_sales_items[] = ['href'=>app_path('sales/receive_stock.php'),'label'=>'Product Receive Req.','badge'=>$sidebar_stock_receive_pending_count];
+                                $stock_sales_items[] = ['href'=>app_path('sales/receive_stock.php'),'label'=>'Product Req.','badge'=>$sidebar_stock_receive_pending_count];
                             }
                             if (!company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
                                 $stock_sales_items[] = ['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment'];
@@ -567,7 +567,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 } else {
                     $sidebar_sales_items[] = [
                         'href' => app_path('sales/receive_stock.php'),
-                        'label' => 'Product Receive Req.',
+                        'label' => 'Product Req.',
                         'badge' => $sidebar_stock_receive_pending_count,
                     ];
                 }

@@ -99,7 +99,15 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
         $reserved = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COALESCE(SUM(ii.quantity),0) AS qty FROM invoice_items ii INNER JOIN invoices i ON i.id=ii.invoice_id WHERE i.user_id={$user_id} AND i.branch_id={$from_branch} AND i.accounting_status='pending' AND ii.product_id={$product_id} AND COALESCE(ii.variant_name,'')='{$variant_sql}' AND ii.quantity>0"));
         $available = fifo_inventory_get_available_stock($conn, $user_id, $product_id, $from_branch, $variant_name) - (float)$reserved['qty'];
         if ($quantity > $available + 0.0001) throw new RuntimeException('Insufficient unreserved stock in the selected source location.');
-        $reference = 'D-' . date('ymd') . '-' . bin2hex(random_bytes(3));
+        $reference_prefix = 'D-' . date('dmy');
+        $reference_number = 1;
+        $reference_result = mysqli_query($conn, "SELECT reference_no FROM stock_distributions WHERE user_id={$user_id} AND reference_no LIKE '" . mysqli_real_escape_string($conn, $reference_prefix) . "%'");
+        while ($existing_reference = mysqli_fetch_assoc($reference_result)) {
+            if (preg_match('/^' . preg_quote($reference_prefix, '/') . '(\d+)$/', (string)$existing_reference['reference_no'], $matches)) {
+                $reference_number = max($reference_number, (int)$matches[1] + 1);
+            }
+        }
+        $reference = $reference_prefix . $reference_number;
         $actor = (int)($_SESSION['login_user_id'] ?? $user_id);
         $note = mb_substr(trim($note), 0, 500);
         $transfer_group = $transfer_group ?? $request_key;

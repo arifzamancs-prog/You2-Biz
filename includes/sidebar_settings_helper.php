@@ -103,7 +103,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('stock_invoices', 'Invoice List', app_path('sales/invoice_list.php'), 'stock_sales', 2),
         sidebar_setting_item('stock_product', 'My Stock', app_path('sales/stock_product.php'), 'stock_sales', 3),
         sidebar_setting_item('stock_damaged_return', 'Return Damaged', app_path('sales/damaged_return.php'), 'stock_sales', 4),
-        sidebar_setting_item('stock_receive_request', 'Product Receive Req.', app_path('sales/receive_stock.php'), 'stock_sales', 5),
+        sidebar_setting_item('stock_receive_request', 'Product Req.', app_path('sales/receive_stock.php'), 'stock_sales', 5),
         sidebar_setting_item('stock_due', 'Due Payment', app_path('sales/receive_payment.php'), 'stock_sales', 6),
         sidebar_setting_item('stock_report', 'Sales Report', app_path('warehouse/sales_report.php'), 'stock_sales', 7),
         sidebar_setting_item('supplier_list', supplier_display_text('Suppliers'), app_path('suppliers/index.php'), 'suppliers', 101),

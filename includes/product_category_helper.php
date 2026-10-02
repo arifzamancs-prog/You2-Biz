@@ -177,7 +177,28 @@ function product_variant_names($conn, $product_id, $user_id)
     $names = [];
     while($row = mysqli_fetch_assoc($result)){ $names[] = $row['variant_name']; }
     mysqli_stmt_close($stmt);
-    return $names;
+    if(empty($names)){ return []; }
+
+    $category_stmt = mysqli_prepare($conn, 'SELECT c.variant_options FROM products p INNER JOIN product_categories c ON c.id=p.category_id WHERE p.id=? AND p.user_id=? LIMIT 1');
+    if(!$category_stmt){ return $names; }
+    mysqli_stmt_bind_param($category_stmt, 'ii', $product_id, $user_id);
+    mysqli_stmt_execute($category_stmt);
+    $category = mysqli_fetch_assoc(mysqli_stmt_get_result($category_stmt));
+    mysqli_stmt_close($category_stmt);
+    $category_variants = product_variant_options_from_text($category['variant_options'] ?? '');
+    if(empty($category_variants)){ return $names; }
+
+    $available = [];
+    foreach($names as $name){ $available[mb_strtolower($name)] = $name; }
+    $ordered = [];
+    foreach($category_variants as $name){
+        $key = mb_strtolower($name);
+        if(isset($available[$key])){ $ordered[] = $available[$key]; unset($available[$key]); }
+    }
+    foreach($names as $name){
+        if(isset($available[mb_strtolower($name)])){ $ordered[] = $name; }
+    }
+    return $ordered;
 }
 
 function product_variant_is_valid($conn, $product_id, $user_id, $variant_name)

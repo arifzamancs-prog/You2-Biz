@@ -73,17 +73,52 @@ while($pending && ($row = mysqli_fetch_assoc($pending))){
         $selected_group_key = $group_key;
     }
 }
+foreach ($pending_groups as &$group) {
+    $variant_order = array_flip(product_variant_names($conn, (int)$group['row']['product_id'], $user_id));
+    usort($group['items'], static function ($left, $right) use ($variant_order) {
+        return ($variant_order[$left['variant_name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['variant_name']] ?? PHP_INT_MAX);
+    });
+    $group['row'] = $group['items'][0];
+}
+unset($group);
 
-$received_history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.reference_no) AS reference_no,MAX(d.received_at) AS received_at,d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,
+$sent_pending = mysqli_query($conn, "SELECT d.*,p.product_name,p.sku,p.photo_path,tb.branch_name AS to_branch_name,tb.branch_code AS to_branch_code,tb.is_head_office AS to_head_office
+    FROM stock_distributions d
+    INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
+    INNER JOIN branches tb ON tb.id=d.to_branch_id AND tb.user_id=d.user_id
+    WHERE d.user_id={$user_id} AND d.from_branch_id={$branch_id} AND d.status='pending'
+    ORDER BY d.created_at ASC,d.id ASC");
+$sent_groups = [];
+while ($sent_pending && ($row = mysqli_fetch_assoc($sent_pending))) {
+    $group_key = json_encode([
+        $row['transfer_group'] ?? ('legacy-' . $row['created_at']),
+        (int)$row['product_id'], (int)$row['to_branch_id'], $row['note']
+    ]);
+    if (!isset($sent_groups[$group_key])) {
+        $sent_groups[$group_key] = ['row' => $row, 'items' => [], 'quantity' => 0];
+    }
+    $sent_groups[$group_key]['items'][] = $row;
+    $sent_groups[$group_key]['quantity'] += (float)$row['quantity'];
+}
+foreach ($sent_groups as &$group) {
+    $variant_order = array_flip(product_variant_names($conn, (int)$group['row']['product_id'], $user_id));
+    usort($group['items'], static function ($left, $right) use ($variant_order) {
+        return ($variant_order[$left['variant_name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['variant_name']] ?? PHP_INT_MAX);
+    });
+}
+unset($group);
+
+$received_history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.created_at) AS created_at,MIN(d.reference_no) AS reference_no,MAX(d.received_at) AS received_at,SUM(d.total_cost) AS total_cost,d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,
     SUM(d.quantity) AS sent_quantity,SUM(d.quantity-d.damaged_quantity) AS received_quantity,SUM(d.damaged_quantity) AS damaged_quantity,
     GROUP_CONCAT(CASE WHEN d.variant_name<>'' THEN CONCAT(d.variant_name, ': ', FORMAT(d.quantity-d.damaged_quantity,0)) ELSE NULL END ORDER BY d.id SEPARATOR ' || ') AS variant_summary,
     GROUP_CONCAT(CASE WHEN d.variant_name<>'' AND d.damaged_quantity>0 THEN CONCAT(d.variant_name, ': ', FORMAT(d.damaged_quantity,0)) ELSE NULL END ORDER BY d.id SEPARATOR ' || ') AS damaged_variant_summary,
-    p.product_name,p.sku,fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office
+    p.product_name,p.sku,fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office,fb.branch_code AS from_branch_code,tb.branch_name AS to_branch_name,tb.is_head_office AS to_head_office,tb.branch_code AS to_branch_code
     FROM stock_distributions d
     INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
     INNER JOIN branches fb ON fb.id=d.from_branch_id AND fb.user_id=d.user_id
+    INNER JOIN branches tb ON tb.id=d.to_branch_id AND tb.user_id=d.user_id
     WHERE d.user_id={$user_id} AND d.to_branch_id={$branch_id} AND d.status='accepted'
-    GROUP BY COALESCE(NULLIF(d.transfer_group,''), CONCAT('legacy-',d.id)),d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,p.product_name,p.sku,fb.branch_name,fb.is_head_office
+    GROUP BY COALESCE(NULLIF(d.transfer_group,''), CONCAT('legacy-',d.created_at)),d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,p.product_name,p.sku,fb.branch_name,fb.is_head_office,fb.branch_code,tb.branch_name,tb.is_head_office,tb.branch_code
     ORDER BY MAX(d.received_at) DESC,MAX(d.id) DESC LIMIT 500");
 
 require_once '../includes/header.php';
@@ -96,7 +131,6 @@ require_once '../includes/sidebar.php';
         <?php if ($message !== '') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
         <?php if ($error !== '') { ?><div class="alert alert-danger"><?= htmlspecialchars($error); ?></div><?php } ?>
         <?php if ($warehouse_receipt_mode) { ?><a href="index.php" class="btn btn-outline-secondary mb-3">Back to Main Warehouse</a><?php } ?>
-        <p class="text-muted">Receive stock sent to <strong><?= htmlspecialchars($warehouse_receipt_mode ? 'Main Warehouse' : current_branch_label($conn)); ?></strong>.</p>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
     <thead><tr><th>Photo</th><th>Reference</th><th>From</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Good Received Qty</th><th>Action</th></tr></thead>
             <tbody>
@@ -112,17 +146,89 @@ require_once '../includes/sidebar.php';
     </div>
 </div></div></section>
 
-<section class="content"><div class="container-fluid"><div class="card card-outline card-success">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Receive History</h3></div>
-    <div class="card-body"><div class="table-responsive"><table class="table table-bordered table-striped mb-0" style="table-layout:fixed;min-width:1100px">
-        <colgroup><col style="width:11%"><col style="width:14%"><col style="width:14%"><col style="width:22%"><col style="width:7%"><col style="width:10%"><col style="width:10%"><col style="width:12%"></colgroup>
-        <thead><tr><th>Reference</th><th>Received</th><th>From</th><th>Product</th><th>Code</th><th>Received Qty</th><th>Damaged</th><th>Note</th></tr></thead>
-        <tbody><?php if($received_history && mysqli_num_rows($received_history) > 0){ while($row = mysqli_fetch_assoc($received_history)){ ?>
-            <tr><td><?= htmlspecialchars($row['reference_no']); ?></td><td><?= htmlspecialchars(app_datetime($row['received_at'])); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?></td><td><?= htmlspecialchars($row['product_name']); ?><?php if(!empty($row['variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['variant_summary']); ?></small><?php } ?></td><td><?= htmlspecialchars($row['sku'] ?? ''); ?></td><td><?= number_format((float)$row['received_quantity'],0); ?></td><td><?= number_format((float)$row['damaged_quantity'],0); ?><?php if(!empty($row['damaged_variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['damaged_variant_summary']); ?></small><?php } ?></td><td><?= htmlspecialchars($row['note']); ?></td></tr>
-        <?php } }else{ ?><tr><td colspan="8" class="text-center text-muted py-4">No stock has been received by this branch yet.</td></tr><?php } ?></tbody>
-    </table></div><small class="text-muted d-block mt-2">Latest 500 received stock records for this branch.</small></div>
+<section class="content"><div class="container-fluid"><div class="card">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck mr-2"></i>Product Sent Request</h3></div>
+    <div class="card-body"><div class="table-responsive"><table class="table table-bordered table-striped mb-0">
+        <thead><tr><th>Photo</th><th>Reference</th><th>Date</th><th>To</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        <?php foreach ($sent_groups as $group) { $row = $group['row']; ?>
+            <tr>
+                <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
+                <td><?= 'D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id']; ?></td>
+                <td><?= htmlspecialchars(app_date($row['created_at'])); ?></td>
+                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td>
+                <td><?= htmlspecialchars($row['product_name']); ?><?php
+                    $variant_parts = [];
+                    foreach ($group['items'] as $item) {
+                        if ($item['variant_name'] !== '') $variant_parts[] = htmlspecialchars($item['variant_name']) . ': ' . number_format((float)$item['quantity'], 0);
+                    }
+                    if ($variant_parts) { ?><small class="d-block text-muted"><?= implode(' || ', $variant_parts); ?></small><?php } ?></td>
+                <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
+                <td><?= number_format($group['quantity'], 0); ?></td>
+                <td><span class="badge badge-warning">Pending</span><small class="d-block text-muted">Awaiting receipt</small></td>
+                <td><a href="../warehouse/print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print mr-1"></i>Print</a></td>
+            </tr>
+        <?php } ?>
+        <?php if (!$sent_groups) { ?><tr><td colspan="9" class="text-center text-muted py-4">No product sent request is pending from this location.</td></tr><?php } ?>
+        </tbody>
+    </table></div></div>
+</div></div></section>
+
+<section class="content"><div class="container-fluid"><div class="card">
+    <div class="card-header"><h3 class="card-title">Distribution History</h3><div class="card-tools" style="width:300px"><div class="input-group input-group-sm"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input id="receive-history-search" class="form-control" aria-label="Search distribution history" placeholder="Search product, branch, status or note"></div></div></div>
+    <div class="card-body">
+    <div class="mb-3"><label for="receive-history-count" class="font-weight-normal">Show <select id="receive-history-count" class="custom-select custom-select-sm d-inline-block mx-1" style="width:auto"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="500">All (latest 500)</option></select> entries</label></div>
+    <style>
+    .receive-history-table{table-layout:fixed;min-width:1500px;width:100%}
+    .receive-history-table th,.receive-history-table td{vertical-align:middle;overflow-wrap:anywhere}
+    .receive-history-table th{white-space:nowrap}
+    .receive-history-table td:nth-child(1),.receive-history-table td:nth-child(2),.receive-history-table td:nth-child(7),.receive-history-table td:nth-child(8),.receive-history-table td:nth-child(9){white-space:nowrap;overflow-wrap:normal}
+    </style>
+    <div class="table-responsive"><table class="table table-bordered table-striped receive-history-table">
+        <colgroup><col style="width:10%"><col style="width:8%"><col style="width:14%"><col style="width:6%"><col style="width:12%"><col style="width:12%"><col style="width:5%"><col style="width:8%"><col style="width:7%"><col style="width:9%"><col style="width:9%"></colgroup>
+        <thead><tr><th>Reference</th><th>Received</th><th>Product</th><th>Code</th><th>From Branch</th><th>To Branch</th><th>Qty</th><th>Received Qty</th><th>Cost</th><th>Status</th><th>Note</th></tr></thead>
+        <tbody id="receive-history-list"><?php if($received_history){ while($row = mysqli_fetch_assoc($received_history)){ ?>
+            <tr data-receive-history-row>
+                <td><?= 'D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id']; ?></td>
+                <td><?= htmlspecialchars(app_date($row['received_at'])); ?></td>
+                <td><?= htmlspecialchars($row['product_name']); ?><?php if(!empty($row['variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['variant_summary']); ?></small><?php } ?></td>
+                <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
+                <td><?= htmlspecialchars(($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']) . (!empty($row['from_branch_code']) ? ' [' . $row['from_branch_code'] . ']' : '')); ?></td>
+                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td>
+                <td><?= number_format((float)$row['sent_quantity'],0); ?></td>
+                <td><?= number_format((float)$row['received_quantity'],0); ?></td>
+                <td><?= number_format((float)$row['total_cost'],2); ?></td>
+                <td><span class="badge badge-success">Accepted</span><?php if((float)$row['damaged_quantity'] > 0){ ?><small class="d-block text-danger mt-1">Damaged: <?= number_format((float)$row['damaged_quantity'],0); ?></small><?php if(!empty($row['damaged_variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['damaged_variant_summary']); ?></small><?php } } ?></td>
+                <td class="text-break"><?= htmlspecialchars($row['note']); ?></td>
+            </tr>
+        <?php } } ?><tr id="receive-history-empty" hidden><td colspan="11" class="text-center text-muted py-4">No matching received stock records.</td></tr></tbody>
+    </table></div><div class="d-flex justify-content-end align-items-center"><div><button type="button" id="receive-history-prev" class="btn btn-sm btn-outline-secondary">Previous</button> <button type="button" id="receive-history-next" class="btn btn-sm btn-outline-secondary">Next</button></div></div></div>
 </div></div></section>
 <script>
+(() => {
+    const rows = Array.from(document.querySelectorAll('[data-receive-history-row]'));
+    const search = document.getElementById('receive-history-search');
+    const count = document.getElementById('receive-history-count');
+    const previous = document.getElementById('receive-history-prev');
+    const next = document.getElementById('receive-history-next');
+    let page = 0;
+    function renderHistory() {
+        const keyword = search.value.trim().toLowerCase();
+        const filtered = rows.filter(row => row.textContent.toLowerCase().includes(keyword));
+        const size = Number(count.value);
+        page = Math.max(0, Math.min(page, Math.ceil(filtered.length / size) - 1));
+        rows.forEach(row => { row.hidden = true; });
+        filtered.slice(page * size, (page + 1) * size).forEach(row => { row.hidden = false; });
+        document.getElementById('receive-history-empty').hidden = filtered.length > 0;
+        previous.disabled = page === 0;
+        next.disabled = (page + 1) * size >= filtered.length;
+    }
+    search.addEventListener('input', () => { page = 0; renderHistory(); });
+    count.addEventListener('change', () => { page = 0; renderHistory(); });
+    previous.addEventListener('click', () => { page--; renderHistory(); });
+    next.addEventListener('click', () => { page++; renderHistory(); });
+    renderHistory();
+})();
 document.querySelectorAll('.receipt-quantity').forEach(function(input){
     input.addEventListener('input', function(){
         const maximum = Number(input.max);
