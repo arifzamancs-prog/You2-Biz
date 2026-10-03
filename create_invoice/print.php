@@ -6,6 +6,7 @@ require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/multi_branch_helper.php';
 
 ensure_booking_invoice_table($conn);
 
@@ -49,6 +50,8 @@ if(!$invoice){
     header('Location: index.php?type=booking');
     exit;
 }
+$show_installment_ledger_total = in_array(project_package_company_type($conn, $user_id), ['Housing', 'Others'], true)
+    && normalize_booking_invoice_type($invoice['invoice_type'] ?? '', $invoice_types) === 'installment';
 $package_total_price = (float)($invoice['total_price'] ?? 0);
 if($package_total_price <= 0){ $package_total_price = (float)($invoice['amount'] ?? 0); }
 $package_paid_amount = (float)($invoice['amount'] ?? 0);
@@ -58,6 +61,28 @@ mysqli_stmt_execute($package_balance_stmt);
 $package_balance = mysqli_fetch_assoc(mysqli_stmt_get_result($package_balance_stmt));
 if((float)($package_balance['package_total'] ?? 0) > 0) $package_total_price = (float)$package_balance['package_total'];
 $package_paid_amount = (float)($package_balance['package_paid'] ?? $package_paid_amount);
+if ($show_installment_ledger_total) {
+    // Match the ledger allocation: Housing uses File No., services use package.
+    $ledger_sql = "SELECT amount,invoice_type,total_price FROM booking_invoices WHERE user_id=? AND customer_id=? AND status='confirmed'";
+    if ($is_housing_company && trim((string)($invoice['file_no'] ?? '')) !== '') {
+        $ledger_stmt = mysqli_prepare($conn, $ledger_sql . ' AND file_no=?');
+        mysqli_stmt_bind_param($ledger_stmt, 'iis', $user_id, $invoice['customer_id'], $invoice['file_no']);
+    } else {
+        $ledger_stmt = mysqli_prepare($conn, $ledger_sql . ' AND project_id=? AND package_id=?');
+        mysqli_stmt_bind_param($ledger_stmt, 'iiii', $user_id, $invoice['customer_id'], $invoice['project_id'], $invoice['package_id']);
+    }
+    mysqli_stmt_execute($ledger_stmt);
+    $ledger_result = mysqli_stmt_get_result($ledger_stmt);
+    $package_paid_amount = 0;
+    $ledger_total_price = 0;
+    while ($payment = mysqli_fetch_assoc($ledger_result)) {
+        $is_refund = booking_invoice_behavior($conn, $user_id, $payment['invoice_type']) === 'expense';
+        $package_paid_amount += $is_refund ? -(float)$payment['amount'] : (float)$payment['amount'];
+        if (!$is_refund) $ledger_total_price = max($ledger_total_price, (float)$payment['total_price']);
+    }
+    mysqli_stmt_close($ledger_stmt);
+    if ($ledger_total_price > 0) $package_total_price = $ledger_total_price;
+}
 $package_due_amount = max(0, $package_total_price - $package_paid_amount);
 $charge_stmt=mysqli_prepare($conn,'SELECT charge_name,charge_type,charge_amount FROM booking_invoice_charges WHERE booking_invoice_id=? ORDER BY id'); mysqli_stmt_bind_param($charge_stmt,'i',$id); mysqli_stmt_execute($charge_stmt); $charge_result=mysqli_stmt_get_result($charge_stmt); $booking_charges=[]; $base_amount=(float)$invoice['amount']; while($charge=mysqli_fetch_assoc($charge_result)){ $booking_charges[]=$charge; $base_amount += $charge['charge_type']==='less' ? (float)$charge['charge_amount'] : -(float)$charge['charge_amount']; }
 
@@ -138,15 +163,15 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             </div>
         </div>
 
-        <div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></div><div class="contact"><strong>Phone:</strong> <?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><strong>Address:</strong> <?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong><?= htmlspecialchars($project_package_labels['project']); ?>:</strong> <?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?><br><strong><?= htmlspecialchars($project_package_labels['package']); ?>:</strong> <?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?><?php if($is_housing_company){ ?><br><strong>File No.:</strong> <?= htmlspecialchars($invoice['file_no'] ?: '-'); ?><br><strong>Block:</strong> <?= htmlspecialchars($invoice['block_name'] ?: '-'); ?>, <strong>Road No:</strong> <?= htmlspecialchars($invoice['road_no'] ?: '-'); ?>, <strong>Plot No:</strong> <?= htmlspecialchars($invoice['plot_no'] ?: '-'); ?><?php } ?><br><strong>Total Price:</strong> BDT <?= number_format($package_total_price, 2); ?></div></div></div>
+<div class="customer-grid"><div><div class="label">Bill To</div><div class="customer-name"><?= htmlspecialchars($invoice['customer_name'] ?: ('Missing Customer #' . (int)$invoice['customer_id'])); ?></div><div class="contact"><strong>Phone:</strong> <?= htmlspecialchars($invoice['phone'] ?: '-'); ?><br><strong>Address:</strong> <?= nl2br(htmlspecialchars($invoice['address'] ?: '-')); ?></div></div><div><div class="label">Invoice Details</div><div class="contact"><strong><?= htmlspecialchars($project_package_labels['project']); ?>:</strong> <?= htmlspecialchars($invoice['project_name'] ?: ('Missing ' . $project_package_labels['project'] . ' #' . (int)$invoice['project_id'])); ?><br><strong><?= htmlspecialchars($project_package_labels['package']); ?>:</strong> <?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?><?php if($is_housing_company){ ?><br><strong>File No:</strong> <?= htmlspecialchars($invoice['file_no'] ?: '-'); ?><br><strong>Block:</strong> <?= htmlspecialchars($invoice['block_name'] ?: '-'); ?>, <strong>Road No:</strong> <?= htmlspecialchars($invoice['road_no'] ?: '-'); ?>, <strong>Plot No:</strong> <?= htmlspecialchars($invoice['plot_no'] ?: '-'); ?><?php } ?><br><strong>Total Price:</strong> BDT <?= number_format($package_total_price, 2); ?></div></div></div>
         <table><thead><tr><th>Description</th><th style="width: 160px;">Payment Type</th><th style="width: 150px;">Payment by</th><th style="width: 160px; text-align:right;">Amount</th></tr></thead><tbody><tr><td><?= htmlspecialchars($invoice['package_name'] ?: ('Missing ' . $project_package_labels['package'] . ' #' . (int)$invoice['package_id'])); ?></td><td><?= htmlspecialchars(booking_invoice_type_label($invoice['invoice_type'], $invoice_types)); ?></td><td><?= htmlspecialchars($invoice['wallet_name'] ?: ('Missing Wallet #' . (int)$invoice['wallet_id'])); ?></td><td style="text-align:right;">BDT <?=number_format($base_amount,2)?></td></tr><?php foreach($booking_charges as $charge){ ?><tr><td><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?>)</td><td></td><td></td><td style="text-align:right;"><?= $charge['charge_type']==='less'?'- ':'+ ' ?>BDT <?=number_format((float)$charge['charge_amount'],2)?></td></tr><?php } ?></tbody></table>
 
         <div class="total-row">
             <?php if($paid_seal_url !== ''){ ?><div class="paid-total-seal"><img src="<?= htmlspecialchars($paid_seal_url); ?>" alt="Paid seal"></div><?php } ?>
             <table class="summary">
                 <tr>
-                    <th>Paid Amount</th>
-                    <td>BDT <?= htmlspecialchars(number_format((float)$invoice['amount'], 2)); ?></td>
+                    <th><?= $show_installment_ledger_total ? 'Total Paid' : 'Paid Amount' ?></th>
+                    <td>BDT <?= htmlspecialchars(number_format($show_installment_ledger_total ? $package_paid_amount : (float)$invoice['amount'], 2)); ?></td>
                 </tr>
                 <?php if($package_due_amount > 0.009){ ?><tr><th>Due Amount</th><td>BDT <?= htmlspecialchars(number_format($package_due_amount, 2)); ?></td></tr><?php } ?>
             </table>
