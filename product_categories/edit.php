@@ -39,10 +39,6 @@ if(!$category){
 
 }
 
-if(product_category_has_usage($conn, $id, $user_id)){
-    die('This category cannot be edited because it has products or transactions.');
-}
-
 $message = '';
 $message_type = '';
 
@@ -50,7 +46,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_name =
     trim($_POST['category_name']);
-    $sub_category = trim($_POST['sub_category'] ?? '');
+    $sub_category = implode(', ', product_variant_options_from_text($_POST['sub_category_options'] ?? ''));
 
     $category_type = 'stock_product';
 
@@ -162,7 +158,12 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
                 <label>Sub Category <small class="text-muted">(Optional)</small></label>
-                <input type="text" name="sub_category" class="form-control" maxlength="100" value="<?= htmlspecialchars($category['sub_category'] ?? ''); ?>">
+                <input type="hidden" name="sub_category_options" id="sub_category_options" value="<?= htmlspecialchars($category['sub_category'] ?? ''); ?>">
+                <div class="input-group">
+                    <input type="text" id="sub_category_value" class="form-control" placeholder="Type a sub category">
+                    <div class="input-group-append"><button class="btn btn-primary" id="add_sub_category" type="button" title="Add sub category"><i class="fas fa-plus"></i></button></div>
+                </div>
+                <div id="sub_category_list" class="mt-2 d-flex flex-wrap"></div>
             </div>
 
             <div class="form-group">
@@ -231,6 +232,13 @@ require_once '../includes/sidebar.php';
 </div>
 
 <script>
+(function(){
+    const source=document.getElementById('sub_category_value'), hidden=document.getElementById('sub_category_options'), list=document.getElementById('sub_category_list'), add=document.getElementById('add_sub_category');
+    let subCategories=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);
+    function render(){ hidden.value=subCategories.join(', '); list.innerHTML=''; subCategories.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{subCategories.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
+    function addSubCategory(){const name=source.value.trim();if(!name)return; if(!subCategories.some(item=>item.toLowerCase()===name.toLowerCase())){subCategories.push(name);render();} source.value='';source.focus();}
+    add.addEventListener('click',addSubCategory);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addSubCategory();}});render();
+})();
 (function(){
     const source=document.getElementById('variant_value'), hidden=document.getElementById('variant_options'), list=document.getElementById('variant_list'), add=document.getElementById('add_variant');
     let variants=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);

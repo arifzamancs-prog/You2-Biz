@@ -46,9 +46,10 @@ if ($wallet['is_system'] == 1) {
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $wallet_name = trim($_POST['wallet_name']);
+    $description = trim($_POST['description'] ?? '');
 
     $sql = "UPDATE wallets
-            SET wallet_name=?
+            SET wallet_name=?, description=?
             WHERE id=?
             AND user_id=? {$branch_scope}";
 
@@ -56,8 +57,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     mysqli_stmt_bind_param(
         $stmt,
-        "sii",
+        "ssii",
         $wallet_name,
+        $description,
         $id,
         $user_id
     );
@@ -100,6 +102,20 @@ require_once '../includes/sidebar.php';
                     class="form-control"
                     required
                     value="<?= htmlspecialchars($wallet['wallet_name']); ?>">
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Description
+                </label>
+
+                <textarea
+                    name="description"
+                    class="form-control"
+                    rows="4"
+                    maxlength="255"><?= htmlspecialchars($wallet['description'] ?? ''); ?></textarea>
 
             </div>
 

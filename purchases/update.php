@@ -6,6 +6,7 @@ require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/expense_helper.php';
+require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_fifo_inventory_tables($conn);
@@ -23,6 +24,25 @@ $purchase_id = (int)($_POST['purchase_id'] ?? 0);
 mysqli_begin_transaction($conn);
 
 try{
+
+    // Expand the grouped editor into individual variant lines for stock storage.
+    if(isset($_POST['variant_quantity'])){
+        $expanded = ['product_id'=>[], 'qty'=>[], 'cost_price'=>[], 'variant_name'=>[]];
+        foreach(($_POST['product_id'] ?? []) as $index=>$pid){
+            $quantities = $_POST['variant_quantity'][$index] ?? [''=>($_POST['qty'][$index] ?? 0)];
+            if(!is_array($quantities)) throw new Exception('Invalid variant quantities.');
+            foreach($quantities as $variant=>$quantity){
+                if(!is_numeric($quantity) || (float)$quantity < 0 || floor((float)$quantity) != (float)$quantity) throw new Exception('Invalid variant quantity.');
+                if((float)$quantity == 0) continue;
+                $expanded['product_id'][] = $pid;
+                $expanded['qty'][] = $quantity;
+                $expanded['cost_price'][] = $_POST['cost_price'][$index] ?? 0;
+                $expanded['variant_name'][] = (string)$variant;
+            }
+        }
+        if(!$expanded['product_id']) throw new Exception('Enter at least one positive quantity.');
+        foreach($expanded as $field=>$values) $_POST[$field] = $values;
+    }
 
     $supplier_id = (int)$_POST['supplier_id'];
 
@@ -267,6 +287,7 @@ $qtys = $_POST['qty'];
 $prices = $_POST['cost_price'];
 
 $totals = $_POST['line_total'];
+$variant_names = $_POST['variant_name'] ?? [];
 
 foreach($product_ids as $key=>$product_id){
 
@@ -279,11 +300,16 @@ foreach($product_ids as $key=>$product_id){
     $price = (float)$prices[$key];
 
     $total = (float)$totals[$key];
+    $variant_name = trim((string)($variant_names[$key] ?? ''));
+    if(!product_variant_is_valid($conn, (int)$product_id, $user_id, $variant_name)){
+        throw new Exception('Please select a valid variant for the product.');
+    }
 
     $sql = "INSERT INTO purchase_items(
 
                 purchase_id,
                 product_id,
+                variant_name,
                 quantity,
                 unit_cost,
                 total_cost
@@ -292,7 +318,7 @@ foreach($product_ids as $key=>$product_id){
 
             VALUES(
 
-                ?,?,?,?,?
+                ?,?,?,?,?,?
 
             )";
 
@@ -305,10 +331,11 @@ foreach($product_ids as $key=>$product_id){
 
         $stmt,
 
-        "iiddd",
+        "iisidd",
 
         $purchase_id,
         $product_id,
+        $variant_name,
         $qty,
         $price,
         $total
@@ -327,7 +354,9 @@ foreach($product_ids as $key=>$product_id){
         'purchase',
         $purchase_id,
         $purchase_no,
-        $purchase_date
+        $purchase_date,
+        null,
+        $variant_name
     )){
         throw new Exception("FIFO batch could not be created.");
     }

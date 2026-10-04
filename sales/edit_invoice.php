@@ -276,6 +276,7 @@ require_once '../includes/sidebar.php';
                 <tr>
 
                     <th width="35%">Product</th>
+                    <th class="variant-column">Variant</th>
                     <th width="15%" class="stock-column">Stock</th>
                     <th width="12%">Qty</th>
                     <th width="15%">Price</th>
@@ -320,6 +321,11 @@ require_once '../includes/sidebar.php';
 
                         </select>
 
+                        </td>
+
+                        <td class="variant-column">
+                            <input type="hidden" name="variant_name[]" class="product-variant" value="<?= htmlspecialchars($item['variant_name'] ?? ''); ?>">
+                            <div class="variant-choice-list"></div>
                         </td>
 
                         <td class="stock-column">
@@ -783,9 +789,10 @@ $(document).on(
 
     function(){
 
-        loadProduct(
-            $(this).closest("tr")
-        );
+        let row = $(this).closest("tr");
+        row.find('.product-variant').val('');
+        row.find('.variant-choice-list').empty();
+        loadProduct(row);
 
     }
 
@@ -826,9 +833,29 @@ function initProductSelect(context){
 
 }
 
+let editInvoiceVariantSequence = 0;
+function renderEditVariantChoices(row, variants, selected){
+    const list=row.find('.variant-choice-list').empty();
+    const hidden=row.find('.product-variant');
+    const group='edit_invoice_variant_'+(++editInvoiceVariantSequence);
+    variants.forEach(function(name){
+        const id=group+'_'+name.replace(/[^a-z0-9]/gi,'_');
+        const label=$('<label>').addClass('variant-choice mb-1').attr('for',id);
+        const input=$('<input>',{type:'checkbox',id:id,value:name}).addClass('variant-choice-input').prop('checked',name===selected);
+        input.on('change',function(){
+            if(this.checked) list.find('.variant-choice-input').not(this).prop('checked',false);
+            hidden.val(this.checked ? this.value : '');
+            loadProduct(row);
+        });
+        label.append(input).append($('<span>').text(name));
+        list.append(label);
+    });
+}
+
 function loadProduct(row){
 
     let product_id = row.find(".product").val();
+    let variant_name = row.find('.product-variant').val() || '';
 
     if(product_id==""){
 
@@ -848,6 +875,7 @@ function loadProduct(row){
 
         data:{
             product_id:product_id,
+            variant_name:variant_name,
             exclude_invoice_id:<?= (int)$invoice_id; ?>
         },
 
@@ -859,6 +887,15 @@ function loadProduct(row){
 
                 row.find(".stock")
                    .val(res.product.is_stock_product ? res.product.available_stock : "Unlimited");
+
+                const variants=res.product.variants || [];
+                if(variants.length){
+                    renderEditVariantChoices(row,variants,variant_name);
+                    if(!variant_name){ row.find('.stock').val('Select variant'); }
+                }else{
+                    row.find('.variant-choice-list').empty();
+                    row.find('.product-variant').val('');
+                }
 
                 row.find(".price")
                    .val(res.product.sale_price);
@@ -874,6 +911,10 @@ function loadProduct(row){
 }
 
 </script>
+
+<style>
+.variant-choice-list{min-width:150px}.variant-choice{display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid #ced4da;border-radius:4px;background:#fff;cursor:pointer;font-weight:400}.variant-choice:hover{border-color:#78a8f8;background:#f4f8ff}.variant-choice-input{width:15px;height:15px;margin:0;accent-color:#0d6efd}.variant-choice-input:checked+span{font-weight:700;color:#0d6efd}
+</style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){

@@ -29,7 +29,7 @@ $sql = "SELECT
             (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.product_id=p.id AND sb.user_id=p.user_id {$stock_filter}) AS current_stock,
             (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.product_id=p.id AND sb.user_id=p.user_id) AS total_stock,
             c.category_name,
-            c.sub_category AS category_sub_category,
+            p.sub_category AS product_sub_category,
             c.category_type
         FROM products p
         LEFT JOIN product_categories c
@@ -184,7 +184,7 @@ require_once '../includes/sidebar.php';
 
                 <td>
                     <?= htmlspecialchars($row['category_name']); ?>
-                    <?php if(!empty($row['category_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['category_sub_category']); ?>]</div><?php } ?>
+                    <?php if(!empty($row['product_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['product_sub_category']); ?>]</div><?php } ?>
                 </td>
 
                 <td>

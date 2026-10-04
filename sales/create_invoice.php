@@ -313,6 +313,14 @@ require_once '../includes/sidebar.php';
 
             </h5>
 
+            <style>
+                .variant-choice-list{min-width:150px}
+                .variant-choice{display:flex;align-items:center;gap:7px;margin:0;padding:6px 8px;border:1px solid #ced4da;border-radius:4px;background:#fff;cursor:pointer;font-weight:400}
+                .variant-choice:hover{border-color:#78a8f8;background:#f4f8ff}
+                .variant-choice-input{width:15px;height:15px;margin:0;accent-color:#0d6efd}
+                .variant-choice-input:checked+span{font-weight:700;color:#0d6efd}
+            </style>
+
             <div class="table-responsive">
 
             <table
@@ -400,7 +408,10 @@ require_once '../includes/sidebar.php';
 
                     </td>
 
-                    <td class="variant-column d-none"><select name="variant_name[]" class="form-control product-variant d-none"><option value="">No variant</option></select></td>
+                    <td class="variant-column d-none">
+                        <select name="variant_name[]" class="product-variant d-none"><option value="">No variant</option></select>
+                        <div class="variant-choice-list"></div>
+                    </td>
 
                     <td class="stock-column">
 
@@ -942,6 +953,7 @@ if($(this).val()=="instant"){
             .prop("required", false)
             .removeClass("select2-hidden-accessible")
             .addClass("d-none");
+        firstRow.find(".variant-choice-list").empty();
         firstRow.find(".stock,.price,.line_total").val("");
         firstRow.find(".qty").val(1);
         $(".charge").val(0);
@@ -1034,6 +1046,24 @@ if($(this).val()=="instant"){
         }
     });
 
+    let invoiceVariantSequence = 0;
+    function renderVariantChoices(row, variants){
+        const list = row.find(".variant-choice-list").empty();
+        const select = row.find(".product-variant");
+        const group = "invoice_variant_" + (++invoiceVariantSequence);
+        variants.forEach(function(name){
+            const id = group + "_" + invoiceVariantSequence + "_" + name.replace(/[^a-z0-9]/gi, "_");
+            const label = $("<label>").addClass("variant-choice mb-1").attr("for", id);
+            const input = $("<input>", {type:"checkbox", id:id, value:name}).addClass("variant-choice-input");
+            input.on("change", function(){
+                if(this.checked) list.find(".variant-choice-input").not(this).prop("checked", false);
+                select.val(this.checked ? this.value : "").trigger("change");
+            });
+            label.append(input).append($("<span>").text(name));
+            list.append(label);
+        });
+    }
+
     /* Product Change */
 
     $(document).on("change",".product",function(){
@@ -1048,6 +1078,7 @@ if($(this).val()=="instant"){
                 .prop("disabled", false)
                 .prop("required", false)
                 .addClass("d-none");
+            row.find(".variant-choice-list").empty();
             row.removeData("has-variants");
             updateVariantColumnVisibility();
             return;
@@ -1077,7 +1108,8 @@ if($(this).val()=="instant"){
             if((res.product.variants || []).length){
                 variant.append("<option value=\"\">Select variant</option>");
                 res.product.variants.forEach(function(name){ variant.append($("<option>").val(name).text(name)); });
-                variant.prop("disabled", false).prop("required", true).removeClass("d-none");
+                renderVariantChoices(row, res.product.variants);
+                variant.prop("disabled", false).prop("required", false).addClass("d-none");
                 row.find(".stock").val("Select variant");
                 row.data("has-variants", true);
             }else{
@@ -1085,6 +1117,7 @@ if($(this).val()=="instant"){
                     .prop("disabled", false)
                     .prop("required", false)
                     .addClass("d-none");
+                row.find(".variant-choice-list").empty();
                 row.data("has-variants", false);
             }
 
@@ -1184,6 +1217,7 @@ $(document).on(
             .prop("disabled", false)
             .prop("required", false)
             .addClass("d-none");
+        row.find(".variant-choice-list").empty();
         row.removeData("is-stock-product");
         row.removeData("has-variants");
 

@@ -125,12 +125,6 @@ require_once '../includes/sidebar.php';
                 <?php if(manager_can_modify()){ ?>
                 <td>
 
-                    <?php if(product_category_has_usage($conn, $row['id'], $user_id)){ ?>
-
-                        <span class="text-muted small">In use</span>
-
-                    <?php } else { ?>
-
                     <a
                         href="edit.php?id=<?= $row['id']; ?>"
                         class="btn btn-warning btn-sm">
@@ -138,6 +132,12 @@ require_once '../includes/sidebar.php';
                         <i class="fas fa-edit"></i>
 
                     </a>
+
+                    <?php if(product_category_has_usage($conn, $row['id'], $user_id)){ ?>
+
+                        <span class="text-muted small ml-1">In use</span>
+
+                    <?php } else { ?>
 
                     <a
                         href="delete.php?id=<?= $row['id']; ?>"

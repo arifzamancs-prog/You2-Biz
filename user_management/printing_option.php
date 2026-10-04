@@ -6,6 +6,12 @@ require_once '../includes/printing_helper.php';
 
 require_admin_module_access();
 
+$settings_branch_id = printing_branch_id($conn);
+if($_SERVER['REQUEST_METHOD'] === 'POST' && (int)($_POST['settings_branch_id'] ?? -1) !== $settings_branch_id){
+    http_response_code(409);
+    exit('Branch changed. Reload Printing Option before saving settings.');
+}
+
 $message = $_SESSION['printing_option_flash_message'] ?? '';
 $message_type = $_SESSION['printing_option_flash_type'] ?? '';
 unset($_SESSION['printing_option_flash_message'], $_SESSION['printing_option_flash_type']);
@@ -116,6 +122,12 @@ require_once '../includes/sidebar.php';
                 <?php } ?>
 
                 <form method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="settings_branch_id" value="<?= $settings_branch_id; ?>">
+                    <?php if(!is_super_admin_user() && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])){ ?>
+                    <div class="alert alert-info">
+                        Printing settings for: <strong><?= htmlspecialchars($settings_branch_id > 0 ? current_branch_label($conn) : 'Company Default'); ?></strong>.
+                    </div>
+                    <?php } ?>
                     <div class="form-group">
                         <label>Print Style</label>
 

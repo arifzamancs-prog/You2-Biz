@@ -54,6 +54,8 @@ if(!$invoice){
     die("Invoice Not Found");
 }
 
+$GLOBALS['printing_branch_context'] = (int)($invoice['branch_id'] ?? 0);
+
 if(invoice_is_pending($invoice)){
     $post_redirect = "post_invoice.php?id=" . $invoice_id;
 
@@ -1113,7 +1115,10 @@ window.addEventListener('load', function () {
         <?php foreach($items as $index => $item){ ?>
         <tr>
             <td><?= $index + 1; ?></td>
-            <td><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?></td>
+            <td>
+                <?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?>
+                <?php if(!empty($item['variant_name'])){ ?><br><small>Variant: <?= htmlspecialchars($item['variant_name']); ?></small><?php } ?>
+            </td>
             <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
             <td class="text-right">BDT <?= number_format($item['unit_price'],2); ?></td>
             <td class="text-right">BDT <?= number_format($item['total_price'],2); ?></td>

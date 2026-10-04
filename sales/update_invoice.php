@@ -325,6 +325,7 @@ mysqli_stmt_bind_param(
     $qtys        = $_POST['qty'];
     $prices      = $_POST['price'];
     $totals      = $_POST['line_total'];
+    $variant_names = $_POST['variant_name'] ?? [];
     $positive_qty_totals = [];
 
     foreach($product_ids as $key=>$product_id){
@@ -334,23 +335,26 @@ mysqli_stmt_bind_param(
         }
 
         $product_id = (int)$product_id;
+        $variant_name = trim((string)($variant_names[$key] ?? ''));
         $line_qty = (float)($qtys[$key] ?? 0);
 
         if($line_qty > 0){
-            if(!isset($positive_qty_totals[$product_id])){
-                $positive_qty_totals[$product_id] = 0.0;
+            if(!isset($positive_qty_totals[$product_id][$variant_name])){
+                $positive_qty_totals[$product_id][$variant_name] = 0.0;
             }
 
-            $positive_qty_totals[$product_id] += $line_qty;
+            $positive_qty_totals[$product_id][$variant_name] += $line_qty;
         }
     }
 
-    foreach($positive_qty_totals as $product_id => $requested_qty){
+    foreach($positive_qty_totals as $product_id => $variant_totals){
+        foreach($variant_totals as $variant_name => $requested_qty){
         $product_snapshot = product_stock_snapshot_for_invoice(
             $conn,
             $user_id,
             (int)$product_id,
-            $invoice_id
+            $invoice_id,
+            $variant_name
         );
 
         if(!$product_snapshot){
@@ -364,6 +368,7 @@ mysqli_stmt_bind_param(
         if($requested_qty > ((float)$product_snapshot['available_stock'] + 0.0001)){
             throw new Exception("Not enough available stock for selected product. Pending voucher reserved this product.");
         }
+        }
     }
 
     foreach($product_ids as $key=>$product_id){
@@ -373,6 +378,7 @@ mysqli_stmt_bind_param(
         }
 
         $product_id = (int)$product_id;
+        $variant_name = trim((string)($variant_names[$key] ?? ''));
         $qty   = (int)$qtys[$key];
         $price = (float)$prices[$key];
         $total = (float)$totals[$key];
@@ -421,10 +427,15 @@ if(!$product){
 
 $is_stock_product = product_uses_stock($conn, $product_id, $user_id);
 
+if(!product_variant_is_valid($conn, $product_id, $user_id, $variant_name)){
+    throw new Exception('Select a valid variant for the selected product.');
+}
+
         $sql = "INSERT INTO invoice_items(
 
                     invoice_id,
                     product_id,
+                    variant_name,
                     quantity,
                     unit_price,
                     total_price
@@ -433,6 +444,7 @@ $is_stock_product = product_uses_stock($conn, $product_id, $user_id);
 
                 VALUES(
 
+                    ?,
                     ?,
                     ?,
                     ?,
@@ -447,10 +459,11 @@ $is_stock_product = product_uses_stock($conn, $product_id, $user_id);
 
             $stmt,
 
-            "iiddd",
+            "iisddd",
 
             $invoice_id,
             $product_id,
+            $variant_name,
             $qty,
             $price,
             $total
@@ -550,7 +563,8 @@ mysqli_stmt_execute($stmt);
                 $user_id,
                 $invoice_item_id,
                 $product_id,
-                $qty
+                $qty,
+                $variant_name
             );
 
             if(!$allocation['success']){

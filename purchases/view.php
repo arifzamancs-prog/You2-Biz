@@ -2,11 +2,15 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/fifo_inventory_helper.php';
+require_once '../includes/product_category_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_fifo_inventory_tables($conn);
+ensure_product_subcategory_schema($conn);
 
 $purchase_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -59,12 +63,18 @@ if(!$purchase){
 $sql = "SELECT
 
             pi.*,
-            p.product_name
+            p.product_name,
+            p.sku,
+            p.sub_category,
+            c.category_name
 
         FROM purchase_items pi
 
         LEFT JOIN products p
         ON p.id = pi.product_id
+
+        LEFT JOIN product_categories c
+        ON c.id = p.category_id
 
         WHERE pi.purchase_id=?";
 
@@ -81,8 +91,38 @@ mysqli_stmt_bind_param(
 
 mysqli_stmt_execute($stmt);
 
-$items =
-    mysqli_stmt_get_result($stmt);
+$items_result = mysqli_stmt_get_result($stmt);
+$items = [];
+// A purchase can contain the same product/code on multiple lines (for
+// example when it was entered variant-wise).  The details page shows that
+// code once, with its total quantity and cost.
+while($row = mysqli_fetch_assoc($items_result)){
+    $key = trim((string)($row['sku'] ?? '')) !== ''
+        ? 'code:' . $row['sku']
+        : 'product:' . (int)$row['product_id'];
+    if(!isset($items[$key])){
+        $row['variant_quantities'] = [];
+        $items[$key] = $row;
+    }else{
+        $items[$key]['quantity'] += (float)$row['quantity'];
+        $items[$key]['total_cost'] += (float)$row['total_cost'];
+    }
+    $variant = trim((string)($row['variant_name'] ?? ''));
+    if($variant !== ''){
+        $items[$key]['variant_quantities'][$variant] = ($items[$key]['variant_quantities'][$variant] ?? 0) + (float)$row['quantity'];
+    }
+}
+foreach($items as &$item){
+    $item['unit_cost'] = (float)$item['quantity'] > 0
+        ? (float)$item['total_cost'] / (float)$item['quantity']
+        : 0;
+    $item['variant_summary'] = implode(' || ', array_map(
+        static function($name, $qty){ return $name . ': ' . number_format($qty, 0); },
+        array_keys($item['variant_quantities']),
+        $item['variant_quantities']
+    ));
+}
+unset($item);
 
 ?>
 
@@ -142,25 +182,27 @@ $status_class = $payment_status === 'paid' ? 'success' : ($payment_status === 'p
                 <thead class="bg-dark">
                     <tr>
                         <th class="border-0">Product</th>
-                        <th class="border-0 text-center" width="120">Quantity</th>
+                        <th class="border-0" width="140">Category</th>
+                        <th class="border-0 text-center" width="220">Quantity</th>
                         <th class="border-0 text-right" width="180">Cost Price</th>
                         <th class="border-0 text-right" width="190">Line Total</th>
                     </tr>
                 </thead>
                 <tbody>
-                <?php while($row = mysqli_fetch_assoc($items)){ ?>
+                <?php foreach($items as $row){ ?>
                     <tr>
                         <td class="font-weight-bold"><?= htmlspecialchars($row['product_name'] ?: 'Deleted Product'); ?></td>
-                        <td class="text-center"><?= number_format((float)$row['quantity'], 0); ?></td>
+                        <td><?= htmlspecialchars($row['category_name'] ?: '—'); ?><?php if(!empty($row['sub_category'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category']); ?></div><?php } ?></td>
+                        <td class="text-center"><div><?= number_format((float)$row['quantity'], 0); ?></div><?php if(!empty($row['variant_summary'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_summary']); ?></div><?php } ?></td>
                         <td class="text-right">BDT <?= number_format((float)$row['unit_cost'], 2); ?></td>
                         <td class="text-right font-weight-bold">BDT <?= number_format((float)$row['total_cost'], 2); ?></td>
                     </tr>
                 <?php } ?>
                 </tbody>
                 <tfoot class="bg-light">
-                    <tr><td colspan="3" class="text-right font-weight-bold">Grand Total</td><td class="text-right font-weight-bold text-dark">BDT <?= number_format((float)$purchase['total_amount'], 2); ?></td></tr>
-                    <tr><td colspan="3" class="text-right text-success font-weight-bold">Paid Amount</td><td class="text-right text-success font-weight-bold">BDT <?= number_format((float)$purchase['paid_amount'], 2); ?></td></tr>
-                    <tr><td colspan="3" class="text-right text-danger font-weight-bold">Due Amount</td><td class="text-right text-danger font-weight-bold">BDT <?= number_format((float)$purchase['due_amount'], 2); ?></td></tr>
+                    <tr><td colspan="4" class="text-right font-weight-bold">Grand Total</td><td class="text-right font-weight-bold text-dark">BDT <?= number_format((float)$purchase['total_amount'], 2); ?></td></tr>
+                    <tr><td colspan="4" class="text-right text-success font-weight-bold">Paid Amount</td><td class="text-right text-success font-weight-bold">BDT <?= number_format((float)$purchase['paid_amount'], 2); ?></td></tr>
+                    <tr><td colspan="4" class="text-right text-danger font-weight-bold">Due Amount</td><td class="text-right text-danger font-weight-bold">BDT <?= number_format((float)$purchase['due_amount'], 2); ?></td></tr>
                 </tfoot>
             </table>
         </div>

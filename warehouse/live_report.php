@@ -48,7 +48,7 @@ if (isset($_GET['ajax'])) {
             }
         }
         $products = [];
-        $result = mysqli_query($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,c.id AS category_id,c.category_name,c.sub_category FROM products p JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id WHERE p.user_id={$company_id} AND c.category_type='stock_product' ORDER BY c.category_name,c.sub_category,p.product_name");
+        $result = mysqli_query($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,p.sub_category,c.id AS category_id,c.category_name FROM products p JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id WHERE p.user_id={$company_id} AND c.category_type='stock_product' ORDER BY c.category_name,p.sub_category,p.product_name");
         while ($p = mysqli_fetch_assoc($result)) { $p['photo'] = product_image_url($conn, $p['photo_path'] ?? ''); unset($p['photo_path']); $p['variants'] = []; $products[(int)$p['id']] = $p; }
         $add = function($pid, $variant, $bid, $metric, $qty) use (&$products, $locations) {
             if (!isset($products[$pid]) || !isset($locations[$bid])) return;

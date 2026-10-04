@@ -14,6 +14,8 @@ $sql = "SELECT
             s.supplier_name,
             COALESCE(SUM(pi.quantity), 0) AS total_quantity,
             GROUP_CONCAT(DISTINCT CONCAT(pr.product_name, ' [', COALESCE(NULLIF(pr.sku, ''), '—'), ']') ORDER BY pr.product_name SEPARATOR ', ') AS product_names,
+            GROUP_CONCAT(DISTINCT NULLIF(pc.category_name, '') ORDER BY pc.category_name SEPARATOR ', ') AS category_names,
+            GROUP_CONCAT(DISTINCT NULLIF(pr.sub_category, '') ORDER BY pr.sub_category SEPARATOR ', ') AS sub_category_names,
             GROUP_CONCAT(
                 CASE
                     WHEN COALESCE(pi.variant_name, '') <> '' THEN CONCAT(pi.variant_name, ': ', pi.quantity)
@@ -35,6 +37,10 @@ $sql = "SELECT
         LEFT JOIN products pr
         ON pr.id = pi.product_id
         AND pr.user_id = p.user_id
+
+        LEFT JOIN product_categories pc
+        ON pc.id = pr.category_id
+        AND pc.user_id = p.user_id
 
         WHERE p.user_id=?
 
@@ -117,7 +123,8 @@ class="table table-bordered table-striped">
 <th width="10%">Date</th>
 <th width="10%"><?= supplier_display_text('Supplier'); ?></th>
 <th width="17%">Product</th>
-<th>Qty</th>
+<th width="12%">Category</th>
+<th width="16%">Qty</th>
 <th width="12%">Total</th>
 <th width="12%">Paid</th>
 <th>Status</th>
@@ -154,16 +161,18 @@ $row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$ro
 
 <td>
 <?= htmlspecialchars($row['product_names'] ?: 'Missing Product Link'); ?>
-<?php if(!empty($row['variant_details'])){ ?>
-    <div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_details']); ?></div>
-<?php } ?>
 </td>
+
+<td><?= htmlspecialchars($row['category_names'] ?: '—'); ?><?php if(!empty($row['sub_category_names'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category_names']); ?></div><?php } ?></td>
 
 <td>
 <?= number_format(
 $row['total_quantity'],
 0
 ); ?>
+<?php if(!empty($row['variant_details'])){ ?>
+    <div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_details']); ?></div>
+<?php } ?>
 </td>
 
 <td>

@@ -20,7 +20,7 @@ $suppliers = mysqli_query(
 
 $products = mysqli_query(
     $conn,
-    "SELECT p.id, p.product_name, p.sku
+    "SELECT p.id, p.product_name, p.sku, p.sub_category, c.category_name
      FROM products p
      INNER JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id='$user_id'
@@ -83,6 +83,10 @@ while($supplier = mysqli_fetch_assoc($suppliers)){
 $product_options_html = '';
 while($product = mysqli_fetch_assoc($products)){
     $label = product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase);
+    if(!empty($product['category_name'])){
+        $label .= ' — ' . $product['category_name'];
+        if(!empty($product['sub_category'])){ $label .= ' / ' . $product['sub_category']; }
+    }
     $product_options_html .= '<option value="' . (int)$product['id'] . '">' . htmlspecialchars($label) . '</option>';
 }
 
@@ -147,15 +151,19 @@ require_once '../includes/sidebar.php';
 <hr>
 
 <table class="table table-bordered" id="purchaseTable">
+<style>
+    #purchaseTable .purchase-product-column{width:18%}
+    #purchaseTable .purchase-total-column{width:19%;min-width:150px}
+</style>
 <thead>
 <tr>
-<th width="22%">Product</th>
+<th class="purchase-product-column">Product</th>
 <th width="13%" class="variant-column">Variant</th>
 <?php if(!$housing_purchase){ ?><th width="12%">Stock</th><?php } ?>
 <th width="17%"><?= $housing_purchase ? 'Price' : 'Purchase Price'; ?></th>
 <?php if(!$housing_purchase){ ?><th width="17%">Sale Price</th><?php } ?>
 <th width="11%">Qty</th>
-<th width="15%">Total</th>
+<th class="purchase-total-column">Total</th>
 <th width="6%">Action</th>
 </tr>
 </thead>

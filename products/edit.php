@@ -70,7 +70,13 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     }
 
     $category_id    = (int)$_POST['category_id'];
-    $sub_category   = product_category_subcategory($conn, $category_id, $user_id);
+    $sub_category   = trim($_POST['sub_category'] ?? '');
+    $sub_category_options = product_category_subcategory_options($conn, $category_id, $user_id);
+    $keeping_current_sub_category = $category_id === (int)$product['category_id']
+        && $sub_category === trim((string)($product['sub_category'] ?? ''));
+    if($sub_category !== '' && !in_array($sub_category, $sub_category_options, true) && !$keeping_current_sub_category){
+        $sub_category = '';
+    }
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
     if(!$is_stock_product){
         $_SESSION['error'] = 'Please select an active FIFO product category.';
@@ -227,7 +233,7 @@ require_once '../includes/sidebar.php';
 
                         <option
                             value="<?= $cat['id']; ?>"
-                            data-sub-category="<?= htmlspecialchars($cat['sub_category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                            data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'
                             <?= $product['category_id']==$cat['id']?'selected':''; ?>>
 
                             <?= htmlspecialchars($cat['category_name']); ?>
@@ -242,7 +248,7 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
                 <label>Sub Category</label>
-                <input type="text" id="sub_category" class="form-control" readonly>
+                <select name="sub_category" id="sub_category" class="form-control" data-current="<?= htmlspecialchars($product['sub_category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"><option value="">Select sub category</option></select>
             </div>
 
             <div class="form-group">
@@ -384,7 +390,7 @@ require_once '../includes/sidebar.php';
 </div>
 
 <script>
-(function(){const category=document.getElementById('category_id'), subCategory=document.getElementById('sub_category');function syncSubCategory(){subCategory.value=category.options[category.selectedIndex]?.dataset.subCategory||'';}category.addEventListener('change',syncSubCategory);syncSubCategory();})();
+(function(){const category=document.getElementById('category_id'), subCategory=document.getElementById('sub_category');function syncSubCategory(){let choices=[];try{choices=JSON.parse(category.options[category.selectedIndex]?.dataset.subCategories||'[]')}catch(e){}const current=subCategory.dataset.current||'';if(current&&!choices.includes(current)){choices.unshift(current)}subCategory.innerHTML='<option value="">'+(choices.length?'Select sub category':'No sub category')+'</option>';choices.forEach(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;option.selected=name===current;subCategory.appendChild(option);});subCategory.disabled=choices.length===0;subCategory.dataset.current='';}category.addEventListener('change',syncSubCategory);syncSubCategory();})();
 (function(){const input=document.getElementById('product_photo'),form=document.getElementById('product-form'),status=document.getElementById('product-photo-status');if(!input||!window.DataTransfer)return;let busy=false;input.addEventListener('change',function(){const file=input.files[0];if(!file)return;busy=true;status.className='form-text text-muted';status.textContent='Compressing photo…';const reader=new FileReader();reader.onload=e=>{const image=new Image();image.onload=()=>{let max=1200;const attempt=()=>{const scale=Math.min(1,max/Math.max(image.width,image.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);let quality=.82;const save=()=>canvas.toBlob(blob=>{if(blob&&blob.size<=51200){const data=new DataTransfer();data.items.add(new File([blob],'product-photo.jpg',{type:'image/jpeg'}));input.files=data.files;busy=false;status.className='form-text text-success';status.textContent='Photo ready: '+Math.ceil(blob.size/1024)+' KB.';return;}if(quality>.1){quality-=.12;save();return;}if(max>96){max=Math.max(96,Math.round(max*.72));attempt();return;}busy=false;input.value='';status.className='form-text text-danger';status.textContent='Photo could not be compressed below 50 KB.';},'image/jpeg',quality);save();};attempt();};image.onerror=()=>{busy=false;status.textContent='Invalid photo selected.';};image.src=e.target.result;};reader.readAsDataURL(file);});form.addEventListener('submit',e=>{if(busy){e.preventDefault();status.className='form-text text-warning';status.textContent='Please wait for photo compression.';}});})();
 </script>
 

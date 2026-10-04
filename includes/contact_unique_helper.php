@@ -188,6 +188,33 @@ function contact_duplicate_message_in_table($conn, $table, $label, $field, $valu
     $scope_user_id = (int)$scope_user_id;
     $use_user_scope = in_array($table, ['customers', 'suppliers'], true) && $scope_user_id > 0;
 
+    // Customer identity uses the same phone even when its formatting differs.
+    if($table === 'customers' && $field === 'phone'){
+        $phone_key = contact_normalize_phone_for_compare($value);
+        if($phone_key === '') return '';
+        $phone_sql = 'SELECT phone FROM customers WHERE id<>?';
+        if($use_user_scope) $phone_sql .= ' AND user_id=?';
+        $phone_stmt = mysqli_prepare($conn, $phone_sql);
+        if(!$phone_stmt) throw new RuntimeException('Customer phone could not be checked. Please try again.');
+        $exclude_id = (int)$exclude_id;
+        if($use_user_scope){
+            mysqli_stmt_bind_param($phone_stmt, 'ii', $exclude_id, $scope_user_id);
+        }else{
+            mysqli_stmt_bind_param($phone_stmt, 'i', $exclude_id);
+        }
+        mysqli_stmt_execute($phone_stmt);
+        $phones = mysqli_stmt_get_result($phone_stmt);
+        $duplicate = false;
+        while($contact = mysqli_fetch_assoc($phones)){
+            if(contact_normalize_phone_for_compare($contact['phone']) === $phone_key){
+                $duplicate = true;
+                break;
+            }
+        }
+        mysqli_stmt_close($phone_stmt);
+        return $duplicate ? 'Customer phone already exists. Please select the existing customer.' : '';
+    }
+
     $sql = "SELECT id
             FROM `$table`
             WHERE LOWER(`$field`)=LOWER(?)";

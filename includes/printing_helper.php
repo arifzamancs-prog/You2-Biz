@@ -3,6 +3,46 @@
 require_once __DIR__ . '/app_config.php';
 
 require_once __DIR__ . '/branding_helper.php';
+require_once __DIR__ . '/branch_context_helper.php';
+
+function printing_branch_id($conn)
+{
+    if(is_super_admin_user() || !company_multi_branch_enabled($conn, (int)($_SESSION['user_id'] ?? 0))) return 0;
+    return (int)($GLOBALS['printing_branch_context'] ?? selected_branch_id($conn, false));
+}
+
+function printing_ensure_branch_table($conn)
+{
+    static $ready = false;
+    if($ready) return true;
+    $ready = mysqli_query($conn, "CREATE TABLE IF NOT EXISTS branch_printing_settings (
+        user_id BIGINT UNSIGNED NOT NULL,
+        branch_id BIGINT UNSIGNED NOT NULL,
+        settings_json LONGTEXT NOT NULL,
+        PRIMARY KEY (user_id, branch_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    return $ready;
+}
+
+function printing_branch_settings($conn, $reset = false)
+{
+    static $cache = [];
+    if($reset){ $cache = []; return []; }
+    $branch_id = printing_branch_id($conn);
+    if($branch_id <= 0) return [];
+    $user_id = (int)($_SESSION['user_id'] ?? 0);
+    $key = $user_id . ':' . $branch_id;
+    if(!array_key_exists($key, $cache)){
+        if(!printing_ensure_branch_table($conn)) return [];
+        $stmt = mysqli_prepare($conn, 'SELECT s.settings_json FROM branch_printing_settings s INNER JOIN branches b ON b.id=s.branch_id AND b.user_id=s.user_id WHERE s.user_id=? AND s.branch_id=?');
+        mysqli_stmt_bind_param($stmt, 'ii', $user_id, $branch_id);
+        mysqli_stmt_execute($stmt);
+        $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+        $cache[$key] = json_decode($row['settings_json'] ?? '{}', true) ?: [];
+        mysqli_stmt_close($stmt);
+    }
+    return $cache[$key];
+}
 
 function printing_ensure_column($conn)
 {
@@ -305,7 +345,7 @@ function printing_upload_file($field_name, $current_filename, $prefix)
     $old_path = printing_upload_dir_path() . '/' . $old_filename;
 
     if($old_filename !== '' && !printing_is_default_seal_filename($old_filename) && $old_filename !== $filename && is_file($old_path)){
-        @unlink($old_path);
+        // Existing seals can be inherited by other branches; keep their files.
     }
 
     return [true, $filename, true, ''];
@@ -435,6 +475,9 @@ function current_printing_user_value($conn, $column, $default = '')
     if(!printing_ensure_column($conn)){
         return $default;
     }
+
+    $branch_settings = printing_branch_settings($conn);
+    if(array_key_exists($column, $branch_settings)) return $branch_settings[$column];
 
     $user_id = (int)($_SESSION['user_id'] ?? 0);
 
@@ -925,6 +968,21 @@ function save_printing_option(
 
     if($user_id <= 0){
         return false;
+    }
+
+    $branch_id = printing_branch_id($conn);
+    if($branch_id > 0){
+        if(!printing_ensure_branch_table($conn)) return false;
+        $payload = printing_default_settings_payload($option, $custom_size['width'], $custom_size['height'], $custom_top_margin, $print_invoice_notes, $print_invoice_created_by, $company_seal_file, $paid_seal_file, $print_company_seal, $print_paid_seal, $print_company_logo, $print_company_profile, $general_top_margin, $print_general_top_margin);
+        $settings = [];
+        foreach($payload as $key => $value) $settings[substr($key, 8)] = $value;
+        $json = json_encode($settings, JSON_THROW_ON_ERROR);
+        $stmt = mysqli_prepare($conn, 'INSERT INTO branch_printing_settings (user_id,branch_id,settings_json) SELECT user_id,id,? FROM branches WHERE user_id=? AND id=? ON DUPLICATE KEY UPDATE settings_json=VALUES(settings_json)');
+        mysqli_stmt_bind_param($stmt, 'sii', $json, $user_id, $branch_id);
+        $ok = mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+        printing_branch_settings($conn, true);
+        return $ok;
     }
 
     $stmt = mysqli_prepare(

@@ -100,7 +100,11 @@ function ensure_product_subcategory_schema($conn)
 {
     $category_column = mysqli_query($conn, "SHOW COLUMNS FROM product_categories LIKE 'sub_category'");
     if($category_column && mysqli_num_rows($category_column) === 0){
-        mysqli_query($conn, "ALTER TABLE product_categories ADD COLUMN sub_category VARCHAR(100) NULL AFTER category_name");
+        mysqli_query($conn, "ALTER TABLE product_categories ADD COLUMN sub_category TEXT NULL AFTER category_name");
+    }elseif($category_column){
+        // A category can have several sub-categories, so the old single-value
+        // VARCHAR column is widened without affecting existing values.
+        mysqli_query($conn, "ALTER TABLE product_categories MODIFY COLUMN sub_category TEXT NULL");
     }
     $product_column = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'sub_category'");
     if($product_column && mysqli_num_rows($product_column) === 0){
@@ -118,6 +122,13 @@ function product_category_subcategory($conn, $category_id, $user_id)
     $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
     mysqli_stmt_close($stmt);
     return trim((string)($row['sub_category'] ?? ''));
+}
+
+function product_category_subcategory_options($conn, $category_id, $user_id)
+{
+    return product_variant_options_from_text(
+        product_category_subcategory($conn, $category_id, $user_id)
+    );
 }
 
 function product_variant_options_from_text($value)

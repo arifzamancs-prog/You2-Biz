@@ -447,6 +447,9 @@ function invoice_qty_display($quantity, $unit_price)
 
                     <td>
                         <?php echo htmlspecialchars(invoice_product_display($row['product_name'], $row['quantity'], $row['unit_price'])); ?>
+                        <?php if(!empty($row['variant_name'])){ ?>
+                            <small class="d-block text-muted">Variant: <?php echo htmlspecialchars($row['variant_name']); ?></small>
+                        <?php } ?>
                     </td>
 
                     <td>

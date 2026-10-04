@@ -84,7 +84,11 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_id =
     (int)$_POST['category_id'];
-    $sub_category = product_category_subcategory($conn, $category_id, $user_id);
+    $sub_category = trim($_POST['sub_category'] ?? '');
+    $sub_category_options = product_category_subcategory_options($conn, $category_id, $user_id);
+    if($sub_category !== '' && !in_array($sub_category, $sub_category_options, true)){
+        $sub_category = '';
+    }
 
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
 
@@ -284,7 +288,7 @@ require_once '../includes/sidebar.php';
 
                             <?php while($cat = mysqli_fetch_assoc($categories)){ ?>
 
-                                <option value="<?= $cat['id']; ?>" data-sub-category="<?= htmlspecialchars($cat['sub_category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'>
+                                <option value="<?= $cat['id']; ?>" data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>' data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'>
 
                                     <?= htmlspecialchars($cat['category_name']); ?>
 
@@ -301,7 +305,7 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-6">
                     <div class="form-group">
                         <label>Sub Category</label>
-                        <input type="text" id="sub_category" class="form-control" readonly>
+                        <select name="sub_category" id="sub_category" class="form-control"><option value="">Select sub category</option></select>
                     </div>
                 </div>
 
@@ -510,7 +514,10 @@ require_once '../includes/sidebar.php';
 const category=document.getElementById('category_id'), subCategory=document.getElementById('sub_category'), opening=document.querySelector('[name="current_stock"]'), wrap=document.getElementById('variant-opening-wrap'), fields=document.getElementById('variant-opening-fields');
 function syncVariants(){
   const option=category.options[category.selectedIndex]; let variants=[];
-  subCategory.value=option.dataset.subCategory||'';
+  let subCategories=[]; try{subCategories=JSON.parse(option.dataset.subCategories||'[]')}catch(e){}
+  subCategory.innerHTML='<option value="">'+(subCategories.length?'Select sub category':'No sub category')+'</option>';
+  subCategories.forEach(name=>{const item=document.createElement('option');item.value=name;item.textContent=name;subCategory.appendChild(item);});
+  subCategory.disabled=subCategories.length===0;
   try{variants=JSON.parse(option.dataset.variants||'[]')}catch(e){}
   fields.innerHTML=''; wrap.classList.toggle('d-none',variants.length===0); opening.disabled=variants.length>0;
   if(!variants.length){ return; }

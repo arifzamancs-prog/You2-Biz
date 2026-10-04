@@ -3,11 +3,14 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/product_category_helper.php';
+require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+ensure_fifo_inventory_tables($conn);
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
 
 $purchase_id = isset($_GET['id'])
@@ -61,13 +64,16 @@ $products = mysqli_query(
 
     $conn,
 
-    "SELECT id,
-            product_name,
-            sku
+    "SELECT p.id,
+            p.product_name,
+            p.sku,
+            p.sub_category,
+            c.category_name
 
-     FROM products
+     FROM products p
+     LEFT JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id
 
-     WHERE user_id='$user_id'
+     WHERE p.user_id='$user_id'
 
      ORDER BY product_name"
 
@@ -98,6 +104,20 @@ mysqli_stmt_execute($stmt);
 
 $items =
     mysqli_stmt_get_result($stmt);
+$grouped_items = [];
+while($line = mysqli_fetch_assoc($items)){
+    $key = $line['product_id'] . ':' . $line['unit_cost'];
+    if(!isset($grouped_items[$key])){
+        $grouped_items[$key] = $line;
+        $grouped_items[$key]['quantity'] = 0;
+        $grouped_items[$key]['total_cost'] = 0;
+        $grouped_items[$key]['variants'] = [];
+    }
+    $grouped_items[$key]['quantity'] += $line['quantity'];
+    $grouped_items[$key]['total_cost'] += $line['total_cost'];
+    $variant = (string)($line['variant_name'] ?? '');
+    $grouped_items[$key]['variants'][$variant] = ($grouped_items[$key]['variants'][$variant] ?? 0) + $line['quantity'];
+}
 ?>
 
 <div class="card">
@@ -198,7 +218,7 @@ id="purchaseTable">
 
 <tbody>
 <?php
-while($item = mysqli_fetch_assoc($items)){
+foreach($grouped_items as $item){
 ?>
 
 <tr>
@@ -229,7 +249,7 @@ value="<?= $product['id']; ?>"
 ? 'selected'
 : ''; ?>>
 
-<?= htmlspecialchars(product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase)); ?>
+<?php $product_label = product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase); if(!empty($product['category_name'])){ $product_label .= ' — ' . $product['category_name'] . (!empty($product['sub_category']) ? ' / ' . $product['sub_category'] : ''); } echo htmlspecialchars($product_label); ?>
 
 </option>
 
@@ -261,6 +281,18 @@ name="qty[]"
 value="<?= $item['quantity']; ?>"
 class="form-control qty"
 required>
+
+<div class="variant-fields mt-2">
+<?php
+$item_variants = product_variant_names($conn, (int)$item['product_id'], $user_id);
+if($item_variants){
+    $item_variants = array_unique(array_merge($item_variants, array_keys($item['variants'])));
+    foreach($item_variants as $variant){
+        if($variant === '' && empty($item['variants'][''])) continue;
+?>
+<label class="d-flex align-items-center small mb-1"><span class="mr-2" style="min-width:75px"><?= htmlspecialchars($variant ?: 'Unassigned'); ?></span><input type="number" min="0" step="1" class="form-control form-control-sm variant-qty" data-variant="<?= htmlspecialchars($variant, ENT_QUOTES); ?>" value="<?= (int)($item['variants'][$variant] ?? 0); ?>"></label>
+<?php } } ?>
+</div>
 
 </td>
 
@@ -439,6 +471,18 @@ $(function(){
     initProductSelect($("#purchaseTable"));
     initCustomerSupplierSelect($(document));
 
+    $('#purchaseTable tbody tr').each(function(){ $(this).find('.qty').prop('readonly', $(this).find('.variant-qty').length > 0); });
+    $('form[action="update.php"]').on('submit', function(){
+        $('#purchaseTable tbody tr').each(function(index){
+            $(this).find('.variant-qty').each(function(){ this.name='variant_quantity['+index+']['+this.dataset.variant+']'; });
+        });
+    });
+    $(document).on('input change', '.variant-qty', function(){
+        const row=$(this).closest('tr'); let total=0;
+        row.find('.variant-qty').each(function(){ total+=Number(this.value)||0; });
+        row.find('.qty').val(total); calculateRow(row);
+    });
+
     calculateGrandTotal();
 
     $(document).on("change", ".product", function(){
@@ -459,6 +503,17 @@ $(function(){
             dataType: "json",
             success: function(res){
                 row.find(".cost_price").val(parseFloat(res.cost_price || 0).toFixed(2));
+                let variantSelect=row.find(".variant-fields");
+                variantSelect.empty();
+                row.find('.qty').prop('readonly', (res.variants || []).length > 0).val((res.variants || []).length ? 0 : 1);
+                if((res.variants || []).length){
+                    res.variants.forEach(function(name){
+                        const label=$('<label>').addClass('d-flex align-items-center small mb-1');
+                        label.append($('<span>').addClass('mr-2').css('min-width','75px').text(name));
+                        label.append($('<input>',{type:'number',min:0,step:1,value:0}).addClass('form-control form-control-sm variant-qty').attr('data-variant',name));
+                        variantSelect.append(label);
+                    });
+                }
                 calculateRow(row);
             }
         });
@@ -485,6 +540,8 @@ $(function(){
         row.find("option").removeAttr("data-select2-id");
 
         row.find(".cost_price").val("");
+        row.find(".variant-fields").empty();
+        row.find('.qty').prop('readonly', false);
         row.find(".qty").val(1);
         row.find(".line_total").val("");
 

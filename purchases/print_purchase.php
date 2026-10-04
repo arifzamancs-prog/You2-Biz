@@ -3,9 +3,13 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
+require_once '../includes/fifo_inventory_helper.php';
+require_once '../includes/product_category_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $purchase_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+ensure_fifo_inventory_tables($conn);
+ensure_product_subcategory_schema($conn);
 
 $sql = "SELECT
             p.*,
@@ -26,12 +30,19 @@ if(!$purchase){
     die("Purchase Not Found");
 }
 
+$GLOBALS['printing_branch_context'] = (int)($purchase['branch_id'] ?? 0);
+
 $sql = "SELECT
             pi.*,
-            p.product_name
+            p.product_name,
+            p.sku,
+            p.sub_category,
+            c.category_name
         FROM purchase_items pi
         LEFT JOIN products p
             ON p.id = pi.product_id
+        LEFT JOIN product_categories c
+            ON c.id = p.category_id
         WHERE pi.purchase_id=?";
 
 $stmt = mysqli_prepare($conn, $sql);
@@ -41,8 +52,32 @@ $items_result = mysqli_stmt_get_result($stmt);
 $items = [];
 
 while($row = mysqli_fetch_assoc($items_result)){
-    $items[] = $row;
+    $key = trim((string)($row['sku'] ?? '')) !== ''
+        ? 'code:' . $row['sku']
+        : 'product:' . (int)$row['product_id'];
+    if(!isset($items[$key])){
+        $row['variant_quantities'] = [];
+        $items[$key] = $row;
+    }else{
+        $items[$key]['quantity'] += (float)$row['quantity'];
+        $items[$key]['total_cost'] += (float)$row['total_cost'];
+    }
+    $variant = trim((string)($row['variant_name'] ?? ''));
+    if($variant !== ''){
+        $items[$key]['variant_quantities'][$variant] = ($items[$key]['variant_quantities'][$variant] ?? 0) + (float)$row['quantity'];
+    }
 }
+foreach($items as &$item){
+    $item['unit_cost'] = (float)$item['quantity'] > 0
+        ? (float)$item['total_cost'] / (float)$item['quantity']
+        : 0;
+    $item['variant_summary'] = implode(' || ', array_map(
+        static function($name, $qty){ return $name . ': ' . number_format($qty, 0); },
+        array_keys($item['variant_quantities']),
+        $item['variant_quantities']
+    ));
+}
+unset($item);
 
 $sql = "SELECT
             name,
@@ -325,7 +360,8 @@ th{
         <thead>
         <tr>
             <th>Product</th>
-            <th class="text-right">Qty</th>
+            <th style="width:20%">Category</th>
+            <th class="text-right" style="width:25%">Qty</th>
             <th class="text-right">Cost</th>
             <th class="text-right">Total</th>
         </tr>
@@ -334,7 +370,8 @@ th{
         <?php foreach($items as $item){ ?>
             <tr>
                 <td><?= htmlspecialchars($item['product_name']); ?></td>
-                <td class="text-right"><?= number_format($item['quantity'],0); ?></td>
+                <td><?= htmlspecialchars($item['category_name'] ?: '—'); ?><?php if(!empty($item['sub_category'])){ ?><small class="muted"><br><?= htmlspecialchars($item['sub_category']); ?></small><?php } ?></td>
+                <td class="text-right"><?= number_format($item['quantity'],0); ?><?php if(!empty($item['variant_summary'])){ ?><small class="muted"><br><?= htmlspecialchars($item['variant_summary']); ?></small><?php } ?></td>
                 <td class="text-right"><?= number_format($item['unit_cost'],2); ?></td>
                 <td class="text-right"><?= number_format($item['total_cost'],2); ?></td>
             </tr>

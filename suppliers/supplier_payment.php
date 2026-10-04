@@ -95,6 +95,13 @@ while($row = mysqli_fetch_assoc($result)){
 
     <div class="card-body">
 
+        <style>
+            #example1 .vendor-column{min-width:160px;width:18%}
+            #example1 .date-column{min-width:120px;width:11%;white-space:nowrap}
+            #example1 .amount-column{min-width:125px;width:12%;white-space:nowrap}
+            #example1 .action-column{min-width:125px;width:125px;white-space:nowrap}
+        </style>
+
         <table
             id="example1"
             class="table table-bordered table-striped">
@@ -104,13 +111,13 @@ while($row = mysqli_fetch_assoc($result)){
             <tr>
 
                 <th>Purchase No</th>
-                <th>Date</th>
-                <th><?= supplier_display_text('Supplier'); ?></th>
-                <th>Total</th>
-                <th>Paid</th>
-                <th>Due</th>
+                <th class="date-column">Date</th>
+                <th class="vendor-column"><?= supplier_display_text('Supplier'); ?></th>
+                <th class="amount-column">Total</th>
+                <th class="amount-column">Paid</th>
+                <th class="amount-column">Due</th>
                 <th>Status</th>
-                <th width="220">Action</th>
+                <th class="action-column">Action</th>
 
             </tr>
 
@@ -184,6 +191,12 @@ while($row = mysqli_fetch_assoc($result)){
 
                         <i class="fas fa-eye"></i>
 
+                    </a>
+
+                    <a href="../purchases/print_purchase.php?id=<?= (int)$row['id']; ?>"
+                       target="_blank" rel="noopener"
+                       class="btn btn-primary btn-sm" title="Print" aria-label="Print purchase invoice">
+                        <i class="fas fa-print"></i>
                     </a>
 
                     <?php if(manager_can_modify() && (int)($row['latest_payment_id'] ?? 0) > 0){ ?>

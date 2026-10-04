@@ -86,6 +86,7 @@ if ($show_installment_ledger_total) {
 $package_due_amount = max(0, $package_total_price - $package_paid_amount);
 $charge_stmt=mysqli_prepare($conn,'SELECT charge_name,charge_type,charge_amount FROM booking_invoice_charges WHERE booking_invoice_id=? ORDER BY id'); mysqli_stmt_bind_param($charge_stmt,'i',$id); mysqli_stmt_execute($charge_stmt); $charge_result=mysqli_stmt_get_result($charge_stmt); $booking_charges=[]; $base_amount=(float)$invoice['amount']; while($charge=mysqli_fetch_assoc($charge_result)){ $booking_charges[]=$charge; $base_amount += $charge['charge_type']==='less' ? (float)$charge['charge_amount'] : -(float)$charge['charge_amount']; }
 
+$GLOBALS['printing_branch_context'] = (int)($invoice['branch_id'] ?? 0);
 $printing_option = current_printing_option($conn);
 $custom_size = current_printing_custom_size($conn);
 $custom_top_margin = current_printing_custom_top_margin($conn);
