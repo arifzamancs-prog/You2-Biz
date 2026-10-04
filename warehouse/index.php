@@ -4,6 +4,7 @@ require_once '../includes/db.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_expiry_helper.php';
 require_once '../includes/product_image_helper.php';
+require_once '../includes/distribution_display_helper.php';
 require_once '../includes/project_package_helper.php';
 
 $company_id = (int)$_SESSION['user_id'];
@@ -42,29 +43,45 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
     } catch (Throwable $e) { $error = $e->getMessage(); }
 }
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') !== 'receive_at_warehouse') {
+    $distribution_transaction = false;
     try {
-        $product_id = (int)($_POST['product_id'] ?? 0);
         $base_request_key = (string)($_POST['request_key'] ?? '');
+        $product_ids = $_POST['product_id'] ?? [];
+        $quantities = $_POST['quantity'] ?? [];
         $variant_quantities = $_POST['variant_quantity'] ?? [];
         $variant_names = $_POST['variant_name'] ?? [];
+        if(!is_array($product_ids) || !preg_match('/^[a-f0-9]{32,64}$/', $base_request_key)) throw new RuntimeException('Invalid distribution request.');
         $distribution_ids = [];
-        if(is_array($variant_quantities) && !empty($variant_quantities)){
-            foreach($variant_quantities as $variant_key => $quantity){
-                $variant_name = is_array($variant_names) && array_key_exists($variant_key, $variant_names)
-                    ? (string)$variant_names[$variant_key]
-                    : (string)$variant_key;
-                $quantity = (float)$quantity;
-                if($quantity <= 0){ continue; }
-                $request_key = substr(hash('sha256', $base_request_key . '|' . $variant_name), 0, 48);
-                $distribution_ids[] = fifo_inventory_distribute($conn, $company_id, (int)($_POST['to_branch_id'] ?? 0), $product_id, $quantity, $request_key, (string)($_POST['note'] ?? ''), (int)($_POST['from_branch_id'] ?? 0), (string)$variant_name, $base_request_key);
+        mysqli_begin_transaction($conn);
+        $distribution_transaction = true;
+        foreach($product_ids as $line_index => $product_id){
+            $product_id = (int)$product_id;
+            if($product_id <= 0) continue;
+            $line_variants = $variant_quantities[$line_index] ?? [];
+            if(is_array($line_variants) && $line_variants){
+                foreach($line_variants as $variant_index => $quantity){
+                    $variant_name = (string)($variant_names[$line_index][$variant_index] ?? '');
+                    $quantity = (float)$quantity;
+                    if($quantity <= 0) continue;
+                    $request_key = substr(hash('sha256', $base_request_key . '|' . $line_index . '|' . $variant_name), 0, 48);
+                    $distribution_ids[] = fifo_inventory_distribute($conn, $company_id, (int)($_POST['to_branch_id'] ?? 0), $product_id, $quantity, $request_key, (string)($_POST['note'] ?? ''), (int)($_POST['from_branch_id'] ?? 0), (string)$variant_name, $base_request_key, false);
+                }
+            }else{
+                $quantity = (float)($quantities[$line_index] ?? 0);
+                if($quantity <= 0) continue;
+                $request_key = substr(hash('sha256', $base_request_key . '|' . $line_index), 0, 48);
+                $distribution_ids[] = fifo_inventory_distribute($conn, $company_id, (int)($_POST['to_branch_id'] ?? 0), $product_id, $quantity, $request_key, (string)($_POST['note'] ?? ''), (int)($_POST['from_branch_id'] ?? 0), '', $base_request_key, false);
             }
-        }else{
-            $distribution_ids[] = fifo_inventory_distribute($conn, $company_id, (int)($_POST['to_branch_id'] ?? 0), $product_id, (float)($_POST['quantity'] ?? 0), $base_request_key, (string)($_POST['note'] ?? ''), (int)($_POST['from_branch_id'] ?? 0), '', $base_request_key);
         }
-        if(empty($distribution_ids)){ throw new RuntimeException('Enter at least one variant quantity.'); }
-        $_SESSION['stock_distribution_message'] = 'Stock distributed successfully. Distribution #' . implode(', #', $distribution_ids);
+        if(empty($distribution_ids)){ throw new RuntimeException('Add a product and enter at least one quantity.'); }
+        mysqli_commit($conn);
+        $distribution_transaction = false;
+        $_SESSION['stock_distribution_message'] = 'Stock distributed successfully in one voucher. Distribution #' . (int)$distribution_ids[0];
         header('Location: index.php'); exit;
-    } catch (Throwable $e) { $error = $e->getMessage(); }
+    } catch (Throwable $e) {
+        if ($distribution_transaction) mysqli_rollback($conn);
+        $error = $e->getMessage();
+    }
 }
 $branches = mysqli_query($conn, "SELECT id,branch_name,branch_code,is_head_office FROM branches WHERE user_id={$company_id} AND status='active' ORDER BY CASE WHEN branch_name='Main Warehouse' THEN 0 WHEN is_head_office=1 THEN 1 ELSE 2 END, branch_name");
 $stock_location_id = $central ? $warehouse_id : $scope_id;
@@ -86,17 +103,27 @@ $stock = mysqli_query($conn, "SELECT p.id AS product_id,p.product_name,p.sku,p.p
     HAVING quantity<>0 OR reserved<>0
     ORDER BY b.is_head_office DESC,b.branch_name,p.product_name");
 $history_scope = $scope_id > 0 ? " AND d.to_branch_id={$scope_id}" : '';
-$history = mysqli_query($conn, "SELECT MIN(d.id) AS id,GROUP_CONCAT(d.id ORDER BY d.id) AS distribution_ids,MIN(d.created_at) AS created_at,d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.status,d.note,
+$history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.reference_no) AS reference_no,GROUP_CONCAT(d.distribution_ids ORDER BY d.id) AS distribution_ids,MIN(d.created_at) AS created_at,d.user_id,d.from_branch_id,d.to_branch_id,d.status,d.note,
     SUM(d.quantity) AS quantity,SUM(d.total_cost) AS total_cost,SUM(d.damaged_quantity) AS damaged_quantity,
-    GROUP_CONCAT(CASE WHEN COALESCE(d.variant_name,'')='' THEN NULL ELSE CONCAT(d.variant_name, ': ', FORMAT(d.quantity,0)) END ORDER BY d.id SEPARATOR ' || ') AS variant_summary,
-    p.product_name,p.sku,fb.branch_code AS from_branch_code,tb.branch_code AS to_branch_code,fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office,tb.branch_name AS to_branch_name,tb.is_head_office AS to_head_office
-    FROM stock_distributions d
+    GROUP_CONCAT(JSON_ARRAY(p.product_name,d.variant_summary) ORDER BY d.id SEPARATOR ',') AS product_summary,
+    GROUP_CONCAT(DISTINCT p.sku ORDER BY p.sku SEPARATOR ', ') AS sku_summary,
+    fb.branch_code AS from_branch_code,tb.branch_code AS to_branch_code,fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office,tb.branch_name AS to_branch_name,tb.is_head_office AS to_head_office
+    FROM (
+        SELECT MIN(id) AS id,MAX(id) AS last_id,MIN(reference_no) AS reference_no,GROUP_CONCAT(id ORDER BY id) AS distribution_ids,
+            MIN(created_at) AS created_at,user_id,from_branch_id,to_branch_id,status,note,product_id,
+            COALESCE(transfer_group,CONCAT('legacy-',created_at)) AS voucher_key,
+            SUM(quantity) AS quantity,SUM(total_cost) AS total_cost,SUM(damaged_quantity) AS damaged_quantity,
+            GROUP_CONCAT(CASE WHEN COALESCE(variant_name,'')<>'' THEN CONCAT(variant_name,': ',FORMAT(quantity,0)) ELSE NULL END ORDER BY id SEPARATOR ' || ') AS variant_summary
+        FROM stock_distributions
+        WHERE user_id={$company_id}
+        GROUP BY user_id,from_branch_id,to_branch_id,status,note,product_id,COALESCE(transfer_group,CONCAT('legacy-',created_at))
+    ) d
     INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
     INNER JOIN branches fb ON fb.id=d.from_branch_id AND fb.user_id=d.user_id
     INNER JOIN branches tb ON tb.id=d.to_branch_id AND tb.user_id=d.user_id
     WHERE d.user_id={$company_id} {$history_scope}
-    GROUP BY COALESCE(d.transfer_group, CONCAT('legacy-',d.created_at)),d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.status,d.note,p.product_name,p.sku,fb.branch_code,tb.branch_code,fb.branch_name,fb.is_head_office,tb.branch_name,tb.is_head_office
-    ORDER BY MAX(d.id) DESC LIMIT 500");
+    GROUP BY d.voucher_key,d.user_id,d.from_branch_id,d.to_branch_id,d.status,d.note,fb.branch_code,tb.branch_code,fb.branch_name,fb.is_head_office,tb.branch_name,tb.is_head_office
+    ORDER BY MAX(d.last_id) DESC LIMIT 500");
 $setup_categories = mysqli_query($conn, "SELECT id,category_name,status FROM product_categories WHERE user_id={$company_id} ORDER BY category_name ASC");
 $setup_products = mysqli_query($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,p.purchase_price,p.sale_price,p.status,c.category_name,
     (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$warehouse_id}) AS warehouse_stock,
@@ -186,9 +213,8 @@ require_once '../includes/sidebar.php';
         <input type="hidden" name="request_key" value="<?= bin2hex(random_bytes(24)); ?>">
         <div class="form-row">
             <div class="form-group col-md-3"><label for="distribution-from">From</label><select id="distribution-from" name="from_branch_id" class="form-control" required><?php mysqli_data_seek($branches, 0); while ($branch = mysqli_fetch_assoc($branches)) { ?><option value="<?= (int)$branch['id']; ?>"><?= htmlspecialchars(($branch['is_head_office'] ? 'Head Office' : $branch['branch_name']) . (!empty($branch['branch_code']) ? ' [' . $branch['branch_code'] . ']' : '')); ?></option><?php } ?></select></div>
-            <div class="form-group col-md-3"><label for="distribution-product">Product / Available</label><select id="distribution-product" name="product_id" class="form-control" required><option value="">Select product</option></select></div>
-            <div class="form-group col-md-2"><label for="distribution-branch">To</label><select id="distribution-branch" name="to_branch_id" class="form-control" required><option value="">Select location</option><?php mysqli_data_seek($branches, 0); while ($branch = mysqli_fetch_assoc($branches)) { ?><option value="<?= (int)$branch['id']; ?>"><?= htmlspecialchars(($branch['is_head_office'] ? 'Head Office' : $branch['branch_name']) . (!empty($branch['branch_code']) ? ' [' . $branch['branch_code'] . ']' : '')); ?></option><?php } ?></select></div>
-            <div class="form-group col-md-3"><label>Quantity</label><div id="distribution-quantity-wrap"><input id="distribution-quantity" class="form-control" type="number" name="quantity" min="1" step="1" required></div></div>
+            <div class="form-group col-md-3"><label for="distribution-branch">To</label><select id="distribution-branch" name="to_branch_id" class="form-control" required><option value="">Select location</option><?php mysqli_data_seek($branches, 0); while ($branch = mysqli_fetch_assoc($branches)) { ?><option value="<?= (int)$branch['id']; ?>"><?= htmlspecialchars(($branch['is_head_office'] ? 'Head Office' : $branch['branch_name']) . (!empty($branch['branch_code']) ? ' [' . $branch['branch_code'] . ']' : '')); ?></option><?php } ?></select></div>
+            <div class="form-group col-md-12"><div id="distribution-lines"><div class="form-row distribution-line"><div class="form-group col-md-6"><label>Product / Available</label><select name="product_id[]" class="form-control distribution-product"><option value="">Select product</option></select></div><div class="form-group col-md-6"><label>Quantity</label><div class="distribution-quantity-wrap"><input class="form-control" type="number" min="1" step="1" disabled></div></div></div></div><button class="btn btn-outline-success btn-sm" type="button" id="add-distribution-line"><i class="fas fa-plus mr-1"></i>Add more</button></div>
             <div class="form-group col-md-3"><label for="distribution-note">Note</label><input id="distribution-note" class="form-control" name="note" maxlength="500"></div>
         </div>
         <button class="btn btn-primary" type="submit"><i class="fas fa-truck-loading mr-1"></i> Transfer Stock</button>
@@ -204,7 +230,7 @@ require_once '../includes/sidebar.php';
 .distribution-history-table td:nth-child(1),.distribution-history-table td:nth-child(2),.distribution-history-table td:nth-child(7),.distribution-history-table td:nth-child(8){white-space:nowrap;overflow-wrap:normal}
 </style>
 <div class="table-responsive"><table class="table table-bordered table-striped distribution-history-table"><colgroup><col style="width:10%"><col style="width:8%"><col style="width:14%"><col style="width:6%"><col style="width:12%"><col style="width:12%"><col style="width:4%"><col style="width:8%"><col style="width:8%"><col style="width:6%"><col style="width:12%"></colgroup><thead><tr><th>Reference</th><th>Date</th><th>Product</th><th>Code</th><th>From Branch</th><th>To Branch</th><th>Qty</th><th>Cost</th><th>Status</th><th>Action</th><th>Note</th></tr></thead><tbody id="distribution-history-list">
-<?php while ($row = mysqli_fetch_assoc($history)) { $can_receive_at_warehouse = $central && $multi_branch && (int)$row['to_branch_id'] === $warehouse_id && ($row['status'] ?? '') === 'pending'; $can_print_distribution = (int)$row['from_branch_id'] === $stock_location_id; ?><tr><td><?= 'D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id']; ?></td><td><?= htmlspecialchars(app_date($row['created_at'])); ?></td><td><?= htmlspecialchars($row['product_name']); ?><?php if(!empty($row['variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['variant_summary']); ?></small><?php } ?></td><td><?= htmlspecialchars($row['sku'] ?? ''); ?></td><td><?= htmlspecialchars(($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']) . (!empty($row['from_branch_code']) ? ' [' . $row['from_branch_code'] . ']' : '')); ?></td><td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td><td><?= number_format($row['quantity'],0); ?></td><td><?= number_format($row['total_cost'],2); ?></td><td><span class="badge badge-<?= ($row['status'] ?? 'accepted') === 'accepted' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($row['status'] ?? 'accepted')); ?></span><?php if((float)($row['damaged_quantity'] ?? 0) > 0){ ?><small class="d-block text-danger mt-1">Damaged: <?= number_format((float)$row['damaged_quantity'],0); ?></small><?php } ?></td><td><?php if($can_print_distribution){ ?><a href="print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary mb-1"><i class="fas fa-print mr-1"></i>Print</a><?php } ?><?php if($can_receive_at_warehouse){ ?><form method="post"><input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>"><input type="hidden" name="action" value="receive_at_warehouse"><input type="hidden" name="distribution_ids" value="<?= htmlspecialchars($row['distribution_ids']); ?>"><button class="btn btn-sm btn-primary" onclick="return confirm('Receive this stock at Main Warehouse?')"><i class="fas fa-check mr-1"></i>Receive</button></form><?php } ?><?php if(!$can_print_distribution && !$can_receive_at_warehouse){ ?><span class="text-muted">-</span><?php } ?></td><td class="text-break"><?= htmlspecialchars($row['note']); ?></td></tr><?php } ?>
+<?php while ($row = mysqli_fetch_assoc($history)) { $can_receive_at_warehouse = $central && $multi_branch && (int)$row['to_branch_id'] === $warehouse_id && ($row['status'] ?? '') === 'pending'; $can_print_distribution = (int)$row['from_branch_id'] === $stock_location_id; ?><tr><td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td><td><?= htmlspecialchars(app_date($row['created_at'])); ?></td><td><?= distribution_product_blocks($row['product_summary']); ?></td><td><?= htmlspecialchars($row['sku_summary'] ?? ''); ?></td><td><?= htmlspecialchars(($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']) . (!empty($row['from_branch_code']) ? ' [' . $row['from_branch_code'] . ']' : '')); ?></td><td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td><td><?= number_format($row['quantity'],0); ?></td><td><?= number_format($row['total_cost'],2); ?></td><td><span class="badge badge-<?= ($row['status'] ?? 'accepted') === 'accepted' ? 'success' : 'warning'; ?>"><?= htmlspecialchars(ucfirst($row['status'] ?? 'accepted')); ?></span><?php if((float)($row['damaged_quantity'] ?? 0) > 0){ ?><small class="d-block text-danger mt-1">Damaged: <?= number_format((float)$row['damaged_quantity'],0); ?></small><?php } ?></td><td><?php if($can_print_distribution){ ?><a href="print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary mb-1"><i class="fas fa-print mr-1"></i>Print</a><?php } ?><?php if($can_receive_at_warehouse){ ?><form method="post"><input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>"><input type="hidden" name="action" value="receive_at_warehouse"><input type="hidden" name="distribution_ids" value="<?= htmlspecialchars($row['distribution_ids']); ?>"><button class="btn btn-sm btn-primary" onclick="return confirm('Receive this stock at Main Warehouse?')"><i class="fas fa-check mr-1"></i>Receive</button></form><?php } ?><?php if(!$can_print_distribution && !$can_receive_at_warehouse){ ?><span class="text-muted">-</span><?php } ?></td><td class="text-break"><?= htmlspecialchars($row['note']); ?></td></tr><?php } ?>
 </tbody></table></div><div class="d-flex justify-content-between align-items-center"><small class="text-muted" id="distribution-history-info" role="status"></small><div><button type="button" id="distribution-history-prev" class="btn btn-sm btn-outline-secondary">Previous</button> <button type="button" id="distribution-history-next" class="btn btn-sm btn-outline-secondary">Next</button></div></div></div></div>
 <style>.warehouse-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}.warehouse-photo-preview img{transition:transform .15s ease}.warehouse-photo-preview:hover img{transform:scale(1.08)}</style>
 <div class="modal fade" id="warehouse-photo-preview-modal" tabindex="-1" role="dialog" aria-labelledby="warehouse-photo-preview-title" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg" role="document"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="warehouse-photo-preview-title">Product Photo</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div><div class="modal-body text-center p-3"><img id="warehouse-photo-preview-image" src="" alt="" style="max-width:100%;max-height:70vh;object-fit:contain"></div></div></div></div>
@@ -287,27 +313,18 @@ productSetupForm?.addEventListener('submit', async event => {
 
 const fromLocation = document.getElementById('distribution-from');
 const toLocation = document.getElementById('distribution-branch');
-const productSelect = document.getElementById('distribution-product');
+const distributionLines = document.getElementById('distribution-lines');
+const distributionLineTemplate = distributionLines?.querySelector('.distribution-line').cloneNode(true);
 function initializeDistributionSelects() {
-    if (!window.jQuery || !window.jQuery.fn.select2) return;
+    if (!distributionLines || !window.jQuery || !window.jQuery.fn.select2) return;
     const $from = window.jQuery(fromLocation);
-    const $product = window.jQuery(productSelect);
     if (!$from.hasClass('select2-hidden-accessible')) {
         $from.select2({ theme: 'bootstrap4', width: '100%' });
     }
     // Select2 emits jQuery change events, which native listeners do not receive.
     fromLocation.removeEventListener('change', handleDistributionSourceChange);
     $from.off('change.distributionSource').on('change.distributionSource', handleDistributionSourceChange);
-    if (!$product.hasClass('select2-hidden-accessible')) {
-        $product.select2({
-            theme: 'bootstrap4',
-            width: '100%',
-            placeholder: 'Select product',
-            allowClear: true
-        });
-    }
-    $product.off('.distributionVariants')
-        .on('select2:select.distributionVariants select2:clear.distributionVariants', renderDistributionQuantityInputs);
+    distributionLines.querySelectorAll('.distribution-product').forEach(initializeDistributionProductSelect);
     const $to = window.jQuery(toLocation);
     if (!$to.hasClass('select2-hidden-accessible')) {
         $to.select2({
@@ -318,8 +335,17 @@ function initializeDistributionSelects() {
         });
     }
 }
+function initializeDistributionProductSelect(select) {
+    if(window.jQuery && window.jQuery.fn.select2){
+        const $select=window.jQuery(select);
+        if(!$select.hasClass('select2-hidden-accessible')) $select.select2({theme:'bootstrap4',width:'100%',placeholder:'Select product',allowClear:true});
+        $select.off('.distributionVariants').on('select2:select.distributionVariants select2:clear.distributionVariants',()=>renderDistributionQuantityInputs(select));
+    }
+    if(!select.dataset.bound){select.addEventListener('change',()=>renderDistributionQuantityInputs(select));select.dataset.bound='1';}
+}
 
 function syncDestination() {
+    if (!fromLocation || !toLocation) return;
     [...toLocation.options].forEach(option => {
         option.hidden = option.value !== '' && option.value === fromLocation.value;
         option.disabled = option.hidden;
@@ -330,39 +356,36 @@ function syncDestination() {
 
 let sourceProductsRequestController = null;
 function loadSourceProducts() {
+    if (!distributionLines || !fromLocation) return;
+    const addButton = document.getElementById('add-distribution-line');
+    addButton.disabled = true;
     if (sourceProductsRequestController) sourceProductsRequestController.abort();
     sourceProductsRequestController = new AbortController();
     const requestedSourceId = fromLocation.value;
-    productSelect.innerHTML = '<option value="">Select product</option>';
-    productSelect.disabled = true;
-    if (window.jQuery && window.jQuery.fn.select2) window.jQuery(productSelect).trigger('change.select2');
-    document.getElementById('distribution-quantity-wrap').innerHTML = '<input id="distribution-quantity" class="form-control" type="number" name="quantity" min="1" step="1" required>';
+    const productSelects=[...distributionLines.querySelectorAll('.distribution-product')];
+    productSelects.forEach((select,index)=>{select.innerHTML='<option value="">Select product</option>';select.disabled=true;select.closest('.distribution-line').querySelector('.distribution-quantity-wrap').innerHTML='<input class="form-control" type="number" name="quantity['+index+']" disabled>';if(window.jQuery&&window.jQuery.fn.select2)window.jQuery(select).trigger('change.select2');});
     if (!requestedSourceId) {
-        productSelect.disabled = false;
+        productSelects.forEach(select=>select.disabled=false);
         return;
     }
     fetch('get_branch_products.php?branch_id=' + encodeURIComponent(requestedSourceId), {signal: sourceProductsRequestController.signal, cache: 'no-store'})
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Products could not be loaded.')))
         .then(products => {
             if (fromLocation.value !== requestedSourceId) return;
-            products.forEach(product => {
-                const label = product.name + ' — Available: ' + Number(product.available).toLocaleString();
-                const option = new Option(label, product.id);
-                option.dataset.available = product.available;
-                option.dataset.sourceBranch = requestedSourceId;
-                option.dataset.variants = JSON.stringify(product.variants || []);
-                productSelect.add(option);
+            productSelects.forEach((select,index) => {
+                products.forEach(product => {
+                    const option = new Option(product.name + ' — Available: ' + Number(product.available).toLocaleString(), product.id);
+                    option.dataset.available=product.available;option.dataset.sourceBranch=requestedSourceId;option.dataset.variants=JSON.stringify(product.variants||[]);select.add(option);
+                });
+                if(!products.length) select.add(new Option('No stock available in this location',''));
+                select.disabled=false;
+                if(window.jQuery&&window.jQuery.fn.select2)window.jQuery(select).trigger('change.select2');
             });
-            if (!products.length) productSelect.add(new Option('No stock available in this location', '', true, false));
-            productSelect.disabled = false;
-            if (window.jQuery && window.jQuery.fn.select2) window.jQuery(productSelect).trigger('change.select2');
-            renderDistributionQuantityInputs();
+            addButton.disabled = !products.length;
         })
         .catch(error => {
             if (error.name === 'AbortError') return;
-            productSelect.innerHTML = '<option value="">Products could not be loaded</option>';
-            productSelect.disabled = false;
-            if (window.jQuery && window.jQuery.fn.select2) window.jQuery(productSelect).trigger('change.select2');
+            productSelects.forEach(select=>{select.innerHTML='<option value="">Products could not be loaded</option>';select.disabled=false;if(window.jQuery&&window.jQuery.fn.select2)window.jQuery(select).trigger('change.select2');});
         });
 }
 
@@ -371,29 +394,43 @@ function handleDistributionSourceChange() {
     loadSourceProducts();
 }
 fromLocation?.addEventListener('change', handleDistributionSourceChange);
-function renderDistributionQuantityInputs() {
-    const wrap=document.getElementById('distribution-quantity-wrap');
+function renderDistributionQuantityInputs(productSelect) {
+    const row=productSelect.closest('.distribution-line');
+    const wrap=row.querySelector('.distribution-quantity-wrap');
+    const lineIndex=[...distributionLines.querySelectorAll('.distribution-line')].indexOf(row);
     const selectedOption = productSelect.selectedOptions[0];
     if (!selectedOption?.value || selectedOption.dataset.sourceBranch !== fromLocation.value) {
-        wrap.innerHTML = '<input class="form-control" type="number" disabled aria-label="Select a source product first">';
+        wrap.innerHTML = '<input class="form-control" type="number" name="quantity['+lineIndex+']" disabled aria-label="Select a source product first">';
         return;
     }
     let variants=[]; try{ variants=JSON.parse(selectedOption?.dataset.variants||'[]'); }catch(error){}
     if(!variants.length){
         const available = Number(selectedOption?.dataset.available || 0);
-        wrap.innerHTML='<div class="input-group"><div class="input-group-prepend"><span class="input-group-text">Available: '+available+'</span></div><input id="distribution-quantity" class="form-control" type="number" name="quantity" min="1" max="'+available+'" value="" step="1" required></div>';
+        wrap.innerHTML='<div class="input-group"><div class="input-group-prepend"><span class="input-group-text">Available: '+available+'</span></div><input class="form-control" type="number" name="quantity['+lineIndex+']" min="1" max="'+available+'" value="" step="1" required></div>';
         return;
     }
     wrap.innerHTML='';
-    variants.forEach(variant=>{
+    variants.forEach((variant,variantIndex)=>{
         const group=document.createElement('div'); group.className='input-group mb-1';
         const label=document.createElement('div'); label.className='input-group-prepend'; label.innerHTML='<span class="input-group-text">'+escapeSetupHtml(variant.name)+' (Available: '+Number(variant.available)+')</span>';
-        const variantName=document.createElement('input'); variantName.type='hidden'; variantName.name='variant_name[]'; variantName.value=variant.name;
-        const input=document.createElement('input'); input.type='number'; input.className='form-control'; input.name='variant_quantity[]'; input.min='0'; input.max=variant.available; input.step='1'; input.value='';
+        const variantName=document.createElement('input'); variantName.type='hidden'; variantName.name='variant_name['+lineIndex+']['+variantIndex+']'; variantName.value=variant.name;
+        const input=document.createElement('input'); input.type='number'; input.className='form-control'; input.name='variant_quantity['+lineIndex+']['+variantIndex+']'; input.min='0'; input.max=variant.available; input.step='1'; input.value='';
         group.append(label,variantName,input); wrap.append(group);
     });
 }
-productSelect?.addEventListener('change', renderDistributionQuantityInputs);
+function addDistributionLine(){
+    const row=distributionLineTemplate.cloneNode(true);
+    const select=row.querySelector('.distribution-product');
+    select.replaceChildren(...Array.from(distributionLines.querySelector('.distribution-product').options, option => {
+        const copy = new Option(option.text, option.value);
+        Object.entries(option.dataset).forEach(([key,value])=>{ if(key !== 'select2Id') copy.dataset[key]=value; });
+        return copy;
+    }));
+    select.selectedIndex=0;
+    row.querySelector('.distribution-quantity-wrap').innerHTML='<input class="form-control" type="number" disabled aria-label="Select a source product first">';
+    distributionLines.appendChild(row);initializeDistributionProductSelect(select);
+}
+document.getElementById('add-distribution-line')?.addEventListener('click',addDistributionLine);
 const stockDistributionForm = document.getElementById('stock-distribution-form');
 async function refreshDistributionHistory(responseHtml) {
     let html = responseHtml || '';
@@ -421,9 +458,11 @@ stockDistributionForm?.addEventListener('ajax-action-success', async function (e
     }
     if (window.jQuery && window.jQuery.fn.select2) {
         window.jQuery(fromLocation).trigger('change.select2');
-        window.jQuery(productSelect).val('').trigger('change.select2');
         window.jQuery(document.getElementById('distribution-branch')).val('').trigger('change.select2');
     }
+    const firstLine=distributionLines.querySelector('.distribution-line');
+    distributionLines.querySelectorAll('.distribution-line').forEach((line,index)=>{if(index>0)line.remove();});
+    firstLine.querySelector('.distribution-product').value='';
     syncDestination();
     loadSourceProducts();
     try {
@@ -433,6 +472,7 @@ stockDistributionForm?.addEventListener('ajax-action-success', async function (e
     }
 });
 syncDestination();
+initializeDistributionSelects();
 loadSourceProducts();
 </script>
 <?php

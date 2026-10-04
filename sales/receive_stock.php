@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_image_helper.php';
+require_once '../includes/distribution_display_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $warehouse_receipt_mode = !empty($warehouse_receipt_mode) && stock_can_manage_warehouse($conn);
@@ -63,7 +64,7 @@ $pending_groups = [];
 $selected_distribution_id = max(0, (int)($_GET['distribution_id'] ?? 0));
 $selected_group_key = '';
 while($pending && ($row = mysqli_fetch_assoc($pending))){
-    $group_key = implode('|', [(int)$row['product_id'], (int)$row['from_branch_id'], (int)$row['to_branch_id'], $row['note'], date('Y-m-d', strtotime($row['created_at']))]);
+    $group_key = implode('|', [$row['transfer_group'] ?: ('legacy-' . $row['created_at']), (int)$row['from_branch_id'], (int)$row['to_branch_id'], $row['note']]);
     if(!isset($pending_groups[$group_key])){
         $pending_groups[$group_key] = ['row' => $row, 'items' => [], 'quantity' => 0];
     }
@@ -74,10 +75,17 @@ while($pending && ($row = mysqli_fetch_assoc($pending))){
     }
 }
 foreach ($pending_groups as &$group) {
-    $variant_order = array_flip(product_variant_names($conn, (int)$group['row']['product_id'], $user_id));
-    usort($group['items'], static function ($left, $right) use ($variant_order) {
-        return ($variant_order[$left['variant_name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['variant_name']] ?? PHP_INT_MAX);
-    });
+    $product_lines = [];
+    $codes = [];
+    $group['receipt_products'] = [];
+    foreach($group['items'] as $item){
+        $group['receipt_products'][(int)$item['product_id']][] = $item;
+        $product_lines[$item['product_id']]['name'] = $item['product_name'];
+        $product_lines[$item['product_id']]['parts'][] = ($item['variant_name'] !== '' ? $item['variant_name'] . ': ' : '') . number_format((float)$item['quantity'], 0);
+        if(trim((string)$item['sku']) !== '') $codes[$item['sku']] = true;
+    }
+    $group['product_summary'] = array_map(static fn($product) => [$product['name'], implode(' || ', $product['parts'])], $product_lines);
+    $group['code_summary'] = implode(', ', array_keys($codes));
     $group['row'] = $group['items'][0];
 }
 unset($group);
@@ -91,8 +99,8 @@ $sent_pending = mysqli_query($conn, "SELECT d.*,p.product_name,p.sku,p.photo_pat
 $sent_groups = [];
 while ($sent_pending && ($row = mysqli_fetch_assoc($sent_pending))) {
     $group_key = json_encode([
-        $row['transfer_group'] ?? ('legacy-' . $row['created_at']),
-        (int)$row['product_id'], (int)$row['to_branch_id'], $row['note']
+        $row['transfer_group'] ?: ('legacy-' . $row['created_at']),
+        (int)$row['to_branch_id'], $row['note']
     ]);
     if (!isset($sent_groups[$group_key])) {
         $sent_groups[$group_key] = ['row' => $row, 'items' => [], 'quantity' => 0];
@@ -101,25 +109,42 @@ while ($sent_pending && ($row = mysqli_fetch_assoc($sent_pending))) {
     $sent_groups[$group_key]['quantity'] += (float)$row['quantity'];
 }
 foreach ($sent_groups as &$group) {
-    $variant_order = array_flip(product_variant_names($conn, (int)$group['row']['product_id'], $user_id));
-    usort($group['items'], static function ($left, $right) use ($variant_order) {
-        return ($variant_order[$left['variant_name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['variant_name']] ?? PHP_INT_MAX);
-    });
+    $product_lines = [];
+    $codes = [];
+    foreach ($group['items'] as $item) {
+        $product_lines[$item['product_id']]['name'] = $item['product_name'];
+        $product_lines[$item['product_id']]['parts'][] = ($item['variant_name'] !== '' ? $item['variant_name'] . ': ' : '') . number_format((float)$item['quantity'], 0);
+        if (trim((string)$item['sku']) !== '') $codes[$item['sku']] = true;
+    }
+    $group['product_summary'] = array_map(static fn($product) => [$product['name'], implode(' || ', $product['parts'])], $product_lines);
+    $group['code_summary'] = implode(', ', array_keys($codes));
+    $group['row'] = $group['items'][0];
 }
 unset($group);
 
-$received_history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.created_at) AS created_at,MIN(d.reference_no) AS reference_no,MAX(d.received_at) AS received_at,SUM(d.total_cost) AS total_cost,d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,
+$received_history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.created_at) AS created_at,MIN(d.reference_no) AS reference_no,MAX(d.received_at) AS received_at,SUM(d.total_cost) AS total_cost,d.user_id,d.from_branch_id,d.to_branch_id,d.note,
     SUM(d.quantity) AS sent_quantity,SUM(d.quantity-d.damaged_quantity) AS received_quantity,SUM(d.damaged_quantity) AS damaged_quantity,
-    GROUP_CONCAT(CASE WHEN d.variant_name<>'' THEN CONCAT(d.variant_name, ': ', FORMAT(d.quantity-d.damaged_quantity,0)) ELSE NULL END ORDER BY d.id SEPARATOR ' || ') AS variant_summary,
-    GROUP_CONCAT(CASE WHEN d.variant_name<>'' AND d.damaged_quantity>0 THEN CONCAT(d.variant_name, ': ', FORMAT(d.damaged_quantity,0)) ELSE NULL END ORDER BY d.id SEPARATOR ' || ') AS damaged_variant_summary,
-    p.product_name,p.sku,fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office,fb.branch_code AS from_branch_code,tb.branch_name AS to_branch_name,tb.is_head_office AS to_head_office,tb.branch_code AS to_branch_code
-    FROM stock_distributions d
+    GROUP_CONCAT(JSON_ARRAY(p.product_name,d.variant_summary) ORDER BY d.id SEPARATOR ',') AS product_summary,
+    GROUP_CONCAT(DISTINCT p.sku ORDER BY p.sku SEPARATOR ', ') AS sku_summary,
+    GROUP_CONCAT(CASE WHEN d.damaged_quantity>0 THEN CONCAT(p.product_name,' · ',d.damaged_variant_summary) ELSE NULL END ORDER BY d.id SEPARATOR ' || ') AS damaged_variant_summary,
+    fb.branch_name AS from_branch_name,fb.is_head_office AS from_head_office,fb.branch_code AS from_branch_code,tb.branch_name AS to_branch_name,tb.is_head_office AS to_head_office,tb.branch_code AS to_branch_code
+    FROM (
+        SELECT MIN(id) AS id,MAX(id) AS last_id,MIN(created_at) AS created_at,MIN(reference_no) AS reference_no,MAX(received_at) AS received_at,
+            user_id,from_branch_id,to_branch_id,product_id,status,note,
+            COALESCE(NULLIF(transfer_group,''),CONCAT('legacy-',created_at)) AS voucher_key,
+            SUM(total_cost) AS total_cost,SUM(quantity) AS quantity,SUM(damaged_quantity) AS damaged_quantity,
+            GROUP_CONCAT(CONCAT(CASE WHEN COALESCE(variant_name,'')<>'' THEN CONCAT(variant_name,': ') ELSE '' END,FORMAT(quantity-damaged_quantity,0)) ORDER BY id SEPARATOR ' || ') AS variant_summary,
+            GROUP_CONCAT(CASE WHEN damaged_quantity>0 THEN CONCAT(CASE WHEN COALESCE(variant_name,'')<>'' THEN CONCAT(variant_name,': ') ELSE '' END,FORMAT(damaged_quantity,0)) ELSE NULL END ORDER BY id SEPARATOR ' || ') AS damaged_variant_summary
+        FROM stock_distributions
+        WHERE user_id={$user_id} AND to_branch_id={$branch_id} AND status='accepted'
+        GROUP BY user_id,from_branch_id,to_branch_id,product_id,status,note,COALESCE(NULLIF(transfer_group,''),CONCAT('legacy-',created_at))
+    ) d
     INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
     INNER JOIN branches fb ON fb.id=d.from_branch_id AND fb.user_id=d.user_id
     INNER JOIN branches tb ON tb.id=d.to_branch_id AND tb.user_id=d.user_id
     WHERE d.user_id={$user_id} AND d.to_branch_id={$branch_id} AND d.status='accepted'
-    GROUP BY COALESCE(NULLIF(d.transfer_group,''), CONCAT('legacy-',d.created_at)),d.user_id,d.from_branch_id,d.to_branch_id,d.product_id,d.note,p.product_name,p.sku,fb.branch_name,fb.is_head_office,fb.branch_code,tb.branch_name,tb.is_head_office,tb.branch_code
-    ORDER BY MAX(d.received_at) DESC,MAX(d.id) DESC LIMIT 500");
+    GROUP BY d.voucher_key,d.user_id,d.from_branch_id,d.to_branch_id,d.note,fb.branch_name,fb.is_head_office,fb.branch_code,tb.branch_name,tb.is_head_office,tb.branch_code
+    ORDER BY MAX(d.received_at) DESC,MAX(d.last_id) DESC LIMIT 500");
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -136,9 +161,28 @@ require_once '../includes/sidebar.php';
             <tbody>
             <?php if (!empty($pending_groups)) { foreach ($pending_groups as $group_key => $group) { $row = $group['row']; $is_selected_request = $group_key === $selected_group_key; ?>
                 <tr id="receive-request-<?= (int)$row['id']; ?>" class="<?= $is_selected_request ? 'table-primary' : ''; ?>"><td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
-                    <td><?= htmlspecialchars($row['reference_no']); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?></td>
-                    <td><?= htmlspecialchars($row['product_name']); ?><?php $variant_parts=[]; foreach($group['items'] as $item){ if($item['variant_name'] !== ''){ $variant_parts[] = htmlspecialchars($item['variant_name']) . ': ' . number_format((float)$item['quantity'],0); } } ?><?php if($variant_parts){ ?><small class="d-block text-muted"><?= implode(' || ', $variant_parts); ?></small><?php } ?></td><td><?= htmlspecialchars($row['sku'] ?? ''); ?></td><td><?= number_format($group['quantity'], 0); ?></td>
-                    <td><?php $form_id = 'receipt-' . (int)$row['id']; ?><form id="<?= $form_id; ?>" method="post"><input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>"><?php foreach($group['items'] as $item){ ?><div class="input-group input-group-sm mb-1" style="min-width:200px"><div class="input-group-prepend"><span class="input-group-text"><?= htmlspecialchars($item['variant_name'] ?: 'Qty'); ?></span></div><input type="number" class="form-control receipt-quantity" name="distribution_received[<?= (int)$item['id']; ?>]" min="0" max="<?= (int)$item['quantity']; ?>" step="1" value="<?= (int)$item['quantity']; ?>" required><small class="w-100 text-muted receipt-damage">Damaged: 0</small></div><?php } ?></form></td>
+                    <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?></td>
+                    <td><?= distribution_product_blocks($group['product_summary']); ?></td><td><?= htmlspecialchars($group['code_summary']); ?></td><td><?= number_format($group['quantity'], 0); ?></td>
+                    <td>
+                        <?php $form_id = 'receipt-' . (int)$row['id']; ?>
+                        <form id="<?= $form_id; ?>" method="post">
+                            <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>">
+                            <?php foreach ($group['receipt_products'] as $product_items) { $product = $product_items[0]; ?>
+                                <fieldset class="border rounded p-2 mb-2 bg-white" style="min-width:220px">
+                                    <legend class="w-auto px-1 mb-2 h6 font-weight-bold">
+                                        <?= htmlspecialchars($product['product_name']); ?><?php if(trim((string)$product['sku']) !== ''){ ?> [<?= htmlspecialchars($product['sku']); ?>]<?php } ?>
+                                    </legend>
+                                    <?php foreach ($product_items as $item) { $input_id = 'received-qty-' . (int)$item['id']; ?>
+                                        <div class="input-group input-group-sm mb-1">
+                                            <div class="input-group-prepend"><label for="<?= $input_id; ?>" class="input-group-text mb-0"><?= htmlspecialchars($item['variant_name'] ?: 'Qty'); ?></label></div>
+                                            <input id="<?= $input_id; ?>" type="number" class="form-control receipt-quantity" name="distribution_received[<?= (int)$item['id']; ?>]" min="0" max="<?= (int)$item['quantity']; ?>" step="1" value="<?= (int)$item['quantity']; ?>" required>
+                                            <small class="w-100 text-muted receipt-damage">Damaged: 0</small>
+                                        </div>
+                                    <?php } ?>
+                                </fieldset>
+                            <?php } ?>
+                        </form>
+                    </td>
                     <td><button form="<?= $form_id; ?>" class="btn btn-success btn-sm" type="submit"<?= $is_selected_request ? ' autofocus' : ''; ?>><i class="fas fa-check mr-1"></i>Receive</button></td></tr>
             <?php } } else { ?><tr><td colspan="8" class="text-center text-muted py-4">No product receive request is pending for this branch.</td></tr><?php } ?>
             </tbody>
@@ -154,16 +198,11 @@ require_once '../includes/sidebar.php';
         <?php foreach ($sent_groups as $group) { $row = $group['row']; ?>
             <tr>
                 <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
-                <td><?= 'D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id']; ?></td>
+                <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td>
                 <td><?= htmlspecialchars(app_date($row['created_at'])); ?></td>
                 <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td>
-                <td><?= htmlspecialchars($row['product_name']); ?><?php
-                    $variant_parts = [];
-                    foreach ($group['items'] as $item) {
-                        if ($item['variant_name'] !== '') $variant_parts[] = htmlspecialchars($item['variant_name']) . ': ' . number_format((float)$item['quantity'], 0);
-                    }
-                    if ($variant_parts) { ?><small class="d-block text-muted"><?= implode(' || ', $variant_parts); ?></small><?php } ?></td>
-                <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
+                <td><?= distribution_product_blocks($group['product_summary']); ?></td>
+                <td><?= htmlspecialchars($group['code_summary']); ?></td>
                 <td><?= number_format($group['quantity'], 0); ?></td>
                 <td><span class="badge badge-warning">Pending</span><small class="d-block text-muted">Awaiting receipt</small></td>
                 <td><a href="../warehouse/print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print mr-1"></i>Print</a></td>
@@ -189,10 +228,10 @@ require_once '../includes/sidebar.php';
         <thead><tr><th>Reference</th><th>Received</th><th>Product</th><th>Code</th><th>From Branch</th><th>To Branch</th><th>Qty</th><th>Received Qty</th><th>Cost</th><th>Status</th><th>Note</th></tr></thead>
         <tbody id="receive-history-list"><?php if($received_history){ while($row = mysqli_fetch_assoc($received_history)){ ?>
             <tr data-receive-history-row>
-                <td><?= 'D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id']; ?></td>
+                <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td>
                 <td><?= htmlspecialchars(app_date($row['received_at'])); ?></td>
-                <td><?= htmlspecialchars($row['product_name']); ?><?php if(!empty($row['variant_summary'])){ ?><small class="d-block text-muted"><?= htmlspecialchars($row['variant_summary']); ?></small><?php } ?></td>
-                <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
+                <td><?= distribution_product_blocks($row['product_summary']); ?></td>
+                <td><?= htmlspecialchars($row['sku_summary'] ?? ''); ?></td>
                 <td><?= htmlspecialchars(($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']) . (!empty($row['from_branch_code']) ? ' [' . $row['from_branch_code'] . ']' : '')); ?></td>
                 <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td>
                 <td><?= number_format((float)$row['sent_quantity'],0); ?></td>

@@ -60,6 +60,33 @@ mysqli_stmt_execute($stmt);
 
 $result = mysqli_stmt_get_result($stmt);
 
+// Keep each variant breakdown with its own product in a multi-product purchase.
+$product_stmt = mysqli_prepare($conn, "SELECT pi.purchase_id,pi.product_id,pr.product_name,pr.sku,
+        COALESCE(pi.variant_name,'') AS variant_name,SUM(pi.quantity) AS quantity
+    FROM purchase_items pi
+    INNER JOIN purchases p ON p.id=pi.purchase_id AND p.user_id=?
+    LEFT JOIN products pr ON pr.id=pi.product_id AND pr.user_id=p.user_id
+    GROUP BY pi.purchase_id,pi.product_id,pr.product_name,pr.sku,COALESCE(pi.variant_name,'')
+    ORDER BY pi.purchase_id,MIN(pi.id)");
+mysqli_stmt_bind_param($product_stmt, 'i', $user_id);
+mysqli_stmt_execute($product_stmt);
+$product_result = mysqli_stmt_get_result($product_stmt);
+$purchase_products = [];
+while ($product = mysqli_fetch_assoc($product_result)) {
+    $purchase_key = (int)$product['purchase_id'];
+    $product_key = (int)$product['product_id'];
+    if (!isset($purchase_products[$purchase_key][$product_key])) {
+        $purchase_products[$purchase_key][$product_key] = [
+            'name' => $product['product_name'] ?: 'Missing Product Link',
+            'code' => trim((string)$product['sku']) ?: '—',
+            'variants' => []
+        ];
+    }
+    if ($product['variant_name'] !== '') {
+        $purchase_products[$purchase_key][$product_key]['variants'][] = $product['variant_name'] . ': ' . number_format((float)$product['quantity'], 0);
+    }
+}
+
 ?>
 
 <?php if(isset($_SESSION['success'])){ ?>
@@ -111,24 +138,37 @@ Create Purchase
 
 <div class="card-body">
 
+<style>
+#example1{width:100%;table-layout:auto}
+#example1 th,#example1 td{vertical-align:middle}
+#example1 th{white-space:nowrap}
+#example1 th:nth-child(1),#example1 td:nth-child(1),
+#example1 th:nth-child(2),#example1 td:nth-child(2),
+#example1 th:nth-child(n+6),#example1 td:nth-child(n+6){width:1%;white-space:nowrap}
+#example1 td:nth-child(4){min-width:230px}
+#example1 td:nth-child(3),#example1 td:nth-child(4),#example1 td:nth-child(5){overflow-wrap:anywhere}
+#example1 td:last-child .btn{margin-bottom:2px}
+</style>
+<div class="table-responsive">
 <table
 id="example1"
+data-desktop-table
 class="table table-bordered table-striped">
 
 <thead>
 
 <tr>
 
-<th width="16%">Purchase No</th>
-<th width="10%">Date</th>
-<th width="10%"><?= supplier_display_text('Supplier'); ?></th>
-<th width="17%">Product</th>
-<th width="12%">Category</th>
-<th width="16%">Qty</th>
-<th width="12%">Total</th>
-<th width="12%">Paid</th>
+<th>Purchase No</th>
+<th>Date</th>
+<th><?= supplier_display_text('Supplier'); ?></th>
+<th>Product</th>
+<th>Category</th>
+<th>Qty</th>
+<th>Total</th>
+<th>Paid</th>
 <th>Status</th>
-<th width="130">Action</th>
+<th>Action</th>
 
 </tr>
 
@@ -160,7 +200,13 @@ $row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$ro
 </td>
 
 <td>
-<?= htmlspecialchars($row['product_names'] ?: 'Missing Product Link'); ?>
+<?php foreach ($purchase_products[(int)$row['id']] ?? [] as $product) { ?>
+    <div class="mb-2">
+        <div><?= htmlspecialchars($product['name'] . ' [' . $product['code'] . ']'); ?></div>
+        <?php if ($product['variants']) { ?><small class="d-block text-muted mt-1"><?= htmlspecialchars(implode(' || ', $product['variants'])); ?></small><?php } ?>
+    </div>
+<?php } ?>
+<?php if (empty($purchase_products[(int)$row['id']])) { ?>Missing Product Link<?php } ?>
 </td>
 
 <td><?= htmlspecialchars($row['category_names'] ?: '—'); ?><?php if(!empty($row['sub_category_names'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category_names']); ?></div><?php } ?></td>
@@ -170,9 +216,6 @@ $row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$ro
 $row['total_quantity'],
 0
 ); ?>
-<?php if(!empty($row['variant_details'])){ ?>
-    <div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_details']); ?></div>
-<?php } ?>
 </td>
 
 <td>
@@ -263,6 +306,7 @@ Due
 </tbody>
 
 </table>
+</div>
 
 </div>
 

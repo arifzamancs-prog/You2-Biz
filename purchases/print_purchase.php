@@ -267,6 +267,13 @@ th{
     padding:2px 0;
 }
 
+.purchase-items{table-layout:fixed}
+.purchase-items td{overflow-wrap:anywhere}
+.product-variants{display:block;margin-top:4px;font-size:85%;line-height:1.5}
+<?php if(!$pos_printing){ ?>
+.purchase-items .text-right{white-space:nowrap;overflow-wrap:normal}
+<?php } ?>
+
 .grand td{
     border-top:1px dashed #111;
     font-size:<?= $pos_printing ? '13px' : '15px'; ?>;
@@ -356,12 +363,13 @@ th{
         </div>
     <?php } ?>
 
-    <table>
+    <table class="purchase-items">
+        <colgroup><col style="width:40%"><col style="width:18%"><col style="width:8%"><col style="width:16%"><col style="width:18%"></colgroup>
         <thead>
         <tr>
             <th>Product</th>
-            <th style="width:20%">Category</th>
-            <th class="text-right" style="width:25%">Qty</th>
+            <th>Category</th>
+            <th class="text-right">Qty</th>
             <th class="text-right">Cost</th>
             <th class="text-right">Total</th>
         </tr>
@@ -369,9 +377,9 @@ th{
         <tbody>
         <?php foreach($items as $item){ ?>
             <tr>
-                <td><?= htmlspecialchars($item['product_name']); ?></td>
+                <td><?= htmlspecialchars($item['product_name']); ?><?php if(!empty($item['variant_summary'])){ ?><small class="muted product-variants"><?= htmlspecialchars($item['variant_summary']); ?></small><?php } ?></td>
                 <td><?= htmlspecialchars($item['category_name'] ?: '—'); ?><?php if(!empty($item['sub_category'])){ ?><small class="muted"><br><?= htmlspecialchars($item['sub_category']); ?></small><?php } ?></td>
-                <td class="text-right"><?= number_format($item['quantity'],0); ?><?php if(!empty($item['variant_summary'])){ ?><small class="muted"><br><?= htmlspecialchars($item['variant_summary']); ?></small><?php } ?></td>
+                <td class="text-right"><?= number_format($item['quantity'],0); ?></td>
                 <td class="text-right"><?= number_format($item['unit_cost'],2); ?></td>
                 <td class="text-right"><?= number_format($item['total_cost'],2); ?></td>
             </tr>

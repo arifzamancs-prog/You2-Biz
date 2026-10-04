@@ -137,7 +137,7 @@ $status_class = $payment_status === 'paid' ? 'success' : ($payment_status === 'p
     <div class="card-header bg-white border-bottom-0 py-3">
         <div class="d-flex align-items-center justify-content-between flex-wrap">
             <div>
-                <h3 class="card-title mb-1 font-weight-bold text-dark"><i class="fas fa-file-invoice mr-2 text-primary"></i>Purchase Details</h3>
+                <h3 class="card-title float-none mb-1 font-weight-bold text-dark"><i class="fas fa-file-invoice mr-2 text-primary"></i>Purchase Details</h3>
                 <div class="text-muted small">Purchase No. <?= htmlspecialchars($purchase['purchase_no']); ?></div>
             </div>
             <a href="print_purchase.php?id=<?= (int)$purchase_id; ?>" target="_blank" class="btn btn-primary btn-sm px-3"><i class="fas fa-print mr-1"></i> Print</a>
@@ -178,22 +178,30 @@ $status_class = $payment_status === 'paid' ? 'success' : ($payment_status === 'p
         </div>
 
         <div class="table-responsive border rounded">
-            <table class="table table-hover mb-0">
+            <style>
+                .purchase-detail-items{width:100%;table-layout:auto}
+                .purchase-detail-items th,.purchase-detail-items td{vertical-align:middle}
+                .purchase-detail-items th{white-space:nowrap}
+                .purchase-detail-items tbody td:first-child{min-width:260px;overflow-wrap:anywhere}
+                .purchase-detail-items th:nth-child(n+3),.purchase-detail-items tbody td:nth-child(n+3){width:1%;white-space:nowrap}
+                .purchase-detail-items tfoot td{white-space:nowrap}
+            </style>
+            <table class="table table-hover mb-0 purchase-detail-items">
                 <thead class="bg-dark">
                     <tr>
                         <th class="border-0">Product</th>
-                        <th class="border-0" width="140">Category</th>
-                        <th class="border-0 text-center" width="220">Quantity</th>
-                        <th class="border-0 text-right" width="180">Cost Price</th>
-                        <th class="border-0 text-right" width="190">Line Total</th>
+                        <th class="border-0">Category</th>
+                        <th class="border-0 text-center">Quantity</th>
+                        <th class="border-0 text-right">Cost Price</th>
+                        <th class="border-0 text-right">Line Total</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php foreach($items as $row){ ?>
                     <tr>
-                        <td class="font-weight-bold"><?= htmlspecialchars($row['product_name'] ?: 'Deleted Product'); ?></td>
+                        <td><div class="font-weight-bold"><?= htmlspecialchars($row['product_name'] ?: 'Deleted Product'); ?></div><?php if(!empty($row['variant_summary'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_summary']); ?></div><?php } ?></td>
                         <td><?= htmlspecialchars($row['category_name'] ?: '—'); ?><?php if(!empty($row['sub_category'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category']); ?></div><?php } ?></td>
-                        <td class="text-center"><div><?= number_format((float)$row['quantity'], 0); ?></div><?php if(!empty($row['variant_summary'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['variant_summary']); ?></div><?php } ?></td>
+                        <td class="text-center"><?= number_format((float)$row['quantity'], 0); ?></td>
                         <td class="text-right">BDT <?= number_format((float)$row['unit_cost'], 2); ?></td>
                         <td class="text-right font-weight-bold">BDT <?= number_format((float)$row['total_cost'], 2); ?></td>
                     </tr>

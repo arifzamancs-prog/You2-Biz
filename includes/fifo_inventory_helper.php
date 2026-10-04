@@ -65,7 +65,7 @@ function fifo_inventory_migrate_company($conn, $user_id)
     } catch (Throwable $e) { mysqli_rollback($conn); throw $e; }
 }
 
-function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $quantity, $request_key, $note = '', $from_branch = null, $variant_name = '', $transfer_group = null)
+function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $quantity, $request_key, $note = '', $from_branch = null, $variant_name = '', $transfer_group = null, $manage_transaction = true)
 {
     $user_id = (int)$user_id;
     $to_branch = (int)$to_branch;
@@ -84,7 +84,7 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
     $target = mysqli_fetch_assoc(mysqli_query($conn, "SELECT id FROM branches WHERE id={$to_branch} AND user_id={$user_id} AND status='active'"));
     if (!$target) throw new RuntimeException('Select an active destination location of this company.');
     if ($from_branch === $to_branch) throw new RuntimeException('Source and destination must be different.');
-    mysqli_begin_transaction($conn);
+    if ($manage_transaction) mysqli_begin_transaction($conn);
     try {
         $product = mysqli_fetch_assoc(mysqli_query($conn, "SELECT p.id FROM products p INNER JOIN product_categories c ON c.id=p.category_id WHERE p.id={$product_id} AND p.user_id={$user_id} AND p.status='active' AND c.category_type='stock_product' FOR UPDATE"));
         if (!$product) throw new RuntimeException('Stock product not found.');
@@ -93,24 +93,30 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
         mysqli_stmt_bind_param($stmt, 'is', $user_id, $request_key);
         mysqli_stmt_execute($stmt);
         $duplicate = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-        if ($duplicate) { mysqli_commit($conn); return (int)$duplicate['id']; }
+        if ($duplicate) { if ($manage_transaction) mysqli_commit($conn); return (int)$duplicate['id']; }
 
         $variant_sql = mysqli_real_escape_string($conn, $variant_name);
         $reserved = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COALESCE(SUM(ii.quantity),0) AS qty FROM invoice_items ii INNER JOIN invoices i ON i.id=ii.invoice_id WHERE i.user_id={$user_id} AND i.branch_id={$from_branch} AND i.accounting_status='pending' AND ii.product_id={$product_id} AND COALESCE(ii.variant_name,'')='{$variant_sql}' AND ii.quantity>0"));
         $available = fifo_inventory_get_available_stock($conn, $user_id, $product_id, $from_branch, $variant_name) - (float)$reserved['qty'];
         if ($quantity > $available + 0.0001) throw new RuntimeException('Insufficient unreserved stock in the selected source location.');
-        $reference_prefix = 'D-' . date('dmy');
-        $reference_number = 1;
-        $reference_result = mysqli_query($conn, "SELECT reference_no FROM stock_distributions WHERE user_id={$user_id} AND reference_no LIKE '" . mysqli_real_escape_string($conn, $reference_prefix) . "%'");
-        while ($existing_reference = mysqli_fetch_assoc($reference_result)) {
-            if (preg_match('/^' . preg_quote($reference_prefix, '/') . '(\d+)$/', (string)$existing_reference['reference_no'], $matches)) {
-                $reference_number = max($reference_number, (int)$matches[1] + 1);
+        $transfer_group = $transfer_group ?? $request_key;
+        $group_sql = mysqli_real_escape_string($conn, (string)$transfer_group);
+        $group_reference = mysqli_fetch_assoc(mysqli_query($conn, "SELECT reference_no FROM stock_distributions WHERE user_id={$user_id} AND transfer_group='{$group_sql}' ORDER BY id LIMIT 1"));
+        if($group_reference){
+            $reference = (string)$group_reference['reference_no'];
+        }else{
+            $reference_prefix = 'D-' . date('dmy');
+            $reference_number = 1;
+            $reference_result = mysqli_query($conn, "SELECT reference_no FROM stock_distributions WHERE user_id={$user_id} AND reference_no LIKE '" . mysqli_real_escape_string($conn, $reference_prefix) . "%'");
+            while ($existing_reference = mysqli_fetch_assoc($reference_result)) {
+                if (preg_match('/^' . preg_quote($reference_prefix, '/') . '(\d+)$/', (string)$existing_reference['reference_no'], $matches)) {
+                    $reference_number = max($reference_number, (int)$matches[1] + 1);
+                }
             }
+            $reference = $reference_prefix . $reference_number;
         }
-        $reference = $reference_prefix . $reference_number;
         $actor = (int)($_SESSION['login_user_id'] ?? $user_id);
         $note = mb_substr(trim($note), 0, 500);
-        $transfer_group = $transfer_group ?? $request_key;
         $stmt = mysqli_prepare($conn, "INSERT INTO stock_distributions(user_id,from_branch_id,to_branch_id,product_id,variant_name,quantity,reference_no,request_key,created_by,note,transfer_group,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')");
         mysqli_stmt_bind_param($stmt, 'iiiisdssiss', $user_id, $from_branch, $to_branch, $product_id, $variant_name, $quantity, $reference, $request_key, $actor, $note, $transfer_group);
         mysqli_stmt_execute($stmt);
@@ -141,9 +147,9 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
         mysqli_stmt_execute($stmt);
         // This is an internal stock movement: company stock and wallet balances
         // stay unchanged. Only a purchase/payment or sale moves wallet money.
-        mysqli_commit($conn);
+        if ($manage_transaction) mysqli_commit($conn);
         return $id;
-    } catch (Throwable $e) { mysqli_rollback($conn); throw $e; }
+    } catch (Throwable $e) { if ($manage_transaction) mysqli_rollback($conn); throw $e; }
 }
 
 function fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, $damaged_quantity = 0, $receiving_branch_id = null)

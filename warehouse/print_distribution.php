@@ -30,7 +30,7 @@ if (trim((string)$seed['transfer_group']) !== '') {
     $group_where = 'd.id=' . (int)$seed['id'];
 }
 
-$items = mysqli_query($conn, "SELECT d.id,d.reference_no,d.variant_name,d.quantity,d.damaged_quantity,d.created_at,d.note,d.status,p.product_name,p.sku,fb.branch_name AS from_branch_name,fb.branch_code AS from_branch_code,fb.is_head_office AS from_head_office,tb.branch_name AS to_branch_name,tb.branch_code AS to_branch_code,tb.is_head_office AS to_head_office
+$items = mysqli_query($conn, "SELECT d.id,d.product_id,d.reference_no,d.variant_name,d.quantity,d.damaged_quantity,d.created_at,d.note,d.status,p.product_name,p.sku,fb.branch_name AS from_branch_name,fb.branch_code AS from_branch_code,fb.is_head_office AS from_head_office,tb.branch_name AS to_branch_name,tb.branch_code AS to_branch_code,tb.is_head_office AS to_head_office
     FROM stock_distributions d
     INNER JOIN products p ON p.id=d.product_id AND p.user_id=d.user_id
     INNER JOIN branches fb ON fb.id=d.from_branch_id AND fb.user_id=d.user_id
@@ -41,16 +41,19 @@ $item_rows = [];
 while ($items && ($item = mysqli_fetch_assoc($items))) $item_rows[] = $item;
 if (!$item_rows) exit('Distribution items not found.');
 
-// Keep the transfer identity independent of the display order of its variants.
 $distribution = $item_rows[0];
-$variant_order = array_flip(product_variant_names($conn, (int)$seed['product_id'], $company_id));
-usort($item_rows, static function ($left, $right) use ($variant_order) {
-    return ($variant_order[$left['variant_name']] ?? PHP_INT_MAX) <=> ($variant_order[$right['variant_name']] ?? PHP_INT_MAX);
-});
+$product_groups = [];
+foreach ($item_rows as $item) {
+    $product_id = (int)$item['product_id'];
+    if (!isset($product_groups[$product_id])) {
+        $product_groups[$product_id] = ['product_name' => $item['product_name'], 'sku' => $item['sku'], 'items' => []];
+    }
+    $product_groups[$product_id]['items'][] = $item;
+}
 
 $company = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM users WHERE id={$company_id}")) ?: [];
 $company_name = trim((string)($company['company_name'] ?? $company['name'] ?? '')) ?: 'Company';
-$reference = 'D-' . date('dmy', strtotime($distribution['created_at'])) . (int)$distribution['id'];
+$reference = trim((string)($distribution['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($distribution['created_at'])) . (int)$distribution['id']);
 $from = ($distribution['from_head_office'] ? 'Head Office' : $distribution['from_branch_name']) . (!empty($distribution['from_branch_code']) ? ' [' . $distribution['from_branch_code'] . ']' : '');
 $to = ($distribution['to_head_office'] ? 'Head Office' : $distribution['to_branch_name']) . (!empty($distribution['to_branch_code']) ? ' [' . $distribution['to_branch_code'] . ']' : '');
 $total_quantity = array_sum(array_map(static fn($row) => (float)$row['quantity'], $item_rows));
@@ -64,7 +67,24 @@ $total_quantity = array_sum(array_map(static fn($row) => (float)$row['quantity']
 <main class="sheet"><div class="head"><div><h1><?= htmlspecialchars($company_name) ?></h1><p>Stock Transfer Delivery Invoice</p></div><div><strong>Reference: <?= htmlspecialchars($reference) ?></strong><p>Date: <?= htmlspecialchars(date('d-m-Y', strtotime($distribution['created_at']))) ?></p><p>Status: <?= htmlspecialchars(ucfirst($distribution['status'])) ?></p></div></div>
 <div class="title">PRODUCT TRANSFER INVOICE</div>
 <div class="meta"><div class="box"><strong>Sent From</strong><?= htmlspecialchars($from) ?></div><div class="box"><strong>Deliver To</strong><?= htmlspecialchars($to) ?></div></div>
-<table><thead><tr><th style="width:7%">SL</th><th>Product</th><th>Code</th><th>Variant</th><th style="width:12%">Sent Qty</th><th style="width:14%">Received Qty</th></tr></thead><tbody><tr><td>1</td><td><?= htmlspecialchars($distribution['product_name']) ?></td><td><?= htmlspecialchars($distribution['sku'] ?? '') ?></td><td><?php foreach ($item_rows as $item) { ?><div><?= htmlspecialchars($item['variant_name'] ?: '-') ?></div><?php } ?></td><td class="qty"><?php foreach ($item_rows as $item) { ?><div><?= number_format((float)$item['quantity'], 0) ?></div><?php } ?></td><td class="qty"><?php foreach ($item_rows as $item) { ?><div>________</div><?php } ?></td></tr></tbody></table>
+<table><thead><tr><th style="width:7%">SL</th><th>Product</th><th>Code</th><th>Variant</th><th style="width:12%">Sent Qty</th><th style="width:14%">Received Qty</th></tr></thead>
+<?php $serial = 0; foreach ($product_groups as $product) { $serial++; ?>
+<tbody class="product-group">
+<?php foreach ($product['items'] as $index => $item) { ?>
+<tr>
+<?php if ($index === 0) { ?>
+    <td rowspan="<?= count($product['items']) ?>"><?= $serial ?></td>
+    <td rowspan="<?= count($product['items']) ?>"><?= htmlspecialchars($product['product_name']) ?></td>
+    <td rowspan="<?= count($product['items']) ?>"><?= htmlspecialchars($product['sku'] ?? '') ?></td>
+<?php } ?>
+    <td><?= htmlspecialchars($item['variant_name'] ?: '-') ?></td>
+    <td class="qty"><?= number_format((float)$item['quantity'], 0) ?></td>
+    <td class="qty">________</td>
+</tr>
+<?php } ?>
+</tbody>
+<?php } ?></table>
+<style>.product-group{break-inside:avoid;page-break-inside:avoid}.product-group td[rowspan]{vertical-align:middle}</style>
 <div class="summary">Total Sent Quantity: <?= number_format($total_quantity, 0) ?></div>
 <div class="note"><strong>Note:</strong> <?= htmlspecialchars($distribution['note'] ?: '-') ?></div>
 <div class="signatures"><div class="signature">Prepared / Dispatched By</div><div class="signature">Delivered By</div><div class="signature">Receiver Signature &amp; Seal</div></div>
