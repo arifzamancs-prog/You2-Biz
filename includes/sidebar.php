@@ -129,6 +129,18 @@ $project_package_labels = !is_super_admin_user() && isset($conn) && $conn instan
     ];
 
 $sidebar_stock_receive_pending_count = 0;
+$sidebar_new_installations = 0;
+if (isset($conn) && $conn instanceof mysqli && is_super_admin_user()) {
+    require_once __DIR__ . '/installation_reporting_helper.php';
+    if (installation_reporting_config()['receiver_enabled']) {
+        try {
+            installation_reporting_tables($conn);
+            $sidebar_new_installations = (int)mysqli_fetch_assoc(mysqli_query($conn, 'SELECT COUNT(*) AS n FROM installation_checkins WHERE reviewed=0'))['n'];
+        } catch (Throwable $e) {
+            // A registry outage must not break navigation.
+        }
+    }
+}
 $sidebar_damage_return_available_count = 0;
 if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
     $sidebar_company_id = (int)($_SESSION['user_id'] ?? 0);
@@ -433,6 +445,11 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             [
                                 'href' => app_path('super_admin/index.php'),
                                 'label' => 'Subscription',
+                            ],
+                            [
+                                'href' => app_path('super_admin/installed_websites.php'),
+                                'label' => 'Installed Websites',
+                                'badge' => $sidebar_new_installations,
                             ],
                             [
                                 'href' => app_path('super_admin/signup_message.php'),

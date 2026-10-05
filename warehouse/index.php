@@ -125,7 +125,12 @@ $history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.reference_no) AS re
     GROUP BY d.voucher_key,d.user_id,d.from_branch_id,d.to_branch_id,d.status,d.note,fb.branch_code,tb.branch_code,fb.branch_name,fb.is_head_office,tb.branch_name,tb.is_head_office
     ORDER BY MAX(d.last_id) DESC LIMIT 500");
 $setup_categories = mysqli_query($conn, "SELECT id,category_name,status FROM product_categories WHERE user_id={$company_id} ORDER BY category_name ASC");
-$setup_products = mysqli_query($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,p.purchase_price,p.sale_price,p.status,c.category_name,
+$product_deep_search = trim((string)($_GET['product_deep_search'] ?? ''));
+$product_load_all = ($_GET['product_load'] ?? '') === 'all';
+$product_search_sql = $product_deep_search !== '' ? ' AND (p.product_name LIKE ? OR p.sku LIKE ? OR c.category_name LIKE ? OR p.sub_category LIKE ?)' : '';
+$product_limit_sql = ($product_load_all || $product_deep_search !== '') ? '' : ' LIMIT 300';
+$setup_product_total = (int)mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) AS total FROM products WHERE user_id={$company_id}"))['total'];
+$setup_product_stmt = mysqli_prepare($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,p.purchase_price,p.sale_price,p.status,c.category_name,
     (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$warehouse_id}) AS warehouse_stock,
     (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id) AS total_stock,
     (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id<>{$warehouse_id}) AS all_branch_stock,
@@ -134,7 +139,13 @@ $setup_products = mysqli_query($conn, "SELECT p.id,p.product_name,p.sku,p.photo_
         (SELECT COALESCE(SUM(d.damaged_quantity),0) FROM stock_distributions d WHERE d.user_id=p.user_id AND d.product_id=p.id AND d.status='accepted')
         - (SELECT COALESCE(SUM(dr.quantity),0) FROM stock_damage_returns dr WHERE dr.user_id=p.user_id AND dr.product_id=p.id AND dr.status IN ('accepted','dump_pending','dumped'))
     ) AS damaged_quantity
-    FROM products p LEFT JOIN product_categories c ON c.id=p.category_id WHERE p.user_id={$company_id} ORDER BY p.id DESC");
+    FROM products p LEFT JOIN product_categories c ON c.id=p.category_id WHERE p.user_id={$company_id}{$product_search_sql} ORDER BY p.id DESC{$product_limit_sql}");
+if ($product_deep_search !== '') {
+    $product_search_like = '%' . $product_deep_search . '%';
+    mysqli_stmt_bind_param($setup_product_stmt, 'ssss', $product_search_like, $product_search_like, $product_search_like, $product_search_like);
+}
+mysqli_stmt_execute($setup_product_stmt);
+$setup_products = mysqli_stmt_get_result($setup_product_stmt);
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -147,7 +158,7 @@ require_once '../includes/sidebar.php';
 <?php } ?>
 <?php if ($central && manager_can_modify()) { ?>
 <div class="card card-outline card-primary">
-    <div class="card-header"><h3 class="card-title"><i class="fas <?= $is_fashion_house ? 'fa-boxes' : 'fa-plus-circle mr-2 text-primary'; ?> mr-2"></i><?= $is_fashion_house ? 'Product List' : 'Product Setup'; ?></h3><div class="card-tools" style="width:300px"><div class="input-group input-group-sm"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input id="product-list-search" class="form-control" placeholder="Search product or Code"></div></div></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas <?= $is_fashion_house ? 'fa-boxes' : 'fa-plus-circle mr-2 text-primary'; ?> mr-2"></i><?= $is_fashion_house ? 'Product List' : 'Product Setup'; ?></h3></div>
     <div class="card-body">
         <?php if(!$is_fashion_house){ ?>
         <div id="product-setup-message"></div>
@@ -160,7 +171,17 @@ require_once '../includes/sidebar.php';
             <button class="btn btn-primary" type="submit"><i class="fas fa-save mr-1"></i>Save Product</button>
         </form>
         <?php } ?>
-<div class="<?= $is_fashion_house ? '' : 'mt-4'; ?>"><?php if(!$is_fashion_house){ ?><h6 class="font-weight-bold">Product List</h6><?php } ?><div class="table-responsive"><table class="table table-bordered table-sm mb-0"<?php if($is_fashion_house){ ?> style="table-layout:fixed;min-width:1280px"<?php } ?>><?php if($is_fashion_house){ ?><colgroup><col style="width:6%"><col style="width:14%"><col style="width:8%"><col style="width:7%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:11%"><col style="width:7%"></colgroup><?php } ?><thead><tr><th>Photo</th><th>Product</th><th>Category</th><th>Code</th><th>Purchase Price</th><th>Sale Price</th><?php if($is_fashion_house){ ?><th>On Hand</th><th>Warehouse St.</th><th>All Br. Stock</th><th>All Br. Sold</th><th>All Br. Damaged</th><?php } ?><th>Status</th></tr></thead><tbody id="setup-product-list"><?php while ($product = mysqli_fetch_assoc($setup_products)) { $setup_photo = product_image_url($conn, $product['photo_path'] ?? ''); ?><tr><td><button type="button" class="warehouse-photo-preview" data-photo-src="<?= htmlspecialchars($setup_photo, ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?=htmlspecialchars($setup_photo)?>" style="width:34px;height:34px;object-fit:cover;border-radius:3px" alt="<?= htmlspecialchars($product['product_name']); ?>"></button></td><td><?= htmlspecialchars($product['product_name']); ?></td><td><?= htmlspecialchars($product['category_name'] ?? '-'); ?></td><td><?= htmlspecialchars($product['sku'] ?? ''); ?></td><td><?= number_format((float)$product['purchase_price'], 2); ?></td><td><?= number_format((float)$product['sale_price'], 2); ?></td><?php if($is_fashion_house){ ?><td><?= number_format((float)$product['total_stock'], 0); ?></td><td><?= number_format((float)$product['warehouse_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_sold'], 0); ?></td><td><?= number_format((float)$product['damaged_quantity'], 0); ?></td><?php } ?><td><span class="badge badge-<?= $product['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= htmlspecialchars(ucfirst($product['status'])); ?></span></td></tr><?php } ?></tbody></table></div></div>
+<form method="get" class="form-row mb-3">
+    <div class="col-md-6"><label for="product-deep-search">Deep Search</label><div class="input-group"><input id="product-deep-search" name="product_deep_search" class="form-control" placeholder="Search all products" value="<?= htmlspecialchars($product_deep_search) ?>"><div class="input-group-append"><button class="btn btn-primary">Search</button></div></div></div>
+    <div class="col-md-6 d-flex align-items-end"><a href="?product_load=all" class="btn btn-info mr-2">Total Load (<?= $setup_product_total ?>)</a><a href="index.php" class="btn btn-secondary">Reset</a></div>
+</form>
+<p class="text-muted">Loaded <?= mysqli_num_rows($setup_products) ?> of <?= $setup_product_total ?> products.</p>
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <label class="mb-0">Show <select id="setup-product-length" class="custom-select custom-select-sm mx-1" style="width:auto"><option value="50">50</option><option value="100">100</option><option value="300">300</option><option value="-1">All loaded</option></select> entries</label>
+    <div class="d-flex align-items-center"><label for="product-list-search" class="mb-0 mr-2">Quick Search</label><input id="product-list-search" class="form-control form-control-sm" style="width:280px;max-width:100%" placeholder="Search loaded products"></div>
+</div>
+<div class="<?= $is_fashion_house ? '' : 'mt-4'; ?>"><?php if(!$is_fashion_house){ ?><h6 class="font-weight-bold">Product List</h6><?php } ?><div class="table-responsive"><table class="table table-bordered table-sm mb-0"<?php if($is_fashion_house){ ?> style="table-layout:fixed;min-width:1280px"<?php } ?>><?php if($is_fashion_house){ ?><colgroup><col style="width:50px"><col style="width:6%"><col style="width:14%"><col style="width:8%"><col style="width:7%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:11%"><col style="width:7%"></colgroup><?php } ?><thead><tr><th>SL</th><th>Photo</th><th>Product</th><th>Category</th><th>Code</th><th>Purchase Price</th><th>Sale Price</th><?php if($is_fashion_house){ ?><th>On Hand</th><th>Warehouse St.</th><th>All Br. Stock</th><th>All Br. Sold</th><th>All Br. Damaged</th><?php } ?><th>Status</th></tr></thead><tbody id="setup-product-list"><?php $setup_sl=0; while ($product = mysqli_fetch_assoc($setup_products)) { $setup_photo = product_image_url($conn, $product['photo_path'] ?? ''); ?><tr><td class="setup-sl"><?= ++$setup_sl ?></td><td><button type="button" class="warehouse-photo-preview" data-photo-src="<?= htmlspecialchars($setup_photo, ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?=htmlspecialchars($setup_photo)?>" style="width:34px;height:34px;object-fit:cover;border-radius:3px" alt="<?= htmlspecialchars($product['product_name']); ?>"></button></td><td><?= htmlspecialchars($product['product_name']); ?></td><td><?= htmlspecialchars($product['category_name'] ?? '-'); ?></td><td><?= htmlspecialchars($product['sku'] ?? ''); ?></td><td><?= number_format((float)$product['purchase_price'], 2); ?></td><td><?= number_format((float)$product['sale_price'], 2); ?></td><?php if($is_fashion_house){ ?><td><?= number_format((float)$product['total_stock'], 0); ?></td><td><?= number_format((float)$product['warehouse_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_sold'], 0); ?></td><td><?= number_format((float)$product['damaged_quantity'], 0); ?></td><?php } ?><td><span class="badge badge-<?= $product['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= htmlspecialchars(ucfirst($product['status'])); ?></span></td></tr><?php } ?></tbody></table></div></div>
+<div class="d-flex justify-content-between align-items-center mt-3"><small id="setup-product-info" role="status"></small><div><button type="button" id="setup-product-prev" class="btn btn-sm btn-outline-secondary">Previous</button> <button type="button" id="setup-product-next" class="btn btn-sm btn-outline-secondary">Next</button></div></div>
     </div>
 </div>
 <?php } ?>
@@ -240,10 +261,28 @@ function bindTableSearch(inputId, bodyId) {
     const input = document.getElementById(inputId);
     const body = document.getElementById(bodyId);
     if (!input || !body) return;
-    input.addEventListener('input', function () {
-        const keyword = this.value.trim().toLowerCase();
-        body.querySelectorAll('tr').forEach(row => { row.style.display = row.textContent.toLowerCase().includes(keyword) ? '' : 'none'; });
-    });
+    const length = document.getElementById('setup-product-length');
+    const previous = document.getElementById('setup-product-prev');
+    const next = document.getElementById('setup-product-next');
+    let page = 0;
+    function render() {
+        const keyword = input.value.trim().toLowerCase();
+        const rows = Array.from(body.querySelectorAll('tr'));
+        const matches = rows.filter(row => Array.from(row.cells).filter(cell => !cell.classList.contains('setup-sl')).map(cell => cell.textContent).join(' ').toLowerCase().includes(keyword));
+        const size = Number(length.value) === -1 ? Math.max(1,matches.length) : Number(length.value);
+        page = Math.min(page, Math.max(0,Math.ceil(matches.length/size)-1));
+        const start = page*size, end = Math.min(start+size,matches.length);
+        rows.forEach(row => {row.style.display='none';});
+        matches.slice(start,end).forEach((row,index) => {row.style.display=''; row.querySelector('.setup-sl').textContent=start+index+1;});
+        previous.disabled=page===0;
+        next.disabled=end>=matches.length;
+        document.getElementById('setup-product-info').textContent='Showing '+(matches.length ? start+1 : 0)+' to '+end+' of '+matches.length+' entries';
+    }
+    input.addEventListener('input', function(){page=0;render();});
+    length.addEventListener('change', function(){page=0;render();});
+    previous.addEventListener('click', function(){if(page>0) page--;render();});
+    next.addEventListener('click', function(){page++;render();});
+    render();
 }
 bindTableSearch('product-list-search', 'setup-product-list');
 function bindWarehouseStockSearch() {
@@ -306,7 +345,8 @@ productSetupForm?.addEventListener('submit', async event => {
     try {
         const result = await submitSetup(productSetupForm, 'add_product');
         const product = result.product;
-        document.getElementById('setup-product-list').insertAdjacentHTML('afterbegin', '<tr><td><img src="' + escapeSetupHtml(product.photo_url) + '" style="width:34px;height:34px;object-fit:cover;border-radius:3px" alt=""></td><td>' + escapeSetupHtml(product.name) + '</td><td>' + escapeSetupHtml(product.category) + '</td><td>' + escapeSetupHtml(product.sku) + '</td><td>' + escapeSetupHtml(product.purchase_price) + '</td><td>' + escapeSetupHtml(product.sale_price) + '</td><td><span class="badge badge-' + (product.status === 'active' ? 'success' : 'secondary') + '">' + escapeSetupHtml(product.status[0].toUpperCase() + product.status.slice(1)) + '</span></td></tr>');
+        document.getElementById('setup-product-list').insertAdjacentHTML('afterbegin', '<tr><td class="setup-sl"></td><td><img src="' + escapeSetupHtml(product.photo_url) + '" style="width:34px;height:34px;object-fit:cover;border-radius:3px" alt=""></td><td>' + escapeSetupHtml(product.name) + '</td><td>' + escapeSetupHtml(product.category) + '</td><td>' + escapeSetupHtml(product.sku) + '</td><td>' + escapeSetupHtml(product.purchase_price) + '</td><td>' + escapeSetupHtml(product.sale_price) + '</td><td><span class="badge badge-' + (product.status === 'active' ? 'success' : 'secondary') + '">' + escapeSetupHtml(product.status[0].toUpperCase() + product.status.slice(1)) + '</span></td></tr>');
+        document.getElementById('product-list-search').dispatchEvent(new Event('input'));
         productSetupForm.reset(); productSetupForm.classList.add('d-none'); showSetupMessage(result.message, true);
     } catch (error) { showSetupMessage(error.message, false); }
 });

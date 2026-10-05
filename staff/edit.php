@@ -34,7 +34,7 @@ $error = '';
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $staff_code = trim($_POST['staff_code'] ?? '');
-    $name = $has_transactions ? $staff['name'] : trim($_POST['name'] ?? '');
+    $name = trim($_POST['name'] ?? '');
     $email = trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $address = trim($_POST['address'] ?? '');
@@ -63,6 +63,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($error !== ''){
     }elseif($staff_code === ''){
         $error = 'Staff ID is required.';
+    }elseif($name === ''){
+        $error = 'Name is required.';
     }elseif($designation === ''){
         $error = 'Please select or enter a designation.';
     }elseif($branch_id <= 0){
@@ -108,14 +110,13 @@ require_once '../includes/sidebar.php';
 <div class="card">
     <div class="card-header"><h3 class="card-title">Edit Staff</h3></div>
     <div class="card-body">
-        <?php if($has_transactions){ ?><div class="alert alert-info">This staff has transactions, so the name cannot be changed.</div><?php } ?>
         <?php if($has_login_access){ ?><div class="alert alert-info">This staff has login access. Branch can only be changed from Access Management.</div><?php } ?>
         <?php if($error){ ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php } ?>
         <form method="post" enctype="multipart/form-data">
             <div class="form-group"><label>Staff ID <span class="text-danger">*</span></label><input class="form-control" name="staff_code" value="<?= htmlspecialchars($_POST['staff_code'] ?? $staff['staff_code'] ?? staff_code_from_id($staff['id'])) ?>" required></div>
             <?php if(!empty($staff['photo'])){ ?><div class="form-group"><label>Current Photo</label><div><img src="../<?= htmlspecialchars($staff['photo']) ?>" alt="Staff Photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"></div></div><?php } ?>
             <div class="form-group"><label>Update Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><small class="text-muted">Max 2MB. Photo will be saved as 250x250 px.</small></div>
-            <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($staff['name']) ?>" required <?= $has_transactions ? 'readonly' : '' ?>></div>
+            <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? $staff['name']) ?>" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" value="<?= htmlspecialchars($staff['email'] ?? '') ?>" placeholder="staff@example.com"></div>
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($staff['phone']) ?>"></div>
             <div class="form-group"><label>Address</label><textarea class="form-control" name="address" rows="3"><?= htmlspecialchars($staff['address'] ?? '') ?></textarea></div>

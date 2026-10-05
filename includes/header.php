@@ -5,6 +5,8 @@
 
 <?php
 require_once __DIR__ . '/branding_helper.php';
+require_once __DIR__ . '/installation_reporting_helper.php';
+if (isset($conn) && $conn instanceof mysqli) installation_reporting_schedule($conn);
 
 $app_favicon_url = branding_favicon_url(isset($conn) ? $conn : null);
 $app_site_title = branding_site_title(isset($conn) ? $conn : null);

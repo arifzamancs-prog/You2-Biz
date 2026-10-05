@@ -23,6 +23,15 @@ $stock_branch_id = $multi_branch
     ? stock_warehouse_id($conn, $user_id)
     : stock_head_office_id($conn, $user_id);
 $stock_filter = $stock_branch_id > 0 ? ' AND sb.branch_id=' . $stock_branch_id : '';
+$load_all = ($_GET['load'] ?? '') === 'all';
+$deep_search = trim((string)($_GET['deep_search'] ?? ''));
+$search_filter = $deep_search !== '' ? " AND (p.product_name LIKE ? OR p.sku LIKE ? OR c.category_name LIKE ? OR p.sub_category LIKE ? OR p.status LIKE ?)" : '';
+$list_limit = ($load_all || $deep_search !== '') ? '' : ' LIMIT 300';
+if (empty($_SESSION['product_delete_csrf'])) $_SESSION['product_delete_csrf'] = bin2hex(random_bytes(32));
+$count_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM products WHERE user_id=?');
+mysqli_stmt_bind_param($count_stmt, 'i', $user_id);
+mysqli_stmt_execute($count_stmt);
+$product_total = (int)mysqli_fetch_assoc(mysqli_stmt_get_result($count_stmt))['total'];
 
 $sql = "SELECT
             p.*,
@@ -35,11 +44,15 @@ $sql = "SELECT
         LEFT JOIN product_categories c
             ON c.id = p.category_id
         WHERE p.user_id=?
-        ORDER BY p.id DESC";
+        {$search_filter}
+        ORDER BY p.id DESC{$list_limit}";
 
 $stmt = mysqli_prepare($conn,$sql);
 
-mysqli_stmt_bind_param(
+if ($deep_search !== '') {
+    $search_like = '%' . $deep_search . '%';
+    mysqli_stmt_bind_param($stmt, 'isssss', $user_id, $search_like, $search_like, $search_like, $search_like, $search_like);
+} else mysqli_stmt_bind_param(
     $stmt,
     "i",
     $user_id
@@ -88,6 +101,12 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
+        <div id="product-message" role="status"></div>
+        <div class="row mb-3">
+            <div class="col-md-5"><form method="get"><label for="product-deep-search">Deep Search</label><div class="input-group"><input id="product-deep-search" name="deep_search" class="form-control" value="<?= htmlspecialchars($deep_search) ?>" placeholder="Search all products"><div class="input-group-append"><button class="btn btn-primary">Search</button></div></div></form></div>
+            <div class="col-md-3 d-flex align-items-end"><a href="?load=all" class="btn btn-info mr-2">Total Load (<?= $product_total ?>)</a><a href="index.php" class="btn btn-secondary">Reset</a></div>
+        </div>
+        <p class="text-muted">Loaded <span id="product-loaded-count"><?= mysqli_num_rows($result) ?></span> of <span id="product-total-count"><?= $product_total ?></span> products<?= $deep_search !== '' ? ' — Deep Search results' : '' ?>.</p>
 
         <?php if(isset($_SESSION['error'])){ ?>
             <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -100,21 +119,21 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <style>
-            #example1 .all-branch-stock-column{min-width:190px!important;width:190px!important}
-            #example1 .product-action-column{width:88px!important;min-width:88px!important;white-space:nowrap}
+            #product-list .all-branch-stock-column{min-width:190px!important;width:190px!important}
+            #product-list .product-action-column{width:88px!important;min-width:88px!important;white-space:nowrap}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
             .product-photo-preview:hover img{transform:scale(1.08)}
         </style>
         <table
-            id="example1"
+            id="product-list" data-csrf="<?= htmlspecialchars($_SESSION['product_delete_csrf']) ?>" data-stock-csrf="<?= htmlspecialchars(stock_csrf_token()) ?>"
             class="table table-bordered table-striped">
 
             <thead>
 
             <tr>
 
-                <th>Photo</th>
+                <th>SL</th><th>Photo</th>
                 <th>Product</th>
                 <th>Category</th>
                 <th>Code</th>
@@ -138,7 +157,7 @@ require_once '../includes/sidebar.php';
 
             <tbody>
 
-            <?php while($row = mysqli_fetch_assoc($result)){ ?>
+            <?php $serial=0; while($row = mysqli_fetch_assoc($result)){ ?>
 
             <?php
             $product_has_transactions = product_has_transactions($conn, (int)$row['id'], $user_id);
@@ -175,6 +194,7 @@ require_once '../includes/sidebar.php';
             ?>
 
             <tr>
+                <td><?= ++$serial ?></td>
 
                 <td><button type="button" class="product-photo-preview" data-photo-src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="<?= htmlspecialchars($row['product_name']); ?>" style="width:46px;height:46px;object-fit:cover;border-radius:4px"></button></td>
 
@@ -286,15 +306,14 @@ require_once '../includes/sidebar.php';
                     <?php } ?>
 
                     <?php if(!$product_has_transactions){ ?>
-                        <a
-                            href="delete.php?id=<?= $row['id']; ?>"
-                            class="btn btn-danger btn-sm"
-                            title="Delete Product"
-                            onclick="return confirm('Delete this product?')">
+                        <button type="button"
+                            data-product-id="<?= (int)$row['id']; ?>"
+                            class="btn btn-danger btn-sm product-delete"
+                            title="Delete Product">
 
                             <i class="fas fa-trash"></i>
 
-                        </a>
+                        </button>
                     <?php }else{ ?>
                         <button
                             type="button"
@@ -335,6 +354,37 @@ require_once '../includes/sidebar.php';
 $page_script = <<<'SCRIPT'
 <script>
 $(function () {
+    const table = $('#product-list').DataTable({
+        responsive: false, autoWidth: false, order: [], pageLength: 50,
+        lengthMenu: [[50,100,300,-1],[50,100,300,'All loaded']],
+        dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6 product-quick-search-slot">>rtip',
+        columnDefs: [{targets: [0,1], orderable: false, searchable: false}],
+        drawCallback: function () {
+            const api=this.api(), start=api.page.info().start;
+            api.column(0,{page:'current'}).nodes().each(function(cell,i){cell.textContent=start+i+1;});
+        }
+    });
+    $('#product-list_wrapper .product-quick-search-slot').html('<div class="d-flex align-items-center justify-content-md-end"><label for="product-quick-search" class="mb-0 mr-2 text-nowrap">Quick Search</label><input id="product-quick-search" class="form-control form-control-sm" style="max-width:280px" placeholder="Search loaded products"></div>');
+    $('#product-quick-search').on('input', function(){table.search(this.value).draw();});
+    $(document).on('click', '.product-delete', async function(){
+        if (!confirm('Delete this product?')) return;
+        const button=this; button.disabled=true;
+        try {
+            const response=await fetch('delete.php', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'}, body:new URLSearchParams({id:button.dataset.productId,csrf:$('#product-list').attr('data-csrf'),stock_csrf:$('#product-list').attr('data-stock-csrf')})});
+            const responseText=await response.text();
+            let data;
+            try { data=JSON.parse(responseText); }
+            catch (_) { throw new Error(response.status===403 ? 'Request could not be verified. Reload this page and try again.' : 'Unexpected server response. Reload this page and try again.'); }
+            if (!response.ok || !data.success) throw new Error(data.message || 'Delete failed.');
+            table.row($(button).closest('tr')).remove().draw(false);
+            $('#product-loaded-count').text(table.rows().count());
+            const total=Math.max(0,Number($('#product-total-count').text())-1);
+            $('#product-total-count').text(total);
+            $('a[href="?load=all"]').text('Total Load ('+total+')');
+            $('#product-message').attr('class','alert alert-success').text('Product deleted.');
+        } catch(error) { $('#product-message').attr('class','alert alert-danger').text(error.message); }
+        finally {button.disabled=false;}
+    });
     $(document).on('click', '.product-photo-preview', function () {
         $('#product-photo-preview-image').attr({src: this.dataset.photoSrc, alt: this.dataset.photoAlt || 'Product photo'});
         $('#product-photo-preview-title').text(this.dataset.photoAlt || 'Product Photo');
