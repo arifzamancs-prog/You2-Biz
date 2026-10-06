@@ -88,7 +88,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $numeric_total_price = $type_establishes_total ? (float)$total_price : 0;
     $charge_calculation = booking_invoice_charge_total($conn, $user_id, $numeric_amount, $charge_inputs);
     $final_amount = $charge_calculation['total'];
-    $requires_existing_file_number = $is_housing_company && in_array($type, ['installment', 'cancel_return'], true);
+    $requires_existing_file_number = $is_housing_company && booking_invoice_requires_existing_file($type);
     $file_number_is_new = in_array($type, ['booking', 'full_payment'], true);
 
     // An adjustment always follows the package originally assigned to its File No.
@@ -125,7 +125,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if(($file_number_is_new && $file_number_exists) || ($requires_existing_file_number && !$file_number_exists)){
             $message = $file_number_is_new
                 ? 'This File No. is already used. Select a non-used File No.'
-                : 'Select an existing File No. for Installment or Cancel/Return.';
+                : 'Select an existing File No. for Installment, Monthly Service Charge or Cancel/Return.';
         }
     }
 
@@ -612,6 +612,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const customerPackages = <?= json_encode($customer_packages); ?>;
     const totalInvoiceTypes = <?= json_encode(array_values($total_invoice_type_keys)); ?>;
     const adjustmentInvoiceTypes = <?= json_encode(array_values($adjustment_invoice_type_keys)); ?>;
+    const existingFileInvoiceTypes = <?= json_encode(booking_invoice_existing_file_type_keys()); ?>;
     const projectSelect = document.getElementById('project_id');
     const packageSelect = document.getElementById('package_id');
     const invoiceTypeSelect = document.getElementById('invoice_type');
@@ -640,7 +641,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function syncHousingProperties() {
         if (!housingPropertySelects.length) return;
-        const locked = ['installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+        const locked = existingFileInvoiceTypes.includes(invoiceTypeSelect.value);
         const fileSelect = document.getElementById('file_no_select');
         const selectedFile = String(fileSelect ? fileSelect.value : '').trim();
         const fileSource = locked && selectedFile ? filePropertyMap[selectedFile] : null;
@@ -695,7 +696,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (field === 'plot_no') {
                     const selectedBlock = String((document.getElementById('block_name_select') || {}).value || '').trim();
                     const selectedRoad = String((document.getElementById('road_no_select') || {}).value || '').trim();
-                    const restrictUsedPlots = ['booking', 'full_payment', 'installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+                    const restrictUsedPlots = ['booking', 'full_payment'].concat(existingFileInvoiceTypes).includes(invoiceTypeSelect.value);
                     Array.from(select.options).forEach(function(option, index){
                         if (index === 0) return;
                         const isUsedPlot = plotAssignments.some(function(item){

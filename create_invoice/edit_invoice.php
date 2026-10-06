@@ -63,7 +63,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         'plot_no' => trim((string)($_POST['plot_no'] ?? $_POST['plot_no_select'] ?? '')),
         'file_no' => trim((string)($_POST['file_no'] ?? $_POST['file_no_select'] ?? '')),
     ];
-    $adjustment_by_file = $is_housing_company && in_array($invoice_type, ['installment', 'cancel_return'], true);
+    $adjustment_by_file = $is_housing_company && booking_invoice_requires_existing_file($invoice_type);
     if($adjustment_by_file && $property_values['file_no'] !== ''){
         $source_stmt = mysqli_prepare($conn, "SELECT project_id, package_id, block_name, road_no, plot_no FROM booking_invoices WHERE user_id=? AND branch_id=? AND file_no=? AND customer_id=? AND status='confirmed' AND invoice_type IN ('booking', 'full_payment') AND id<>? ORDER BY id DESC LIMIT 1");
         $branch_id = (int)($invoice['branch_id'] ?? 0);
@@ -75,7 +75,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $package_id = (int)$source['package_id'];
             foreach(['block_name', 'road_no', 'plot_no'] as $field) $property_values[$field] = trim((string)($source[$field] ?? ''));
         } else {
-            $message = 'Select a File No. created by a Booking or Full Payment invoice.';
+            $message = 'Select an existing File No. for Installment, Monthly Service Charge or Cancel/Return.';
         }
     }
 
@@ -209,6 +209,7 @@ require_once '../includes/sidebar.php';
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const totalInvoiceTypes = <?= json_encode(array_values($total_invoice_type_keys)); ?>;
+    const existingFileInvoiceTypes = <?= json_encode(booking_invoice_existing_file_type_keys()); ?>;
     const projectSelect = document.getElementById('project_id');
     const packageSelect = document.getElementById('package_id');
     const customerSelect = document.getElementById('customer_id');
@@ -233,7 +234,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function syncHousingProperties() {
         if (!housingPropertySelects.length) return;
-        const adjustment = ['installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+        const adjustment = existingFileInvoiceTypes.includes(invoiceTypeSelect.value);
         const selectedFile = String((document.getElementById('file_no_select') || {}).value || '').trim();
         const source = adjustment && selectedFile ? filePropertyMap[selectedFile] : null;
         const lockFields = !!source;
@@ -269,7 +270,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (select.dataset.propertyField === 'plot_no') {
                 const selectedBlock = String((document.getElementById('block_name_select') || {}).value || '').trim();
                 const selectedRoad = String((document.getElementById('road_no_select') || {}).value || '').trim();
-                const restrictUsedPlots = ['booking', 'full_payment', 'installment', 'cancel_return'].includes(invoiceTypeSelect.value);
+                const restrictUsedPlots = ['booking', 'full_payment'].concat(existingFileInvoiceTypes).includes(invoiceTypeSelect.value);
                 Array.from(select.options).forEach(function(option, index){
                     if (index === 0) return;
                     const isUsedPlot = plotAssignments.some(function(item){

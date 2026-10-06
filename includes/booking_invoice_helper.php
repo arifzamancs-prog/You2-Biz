@@ -222,6 +222,26 @@ function booking_system_invoice_type_keys()
     return array_keys(booking_default_invoice_types());
 }
 
+/**
+ * Payment types that collect against an existing booking in exactly the same
+ * way as an Installment.  `monthly_service_charge` is deliberately kept as a
+ * non-system type so it remains manageable from Payment Type settings.
+ */
+function booking_invoice_installment_like_type_keys()
+{
+    return ['installment', 'monthly_service_charge'];
+}
+
+function booking_invoice_existing_file_type_keys()
+{
+    return array_merge(booking_invoice_installment_like_type_keys(), ['cancel_return']);
+}
+
+function booking_invoice_requires_existing_file($type)
+{
+    return in_array(trim((string)$type), booking_invoice_existing_file_type_keys(), true);
+}
+
 function ensure_booking_invoice_type_table($conn, $user_id)
 {
     mysqli_query(
@@ -354,7 +374,7 @@ function booking_invoice_establishes_total($conn, $user_id, $type)
         return true;
     }
 
-    if(in_array($type, ['installment', 'cancel_return', 'profit_return'], true)){
+    if(in_array($type, array_merge(booking_invoice_existing_file_type_keys(), ['profit_return']), true)){
         return false;
     }
 
@@ -368,7 +388,7 @@ function booking_invoice_is_adjustment_type($conn, $user_id, $type)
         return false;
     }
 
-    if(in_array($type, ['installment', 'cancel_return', 'profit_return'], true)){
+    if(in_array($type, array_merge(booking_invoice_existing_file_type_keys(), ['profit_return']), true)){
         return true;
     }
 
