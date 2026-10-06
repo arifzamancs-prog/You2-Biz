@@ -26,7 +26,7 @@ $stock_filter = $stock_branch_id > 0 ? ' AND sb.branch_id=' . $stock_branch_id :
 $load_all = ($_GET['load'] ?? '') === 'all';
 $deep_search = trim((string)($_GET['deep_search'] ?? ''));
 $search_filter = $deep_search !== '' ? " AND (p.product_name LIKE ? OR p.sku LIKE ? OR c.category_name LIKE ? OR p.sub_category LIKE ? OR p.status LIKE ?)" : '';
-$list_limit = ($load_all || $deep_search !== '') ? '' : ' LIMIT 300';
+$list_limit = ($load_all || $deep_search !== '') ? '' : ' LIMIT 200';
 if (empty($_SESSION['product_delete_csrf'])) $_SESSION['product_delete_csrf'] = bin2hex(random_bytes(32));
 $count_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM products WHERE user_id=?');
 mysqli_stmt_bind_param($count_stmt, 'i', $user_id);
@@ -119,7 +119,9 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <style>
-            #product-list .all-branch-stock-column{min-width:190px!important;width:190px!important}
+            #product-list .product-sl-column{min-width:58px!important;width:58px!important;text-align:center}
+            #product-list .sale-price-column{min-width:130px!important;width:130px!important}
+            #product-list .all-branch-stock-column{min-width:130px!important;width:130px!important}
             #product-list .product-action-column{width:88px!important;min-width:88px!important;white-space:nowrap}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
@@ -133,12 +135,12 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <th>SL</th><th>Photo</th>
+                <th class="product-sl-column">SL</th><th>Photo</th>
                 <th>Product</th>
                 <th>Category</th>
                 <th>Code</th>
                 <th>Purchase Price</th>
-                <th>Sale Price</th>
+                <th class="sale-price-column">Sale Price</th>
                 <?php if($show_expired_on){ ?>
                     <th>Expiry on</th>
                 <?php } ?>
@@ -355,8 +357,8 @@ $page_script = <<<'SCRIPT'
 <script>
 $(function () {
     const table = $('#product-list').DataTable({
-        responsive: false, autoWidth: false, order: [], pageLength: 50,
-        lengthMenu: [[50,100,300,-1],[50,100,300,'All loaded']],
+        responsive: false, autoWidth: false, order: [], pageLength: 10,
+        lengthMenu: [[10,25,50,100,200,-1],[10,25,50,100,200,'All loaded']],
         dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6 product-quick-search-slot">>rtip',
         columnDefs: [{targets: [0,1], orderable: false, searchable: false}],
         drawCallback: function () {
