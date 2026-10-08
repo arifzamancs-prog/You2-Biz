@@ -14,6 +14,7 @@ require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/sales_refund_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -96,6 +97,7 @@ AND user_id={$user_id} FOR UPDATE"
 );
 
 $invoice_row = mysqli_fetch_assoc($invoice_sql);
+sales_refund_protect_invoice($conn,(int)$user_id,$invoice_id);
 
 if(!$invoice_row){
     throw new Exception("Invoice Not Found.");

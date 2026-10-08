@@ -68,6 +68,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('staff_ledger', 'Other Payments', app_path('staff/ledger.php'), 'staff_manage', 24),
         sidebar_setting_item('super_admin', 'Super Admin', '', '', 30),
         sidebar_setting_item('subscription', 'Subscription', app_path('super_admin/index.php'), 'super_admin', 31),
+        sidebar_setting_item('eshop', 'E-shop', app_path('eshop/index.php'), '', 54),
         sidebar_setting_item('message_setup', 'Message Setup', app_path('super_admin/signup_message.php'), 'super_admin', 32),
         sidebar_setting_item('settings', 'Settings', app_path('super_admin/email_sms_settings.php'), 'super_admin', 33),
         sidebar_setting_item('company_delete_data', 'Company Delete Data', app_path('super_admin/company_delete_data.php'), 'super_admin', 34),

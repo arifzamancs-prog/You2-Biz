@@ -23,6 +23,9 @@ require_once '../includes/stock_module_helper.php';
 require_once '../includes/lead_management_helper.php';
 
 require_super_admin_user();
+require_once '../includes/eshop_helper.php';
+ensure_eshop_table($conn);
+if(empty($_SESSION['eshop_csrf'])) $_SESSION['eshop_csrf'] = bin2hex(random_bytes(32));
 ensure_multi_branch_column($conn);
 ensure_stock_module_feature_column($conn);
 if (empty($_SESSION['multi_branch_csrf'])) {
@@ -1582,6 +1585,20 @@ require_once '../includes/sidebar.php';
                                         </a>
                                     </div>
                                 </div>
+                            </form>
+                            <?php $company_shop = eshop_company_settings($conn, (int)$row['id']); ?>
+                            <form method="post" action="eshop.php" class="mt-3 border-top pt-2">
+                                <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
+                                <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['eshop_csrf']) ?>">
+                                <label class="small mb-1" for="eshop-status-<?= (int)$row['id'] ?>">E-shop access</label>
+                                <select id="eshop-status-<?= (int)$row['id'] ?>" name="enabled" class="form-control form-control-sm mb-2">
+                                    <option value="0">Inactive</option>
+                                    <option value="1" <?= !empty($company_shop['enabled']) ? 'selected' : '' ?>>Active</option>
+                                </select>
+                                <label class="small mb-1" for="eshop-slug-<?= (int)$row['id'] ?>">Shop URL name</label>
+                                <input id="eshop-slug-<?= (int)$row['id'] ?>" name="slug" class="form-control form-control-sm" required minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9-]{1,62}[a-z0-9]" value="<?= htmlspecialchars($company_shop['slug'] ?? '') ?>" placeholder="company-name">
+                                <small class="text-muted d-block text-break mt-1">Reserved URL: <?= htmlspecialchars(eshop_reserved_url($company_shop['slug'] ?? 'company-name')) ?></small>
+                                <button type="submit" class="btn btn-primary btn-sm mt-2">Save E-shop</button>
                             </form>
                         </td>
                         <td>

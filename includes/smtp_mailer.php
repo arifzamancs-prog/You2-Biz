@@ -2,6 +2,31 @@
 
 require_once __DIR__ . '/system_settings_helper.php';
 
+// Returns non-sensitive readiness information only; never expose SMTP credentials.
+function smtp_configuration_status_from_settings(array $settings)
+{
+    $host=trim((string)($settings['smtp_host']??''));
+    $port=(int)($settings['smtp_port']??0);
+    $secure=(string)($settings['smtp_secure']??'');
+    $username=trim((string)($settings['smtp_username']??''));
+    $password=(string)($settings['smtp_password']??'');
+    $from=trim((string)($settings['smtp_from_email']??''));
+    $issues=[];
+    if($host==='' || preg_match('/[\r\n\s]/',$host)) $issues[]='SMTP host';
+    if($port<1 || $port>65535) $issues[]='SMTP port';
+    if(!in_array($secure,['ssl','tls','none'],true)) $issues[]='SMTP security';
+    if($username==='' || preg_match('/[\r\n]/',$username)) $issues[]='SMTP username';
+    if($password==='') $issues[]='SMTP password';
+    if(!filter_var($from,FILTER_VALIDATE_EMAIL)) $issues[]='sender email';
+    return ['ready'=>!$issues,'issues'=>$issues];
+}
+
+function smtp_configuration_status($conn)
+{
+    $settings=$conn instanceof mysqli ? system_settings_all($conn) : system_settings_defaults();
+    return smtp_configuration_status_from_settings($settings);
+}
+
 function smtp_send_mail($to_email, $to_name, $subject, $html_body, $attachments = [], $mail_options = [])
 {
     global $conn;

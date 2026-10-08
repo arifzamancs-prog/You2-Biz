@@ -313,6 +313,10 @@ require_once '../includes/sidebar.php';
                         $transaction_type,
                         $income_types
                     );
+                    if ($transaction_type === 'receive_payment' && (float)$row['amount'] < 0 && strpos($txn_no, 'REF-') === 0) {
+                        $type_label = 'Sales Refund';
+                        $is_income = false;
+                    }
 
                     $badge_class = $is_income ? 'badge-success' : 'badge-danger';
 

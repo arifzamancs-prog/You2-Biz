@@ -253,6 +253,12 @@ function ensure_fifo_inventory_tables($conn)
         )"
     );
 
+    // The variant index below depends on branch_id, including on fresh installs.
+    $branch_column = mysqli_query($conn, "SHOW COLUMNS FROM stock_batches LIKE 'branch_id'");
+    if (mysqli_num_rows($branch_column) === 0) {
+        mysqli_query($conn, 'ALTER TABLE stock_batches ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0, ADD INDEX idx_stock_branch_product (user_id,branch_id,product_id)');
+    }
+
     $batch_variant = mysqli_query($conn, "SHOW COLUMNS FROM stock_batches LIKE 'variant_name'");
     if($batch_variant && mysqli_num_rows($batch_variant) === 0){
         mysqli_query($conn, "ALTER TABLE stock_batches ADD COLUMN variant_name VARCHAR(100) NOT NULL DEFAULT '' AFTER product_id");
@@ -313,10 +319,6 @@ function ensure_fifo_inventory_tables($conn)
         );
     }
 
-    $branch_column = mysqli_query($conn, "SHOW COLUMNS FROM stock_batches LIKE 'branch_id'");
-    if (mysqli_num_rows($branch_column) === 0) {
-        mysqli_query($conn, 'ALTER TABLE stock_batches ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0, ADD INDEX idx_stock_branch_product (user_id,branch_id,product_id)');
-    }
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS stock_distributions (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL, from_branch_id BIGINT UNSIGNED NOT NULL,

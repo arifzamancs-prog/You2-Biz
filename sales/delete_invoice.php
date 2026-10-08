@@ -8,6 +8,7 @@ require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/sales_refund_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -95,6 +96,9 @@ if ($is_posted && $paid_amount > 0) {
 mysqli_begin_transaction($conn);
 
 try {
+    // Serialize deletion with refunds before touching items or money.
+    sales_refund_query($conn,'SELECT id FROM invoices WHERE id=? AND user_id=? FOR UPDATE','ii',[$invoice_id,(int)$user_id]);
+    sales_refund_protect_invoice($conn,(int)$user_id,$invoice_id);
 
 /*
 |--------------------------------------------------

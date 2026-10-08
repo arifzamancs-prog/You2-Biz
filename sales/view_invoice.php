@@ -157,11 +157,14 @@ function invoice_qty_display($quantity, $unit_price)
 
             <h3 class="card-title">
 
-                Invoice Details
+                <?= ($invoice['created_by_type']??'')==='sales_refund' ? 'Refund Credit Note' : 'Invoice Details' ?>
 
             </h3>
 
             <div class="float-right">
+                <?php if (($_SESSION['user_role']??'')==='admin' && !invoice_is_pending($invoice) && (float)$invoice['total_amount']>0) { ?>
+                <a href="refund.php?id=<?= (int)$invoice_id ?>" class="btn btn-danger btn-sm">Refund / History</a>
+                <?php } ?>
 
                 <a href="invoice_list.php"
                    class="btn btn-secondary btn-sm">

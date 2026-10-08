@@ -284,16 +284,12 @@ function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
     $ip = staff_attendance_client_ip();
     $device = 'desktop';
 
-    $stmt = mysqli_prepare($conn, "INSERT INTO staff_attendance_logs
+    // Attendance is a daily first check-in record, not a session log. A second
+    // desktop login must never replace the original time/status (for example,
+    // a 9 AM Present record becoming Late after an afternoon login).
+    $stmt = mysqli_prepare($conn, "INSERT IGNORE INTO staff_attendance_logs
         (user_id, staff_id, login_user_id, attendance_date, login_at, login_ip, login_device, attendance_status, is_auto_absent)
-        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, 0)
-        ON DUPLICATE KEY UPDATE
-            login_user_id=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_user_id, VALUES(login_user_id)),
-            login_at=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_at, VALUES(login_at)),
-            login_ip=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_ip, VALUES(login_ip)),
-            login_device=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, login_device, VALUES(login_device)),
-            attendance_status=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, attendance_status, VALUES(attendance_status)),
-            is_auto_absent=IF(VALUES(attendance_status)='out_of_office' AND is_auto_absent=0, is_auto_absent, 0)");
+        VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, 0)");
     mysqli_stmt_bind_param($stmt, 'iiissss', $company_user_id, $staff_id, $login_user_id, $today, $ip, $device, $status);
     mysqli_stmt_execute($stmt);
 }
@@ -396,6 +392,29 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
         ];
     }
     return $rows;
+}
+
+// Keep a pending generated salary aligned with an authorised attendance edit.
+// Paid rows are deliberately immutable: their wallet/ledger payment has already
+// been posted and needs a separate finance adjustment, never a silent rewrite.
+function staff_attendance_reconcile_monthly_salary($conn, $user_id, $staff_id, $attendance_date)
+{
+    $user_id=(int)$user_id; $staff_id=(int)$staff_id;
+    if($user_id<=0 || $staff_id<=0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/',(string)$attendance_date)) return ['updated'=>false,'paid'=>false];
+    $year=(int)substr($attendance_date,0,4); $month=(int)substr($attendance_date,5,2);
+    $calculated=null;
+    foreach(staff_attendance_monthly_salary_rows($conn,$user_id,$year,$month,false,true) as $row){ if((int)$row['staff_id']===$staff_id){ $calculated=$row; break; } }
+    if(!$calculated) return ['updated'=>false,'paid'=>false];
+    $check=mysqli_prepare($conn,'SELECT payment_status FROM staff_monthly_salaries WHERE user_id=? AND staff_id=? AND salary_year=? AND salary_month=? LIMIT 1');
+    mysqli_stmt_bind_param($check,'iiii',$user_id,$staff_id,$year,$month); mysqli_stmt_execute($check); $existing=mysqli_fetch_assoc(mysqli_stmt_get_result($check));
+    if(!$existing) return ['updated'=>false,'paid'=>false];
+    if($existing['payment_status']==='paid') return ['updated'=>false,'paid'=>true];
+    $update=mysqli_prepare($conn,'UPDATE staff_monthly_salaries SET assigned_salary=?,salary_start_date=?,payable_days=?,prorated_salary=?,late_days=?,absent_days=?,casual_leave_days=?,medical_leave_days=?,salary_cut_days=?,salary_cut_amount=?,generated_salary=? WHERE user_id=? AND staff_id=? AND salary_year=? AND salary_month=? AND payment_status=\'pending\'');
+    $salary=(float)$calculated['salary']; $start=(string)$calculated['salary_start_date']; $payableDays=(int)$calculated['payable_days']; $prorated=(float)$calculated['prorated_salary'];
+    $late=(int)$calculated['late_days']; $absent=(int)$calculated['absent_days']; $casual=(int)$calculated['casual_leave_days']; $medical=(int)$calculated['medical_leave_days']; $cutDays=(int)$calculated['cut_days']; $cutAmount=(float)$calculated['cut_amount']; $generated=(float)$calculated['generated_salary'];
+    mysqli_stmt_bind_param($update,'dsidiiiiiddiiii',$salary,$start,$payableDays,$prorated,$late,$absent,$casual,$medical,$cutDays,$cutAmount,$generated,$user_id,$staff_id,$year,$month);
+    mysqli_stmt_execute($update);
+    return ['updated'=>mysqli_stmt_affected_rows($update)>0,'paid'=>false];
 }
 
 function staff_attendance_generate_monthly_salaries($conn, $user_id)

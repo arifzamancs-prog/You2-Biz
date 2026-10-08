@@ -8,6 +8,7 @@ require_once __DIR__ . '/project_package_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 require_once __DIR__ . '/sidebar_settings_helper.php';
 require_once __DIR__ . '/multi_branch_helper.php';
+require_once __DIR__ . '/eshop_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -475,6 +476,14 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 <?php } ?>
 
                 <li class="nav-header">OPERATIONS</li>
+                <?php
+                if(is_admin_user() && !is_super_admin_user()){
+                    $sidebar_eshop = eshop_company_settings($conn, (int)$_SESSION['user_id']);
+                    if($sidebar_eshop && (int)$sidebar_eshop['enabled']){
+                        sidebar_item(app_path('eshop/index.php'), 'E-shop', 'fas fa-store');
+                    }
+                }
+                ?>
 
                 <?php if(is_admin_user() || manager_has_permission('notice_publish')){ ?>
                     <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
