@@ -10,7 +10,12 @@ function product_delete_response($status, $success, $message) {
     exit;
 }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') product_delete_response(405, false, 'Use the product list to delete a product.');
-if (!manager_can_modify() || !stock_can_manage_warehouse($conn)) product_delete_response(403, false, 'Permission denied.');
+$is_restaurant_catalog = restaurant_catalog_enabled($conn, (int)($_SESSION['user_id'] ?? 0));
+// Restaurant & Cafe exposes product management without the warehouse module.
+// Keep the warehouse permission requirement for every other company type.
+if (!manager_can_modify() || (!$is_restaurant_catalog && !stock_can_manage_warehouse($conn))) {
+    product_delete_response(403, false, 'Permission denied.');
+}
 if (empty($_SESSION['product_delete_csrf']) || !hash_equals($_SESSION['product_delete_csrf'], (string)($_POST['csrf'] ?? ''))) product_delete_response(403, false, 'Please reload the page and try again.');
 $user_id = (int)$_SESSION['user_id'];
 $id = (int)($_POST['id'] ?? 0);

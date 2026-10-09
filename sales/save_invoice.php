@@ -26,6 +26,8 @@ ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
 $table_system_is_enabled = table_system_enabled($conn, $user_id);
+$restaurant_invoice_reference_enabled = $table_system_is_enabled && restaurant_invoice_reference_enabled($conn, $user_id);
+$restaurant_invoice_reference_type = $table_system_is_enabled ? restaurant_invoice_reference_type($conn, $user_id) : 'staff';
 $is_ajax = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest'
     || (string)($_POST['ajax'] ?? '') === '1';
 
@@ -299,8 +301,16 @@ try{
     $staff_id = (int)($_POST['staff_id'] ?? 0);
     $restaurant_table_id = (int)($_POST['restaurant_table_id'] ?? 0);
     if(!$table_system_is_enabled){ $staff_id = 0; $restaurant_table_id = 0; }
+    if($restaurant_invoice_reference_enabled && (($restaurant_invoice_reference_type === 'table' && $restaurant_table_id <= 0) || ($restaurant_invoice_reference_type === 'staff' && $staff_id <= 0))){
+        throw new Exception('Please select a reference before saving the invoice.');
+    }
     if($restaurant_table_id > 0 && $staff_id === 0){
-        throw new Exception('Select the staff before selecting a table.');
+        $table_staff_stmt = mysqli_prepare($conn, "SELECT staff_id FROM restaurant_tables WHERE id=? AND user_id=? AND status='active'");
+        mysqli_stmt_bind_param($table_staff_stmt, 'ii', $restaurant_table_id, $user_id);
+        mysqli_stmt_execute($table_staff_stmt);
+        $table_staff = mysqli_fetch_assoc(mysqli_stmt_get_result($table_staff_stmt));
+        $staff_id = (int)($table_staff['staff_id'] ?? 0);
+        if($staff_id <= 0) throw new Exception('The selected table is not assigned to a staff member.');
     }
     if($staff_id > 0){
         $stmt = mysqli_prepare($conn, "SELECT id FROM staff WHERE id=? AND user_id=? AND status='active'");
@@ -1090,9 +1100,11 @@ if(
     $_POST['action'] == 'print'
 ){
 
-    header(
-        "Location:print_invoice.php?id=".$invoice_id."&reload_parent=create"
-    );
+    $print_url = "print_invoice.php?id=" . $invoice_id . "&reload_parent=create";
+    if(($_POST['auto_print'] ?? '') === '1'){
+        $print_url .= '&auto_print=1';
+    }
+    header("Location:" . $print_url);
 
 }else{
 

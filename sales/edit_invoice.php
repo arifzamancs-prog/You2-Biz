@@ -10,6 +10,7 @@ require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_charge_columns($conn);
@@ -17,6 +18,9 @@ ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
 $table_system_is_enabled = table_system_enabled($conn, $user_id);
+$restaurant_catalog_is_enabled = restaurant_catalog_enabled($conn, $user_id);
+$restaurant_invoice_reference_enabled = $table_system_is_enabled && restaurant_invoice_reference_enabled($conn, $user_id);
+$restaurant_invoice_reference_type = $table_system_is_enabled ? restaurant_invoice_reference_type($conn, $user_id) : 'staff';
 
 $invoice_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -55,6 +59,9 @@ if(!$invoice){
     die("Invoice Not Found");
 
 }
+
+$show_invoice_reference = $restaurant_invoice_reference_enabled
+    && ((int)($invoice['staff_id'] ?? 0) > 0 || (int)($invoice['restaurant_table_id'] ?? 0) > 0);
 
 $reference_staff = mysqli_query($conn, "SELECT id, staff_code, name FROM staff WHERE user_id={$user_id} AND (status='active' OR id=" . (int)($invoice['staff_id'] ?? 0) . ") ORDER BY name");
 $reference_tables = mysqli_query($conn, "SELECT id, staff_id, table_name FROM restaurant_tables WHERE user_id={$user_id} AND status='active' ORDER BY table_name");
@@ -146,6 +153,7 @@ mysqli_stmt_execute($stmt);
 
 $charges =
     mysqli_stmt_get_result($stmt);
+$charge_rows = $charges ? mysqli_fetch_all($charges, MYSQLI_ASSOC) : [];
 
 /* Products */
 
@@ -379,13 +387,11 @@ require_once '../includes/sidebar.php';
             </table>
             <hr>
 
-            <h5>Charges</h5>
+            <?php if($charge_rows){ ?><h5>Charges</h5>
 
             <div class="row">
 
-            <?php
-            while($charge=mysqli_fetch_assoc($charges)){
-            ?>
+            <?php foreach($charge_rows as $charge){ ?>
 
             <div class="col-md-3">
 
@@ -417,7 +423,7 @@ require_once '../includes/sidebar.php';
             <?php } ?>
 
             </div>
-            <hr>
+            <hr><?php } ?>
 
 <div class="row">
 
@@ -499,7 +505,8 @@ value="<?= $wallet['id']; ?>"
 
     </div>
 
-            <div class="col-md-4">
+            <?php if($restaurant_catalog_is_enabled){ ?><input type="hidden" name="due_amount" id="due_amount" value="<?= $invoice['due_amount']; ?>">
+            <?php }else{ ?><div class="col-md-4">
 
                 <label><span id="due_amount_label">Due Amount</span></label>
 
@@ -512,24 +519,21 @@ value="<?= $wallet['id']; ?>"
                     class="form-control"
                     readonly>
 
-            </div>
+            </div><?php } ?>
 
         </div>
 
             <br>
-            <?php if($table_system_is_enabled){ ?><div class="form-group mt-3">
+            <?php if($show_invoice_reference){ ?><div class="form-group mt-3">
                 <label>Ref.</label>
-                <div class="row">
-                    <div class="col-md-6"><label class="font-weight-normal">Staff</label><select name="staff_id" id="reference_staff_id" class="form-control"><option value="">Select Staff</option><?php while($staff=mysqli_fetch_assoc($reference_staff)){ ?><option value="<?=$staff['id']?>" <?=((int)($invoice['staff_id'] ?? 0)===(int)$staff['id'])?'selected':''?>><?=htmlspecialchars($staff['name'])?><?= $staff['staff_code'] ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : '' ?></option><?php } ?></select></div>
-                    <?php if($table_system_is_enabled){ ?><div class="col-md-6"><label class="font-weight-normal">Table</label><select name="restaurant_table_id" id="reference_table_id" class="form-control"><option value="">Select Table</option><?php while($table=mysqli_fetch_assoc($reference_tables)){ ?><option value="<?=$table['id']?>" data-staff-id="<?=$table['staff_id']?>" <?=((int)($invoice['restaurant_table_id'] ?? 0)===(int)$table['id'])?'selected':''?>><?=htmlspecialchars($table['table_name'])?></option><?php } ?></select></div><?php } ?>
-                </div>
+                <?php if($restaurant_invoice_reference_type === 'table'){ ?><input type="hidden" name="staff_id" id="reference_staff_id" value="<?= (int)($invoice['staff_id'] ?? 0) ?>"><select name="restaurant_table_id" id="reference_table_id" class="form-control"><option value="">Search ref.</option><?php while($table=mysqli_fetch_assoc($reference_tables)){ ?><option value="<?=$table['id']?>" data-staff-id="<?=$table['staff_id']?>" <?=((int)($invoice['restaurant_table_id'] ?? 0)===(int)$table['id'])?'selected':''?> <?= (int)$table['staff_id'] <= 0 ? 'disabled' : '' ?>><?=htmlspecialchars($table['table_name'])?></option><?php } ?></select><?php }else{ ?><select name="staff_id" id="reference_staff_id" class="form-control"><option value="">Search ref.</option><?php while($staff=mysqli_fetch_assoc($reference_staff)){ ?><option value="<?=$staff['id']?>" <?=((int)($invoice['staff_id'] ?? 0)===(int)$staff['id'])?'selected':''?>><?=htmlspecialchars($staff['name'])?><?= $staff['staff_code'] ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : '' ?></option><?php } ?></select><?php } ?>
             </div><?php } ?>
 
             <div class="form-group mt-3"><label>Notes</label><textarea name="notes" class="form-control"><?= htmlspecialchars($invoice['notes']); ?></textarea></div>
 
             <button
                 type="submit"
-                class="btn btn-primary">
+                class="btn btn-primary" id="update-invoice-button" <?= $show_invoice_reference ? 'disabled' : '' ?>>
 
                 Update Invoice
 
@@ -919,18 +923,15 @@ function loadProduct(row){
 <script>
 document.addEventListener('DOMContentLoaded', function(){
     const staff=document.getElementById('reference_staff_id'), table=document.getElementById('reference_table_id');
-    if(!staff || !table) return;
-    const existingTable=table.value;
-    function filterTables(reset){
-        const selected=staff.value;
-        table.disabled=!selected;
-        const matching=Array.from(table.options).filter(function(option){ if(!option.value) return; option.hidden=!selected || option.dataset.staffId!==selected; return selected && option.dataset.staffId===selected; });
-        if(reset && table.value && table.options[table.selectedIndex].hidden){ table.value=''; }
-        if(reset && matching.length===1){ table.value=matching[0].value; }
+    const update=document.getElementById('update-invoice-button');
+    const reference=table || staff;
+    if(!reference) return;
+    function syncReference(){
+        if(table && staff){ const selected=table.options[table.selectedIndex]; staff.value=selected&&selected.dataset.staffId?selected.dataset.staffId:''; }
+        if(update) update.disabled=!reference.value;
     }
-    staff.addEventListener('change',function(){ filterTables(true); });
-    filterTables(false);
-    if(existingTable){ table.value=existingTable; }
+    reference.addEventListener('change',syncReference); syncReference();
+    if(window.jQuery && jQuery.fn.select2){ jQuery(reference).select2({theme:'bootstrap4',width:'100%',placeholder:'Search ref.',allowClear:true}).on('change',syncReference); }
 });
 </script>
 

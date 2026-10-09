@@ -52,7 +52,7 @@ if(!$invoice){
 }
 $invoice_type_key = normalize_booking_invoice_type($invoice['invoice_type'] ?? '', $invoice_types);
 $is_monthly_service_charge = $invoice_type_key === 'monthly_service_charge';
-$show_installment_ledger_total = in_array(project_package_company_type($conn, $user_id), ['Housing', 'Others'], true)
+$show_installment_ledger_total = in_array(project_package_company_type($conn, $user_id), ['Housing', 'Service type'], true)
     && $invoice_type_key === 'installment';
 $package_total_price = (float)($invoice['total_price'] ?? 0);
 if($package_total_price <= 0){ $package_total_price = (float)($invoice['amount'] ?? 0); }

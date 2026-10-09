@@ -7,6 +7,7 @@ require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
+$cafe_product_filter = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? " AND c.category_type='stock_product'" : '';
 if(!$housing_purchase) ensure_fifo_only_product_categories($conn, $user_id);
 
 $suppliers = mysqli_query(
@@ -25,6 +26,7 @@ $products = mysqli_query(
      INNER JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id='$user_id'
      AND p.status='active'
+     {$cafe_product_filter}
      ORDER BY product_name"
 );
 

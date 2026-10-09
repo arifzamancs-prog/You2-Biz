@@ -17,14 +17,7 @@ $sql = "SELECT
             t.*,
             w.wallet_name,
             fw.wallet_name AS from_wallet,
-            tw.wallet_name AS to_wallet,
-            CASE
-                WHEN t.transaction_type = 'sales_invoice'
-                    THEN COALESCE(i.customer_name, sales_customer.customer_name, '')
-                WHEN t.transaction_type = 'receive_payment'
-                    THEN COALESCE(payment_customer.customer_name, direct_customer.customer_name, '')
-                ELSE ''
-            END AS customer_name
+            tw.wallet_name AS to_wallet
         FROM transactions t
         LEFT JOIN wallets w
         ON w.id = t.wallet_id
@@ -35,19 +28,6 @@ $sql = "SELECT
         ON fw.id = tr.from_wallet_id
         LEFT JOIN wallets tw
         ON tw.id = tr.to_wallet_id
-        LEFT JOIN invoices i
-        ON i.id = t.reference_id
-        AND t.transaction_type = 'sales_invoice'
-        LEFT JOIN customers sales_customer
-        ON sales_customer.id = i.customer_id
-        LEFT JOIN customer_payments cp
-        ON cp.id = t.reference_id
-        AND t.transaction_type = 'receive_payment'
-        LEFT JOIN customers payment_customer
-        ON payment_customer.id = cp.customer_id
-        LEFT JOIN customers direct_customer
-        ON direct_customer.id = t.reference_id
-        AND t.transaction_type = 'receive_payment'
         WHERE t.user_id=? {$branch_scope}";
 
 if($from_date !== '' && $to_date !== ''){
@@ -244,7 +224,6 @@ require_once '../includes/sidebar.php';
                         <th>Date</th>
                         <th>Txn No</th>
                         <th>Type</th>
-                        <th>Customer</th>
                         <th>Wallet</th>
                         <th>Amount</th>
                         <th class="d-print-none">Note</th>
@@ -256,7 +235,7 @@ require_once '../includes/sidebar.php';
 
                     <?php if(empty($transactions)){ ?>
                     <tr>
-                        <td colspan="7" class="text-center text-muted">
+                        <td colspan="6" class="text-center text-muted">
                             No transaction found for selected date range.
                         </td>
                     </tr>
@@ -359,10 +338,6 @@ require_once '../includes/sidebar.php';
                         </td>
 
                         <td>
-                            <?= htmlspecialchars($row['customer_name'] ?? ''); ?>
-                        </td>
-
-                        <td>
                             <?= htmlspecialchars($wallet_text); ?>
                         </td>
 
@@ -386,7 +361,7 @@ require_once '../includes/sidebar.php';
 
                     <tfoot>
                     <tr>
-                        <th colspan="5" class="text-right">Total</th>
+                        <th colspan="4" class="text-right">Total</th>
                         <th>BDT <?= number_format($total_amount, 2); ?></th>
                         <th class="d-print-none"></th>
                     </tr>

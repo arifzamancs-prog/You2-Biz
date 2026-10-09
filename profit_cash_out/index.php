@@ -46,7 +46,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $cash_out_id = (int)mysqli_insert_id($conn);
 
             debit_wallet($conn, $wallet_id, $user_id, $amount);
-            record_wallet_transaction($conn, $txn_no, $user_id, $wallet_id, 'profit_cash_out', $cash_out_id, $amount, $note === '' ? 'Owner profit cash out' : $note, $txn_date);
+            record_wallet_transaction($conn, $txn_no, $user_id, $wallet_id, 'profit_cash_out', $cash_out_id, $amount, $note === '' ? 'Owner wallet cash out' : $note, $txn_date);
             mysqli_commit($conn);
             header('Location: index.php?success=1'); exit;
         }catch(Exception $exception){
@@ -57,21 +57,41 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 }
 
 $wallets = active_wallets_result($conn, $user_id);
-$history_stmt = mysqli_prepare($conn, "SELECT p.*,w.wallet_name FROM profit_cash_outs p LEFT JOIN wallets w ON w.id=p.wallet_id AND w.user_id=p.user_id WHERE p.user_id=? ORDER BY p.txn_date DESC,p.id DESC");
-mysqli_stmt_bind_param($history_stmt, 'i', $user_id); mysqli_stmt_execute($history_stmt);
-$history = mysqli_stmt_get_result($history_stmt);
+$from_date = trim((string)($_GET['from_date'] ?? ''));
+$to_date = trim((string)($_GET['to_date'] ?? ''));
+$history_branch_id = selected_branch_id($conn, false);
+
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from_date)) $from_date = '';
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to_date)) $to_date = '';
+
+$history_where = ["p.user_id={$user_id}"];
+if ($from_date !== '') $history_where[] = "p.txn_date >= '" . mysqli_real_escape_string($conn, $from_date) . "'";
+if ($to_date !== '') $history_where[] = "p.txn_date <= '" . mysqli_real_escape_string($conn, $to_date) . "'";
+if ($history_branch_id > 0) $history_where[] = "w.branch_id={$history_branch_id}";
+
+$history = mysqli_query(
+    $conn,
+    "SELECT p.*, w.wallet_name, COALESCE(NULLIF(b.branch_name, ''), 'Head Office') AS branch_name
+     FROM profit_cash_outs p
+     LEFT JOIN wallets w ON w.id=p.wallet_id AND w.user_id=p.user_id
+     LEFT JOIN branches b ON b.id=w.branch_id AND b.user_id=w.user_id
+     WHERE " . implode(' AND ', $history_where) . "
+     ORDER BY p.txn_date DESC, p.id DESC"
+);
 
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
-<div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-hand-holding-usd mr-2"></i>Profit Cash Out</h3></div><div class="card-body">
-<?php if(isset($_GET['success'])){ ?><div class="alert alert-success">Profit cash out recorded and deducted from the selected wallet.</div><script>if(window.history&&window.history.replaceState){window.history.replaceState({},document.title,window.location.pathname);}</script><?php } ?>
-<?php if(isset($_GET['updated'])){ ?><div class="alert alert-success">Profit cash out updated and wallet balance adjusted.</div><?php } ?>
-<?php if(isset($_GET['deleted'])){ ?><div class="alert alert-success">Profit cash out deleted and wallet balance restored.</div><?php } ?>
+<div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-hand-holding-usd mr-2"></i>Wallet Cash Out</h3></div><div class="card-body">
+<?php if(isset($_GET['success'])){ ?><div class="alert alert-success">Wallet cash out recorded and deducted from the selected wallet.</div><script>if(window.history&&window.history.replaceState){window.history.replaceState({},document.title,window.location.pathname);}</script><?php } ?>
+<?php if(isset($_GET['updated'])){ ?><div class="alert alert-success">Wallet cash out updated and wallet balance adjusted.</div><?php } ?>
+<?php if(isset($_GET['deleted'])){ ?><div class="alert alert-success">Wallet cash out deleted and wallet balance restored.</div><?php } ?>
 <?php if(isset($_GET['error'])){ ?><div class="alert alert-danger"><?= htmlspecialchars((string)$_GET['error']); ?></div><?php } ?>
 <?php if($error !== ''){ ?><div class="alert alert-danger"><?=htmlspecialchars($error)?></div><?php } ?>
-<div class="alert alert-info">This records the owner's profit withdrawal. It reduces the wallet balance, but it is <strong>not an expense</strong> and does not reduce the Profit Report.</div>
-<form method="post"><div class="row"><div class="col-md-4 form-group"><label>Wallet</label><select class="form-control" name="wallet_id" required><option value="">Select Wallet</option><?php while($wallet=mysqli_fetch_assoc($wallets)){ ?><option value="<?=$wallet['id']?>"><?=htmlspecialchars($wallet['wallet_name'])?> — BDT <?=number_format((float)$wallet['balance'],2)?></option><?php } ?></select></div><div class="col-md-3 form-group"><label>Cash Out Amount</label><input type="number" min="0.01" step="0.01" class="form-control" name="amount" required></div><div class="col-md-3 form-group"><label>Date</label><input type="date" class="form-control" name="txn_date" value="<?=date('Y-m-d')?>" required></div></div><div class="row"><div class="col-md-6 form-group"><label>Admin Password</label><input type="password" class="form-control" name="admin_password" autocomplete="current-password" required></div></div><div class="form-group"><label>Note</label><textarea class="form-control" name="note" rows="2" placeholder="Optional note"></textarea></div><button class="btn btn-primary">Cash Out</button></form>
+<div class="alert alert-info">This records the owner's wallet withdrawal. It reduces the wallet balance, but it is <strong>not an expense</strong> and does not affect reported earnings.</div>
+<form method="post"><div class="row"><div class="col-md-4 form-group"><label>Wallet</label><select class="form-control" name="wallet_id" required><option value="">Select Wallet</option><?php while($wallet=mysqli_fetch_assoc($wallets)){ ?><option value="<?=$wallet['id']?>"><?=htmlspecialchars($wallet['wallet_name'])?> — <?=htmlspecialchars($wallet['branch_name'])?> — BDT <?=number_format((float)$wallet['balance'],2)?></option><?php } ?></select></div><div class="col-md-3 form-group"><label>Cash Out Amount</label><input type="number" min="0.01" step="0.01" class="form-control" name="amount" required></div><div class="col-md-3 form-group"><label>Date</label><input type="date" class="form-control" name="txn_date" value="<?=date('Y-m-d')?>" required></div></div><div class="row"><div class="col-md-6 form-group"><label>Admin Password</label><input type="password" class="form-control" name="admin_password" autocomplete="current-password" required></div></div><div class="form-group"><label>Note</label><textarea class="form-control" name="note" rows="2" placeholder="Optional note"></textarea></div><button class="btn btn-primary">Cash Out</button></form>
 </div></div>
 <script>document.addEventListener('DOMContentLoaded',function(){var w=document.querySelector('select[name="wallet_id"]'),a=document.querySelector('input[name="amount"]');if(a){a.value='0';}if(w&&a){w.addEventListener('change',function(){a.value='0';});}});</script>
-<div class="card"><div class="card-header"><h3 class="card-title">Profit Cash Out History</h3></div><div class="card-body"><table id="example1" class="table table-bordered table-striped"><thead><tr><th>Transaction No.</th><th>Date</th><th>Wallet</th><th>Amount</th><th>Note</th><th width="120">Action</th></tr></thead><tbody><?php while($row=mysqli_fetch_assoc($history)){ ?><tr><td><?=htmlspecialchars($row['txn_no'])?></td><td><?=htmlspecialchars(app_date($row['txn_date']))?></td><td><?=htmlspecialchars($row['wallet_name'] ?: ('Missing Wallet #' . (int)$row['wallet_id']))?></td><td>BDT <?=number_format((float)$row['amount'],2)?></td><td><?=htmlspecialchars($row['note'] ?? '')?></td><td><a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm" title="Edit Profit Cash Out" aria-label="Edit Profit Cash Out"><i class="fas fa-edit"></i></a> <a href="delete.php?id=<?= (int)$row['id']; ?>" class="btn btn-danger btn-sm" title="Delete Profit Cash Out" aria-label="Delete Profit Cash Out" onclick="return confirm('Delete this profit cash out entry? Wallet balance will be restored.');"><i class="fas fa-trash"></i></a></td></tr><?php } ?></tbody></table></div></div>
+<div class="card"><div class="card-header"><h3 class="card-title">Wallet Cash Out History</h3></div><div class="card-body">
+<form method="get" class="mb-3"><div class="row align-items-end"><div class="col-md-4 form-group mb-md-0"><label>From Date</label><input type="date" class="form-control" name="from_date" value="<?= htmlspecialchars($from_date) ?>"></div><div class="col-md-4 form-group mb-md-0"><label>To Date</label><input type="date" class="form-control" name="to_date" value="<?= htmlspecialchars($to_date) ?>"></div><div class="col-md-4 form-group mb-md-0"><button class="btn btn-primary"><i class="fas fa-search"></i> Search</button> <a href="index.php" class="btn btn-secondary">Reset</a></div></div></form>
+<table id="example1" class="table table-bordered table-striped"><thead><tr><th>SL</th><th>Transaction No.</th><th>Date</th><th>Branch</th><th>Wallet</th><th>Amount</th><th>Note</th><th width="120">Action</th></tr></thead><tbody><?php $sl = 1; while($row=mysqli_fetch_assoc($history)){ ?><tr><td><?= $sl++ ?></td><td><?=htmlspecialchars($row['txn_no'])?></td><td><?=htmlspecialchars(app_date($row['txn_date']))?></td><td><?=htmlspecialchars($row['branch_name'])?></td><td><?=htmlspecialchars($row['wallet_name'] ?: ('Missing Wallet #' . (int)$row['wallet_id']))?></td><td>BDT <?=number_format((float)$row['amount'],2)?></td><td><?=htmlspecialchars($row['note'] ?? '')?></td><td><a href="edit.php?id=<?= (int)$row['id']; ?>" class="btn btn-warning btn-sm" title="Edit Wallet Cash Out" aria-label="Edit Wallet Cash Out"><i class="fas fa-edit"></i></a> <a href="delete.php?id=<?= (int)$row['id']; ?>" class="btn btn-danger btn-sm" title="Delete Wallet Cash Out" aria-label="Delete Wallet Cash Out" onclick="return confirm('Delete this wallet cash out entry? Wallet balance will be restored.');"><i class="fas fa-trash"></i></a></td></tr><?php } ?></tbody></table></div></div>
 <?php require_once '../includes/footer.php'; ?>

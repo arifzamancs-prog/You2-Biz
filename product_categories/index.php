@@ -4,6 +4,11 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
+if(($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'){
+    require_once '../restaurant/categories_index.php';
+    exit;
+}
+
 $user_id = $_SESSION['user_id'];
 
 ensure_fifo_only_product_categories($conn, $user_id);
@@ -94,7 +99,11 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <td><?= htmlspecialchars($row['category_name']); ?></td>
+                <td><?= htmlspecialchars($row['category_name']); ?>
+                    <?php if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') { ?>
+                    <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
+                    <?php } ?>
+                </td>
                 <td><?= htmlspecialchars($row['sub_category'] ?: '-'); ?></td>
                 <td><?= htmlspecialchars($row['variant_options'] ?: '-'); ?></td>
 

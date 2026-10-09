@@ -2,6 +2,15 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/product_category_helper.php';
+require_once '../includes/supplier_helper.php';
+
+if (restaurant_catalog_enabled($conn, (int)$_SESSION['user_id'])) {
+    ensure_restaurant_supplier_code_column($conn);
+    require_once '../restaurant/suppliers_create.php';
+    exit;
+}
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';

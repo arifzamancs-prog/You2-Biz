@@ -4,6 +4,8 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
+require_once '../includes/product_category_helper.php';
+require_once '../includes/supplier_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -18,6 +20,12 @@ $supplier_name = trim($_POST['supplier_name'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
 $email = trim($_POST['email'] ?? '');
 $address = trim($_POST['address'] ?? '');
+$is_restaurant_catalog = restaurant_catalog_enabled($conn, $user_id);
+$supplier_code = trim($_POST['supplier_code'] ?? '');
+
+if($is_restaurant_catalog){
+    ensure_restaurant_supplier_code_column($conn);
+}
 
 $supplier_name = normalize_person_name($supplier_name);
 $phone = normalize_phone_input($phone);
@@ -60,7 +68,22 @@ if(
     exit;
 }
 
-$sql = "INSERT INTO suppliers
+if($is_restaurant_catalog && $supplier_code !== ''){
+    $code_stmt = mysqli_prepare($conn, 'SELECT id FROM suppliers WHERE user_id=? AND supplier_code=? LIMIT 1');
+    mysqli_stmt_bind_param($code_stmt, 'is', $user_id, $supplier_code);
+    mysqli_stmt_execute($code_stmt);
+    $duplicate_code = (bool)mysqli_fetch_assoc(mysqli_stmt_get_result($code_stmt));
+    mysqli_stmt_close($code_stmt);
+    if($duplicate_code){
+        $_SESSION['error'] = 'This Supplier ID is already in use.';
+        header("Location:create.php");
+        exit;
+    }
+}
+
+$sql = $is_restaurant_catalog
+    ? "INSERT INTO suppliers (user_id, supplier_code, supplier_name, phone, email, address, status) VALUES (?, ?, ?, ?, ?, ?, 'active')"
+    : "INSERT INTO suppliers
         (
             user_id,
             supplier_name,
@@ -76,15 +99,11 @@ $sql = "INSERT INTO suppliers
 
 $stmt = mysqli_prepare($conn,$sql);
 
-mysqli_stmt_bind_param(
-    $stmt,
-    "issss",
-    $user_id,
-    $supplier_name,
-    $phone,
-    $email,
-    $address
-);
+if($is_restaurant_catalog){
+    mysqli_stmt_bind_param($stmt, "isssss", $user_id, $supplier_code, $supplier_name, $phone, $email, $address);
+}else{
+    mysqli_stmt_bind_param($stmt, "issss", $user_id, $supplier_name, $phone, $email, $address);
+}
 
 if(mysqli_stmt_execute($stmt)){
 

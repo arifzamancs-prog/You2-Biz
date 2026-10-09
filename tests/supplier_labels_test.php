@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/supplier_label_helper.php';
-foreach (['Stock Product' => 'Vendors / Add Vendor / vendor', 'Housing' => 'Suppliers / Add Supplier / supplier', 'Others' => 'Suppliers / Add Supplier / supplier'] as $type => $expected) {
+foreach (['Stock Product' => 'Vendors / Add Vendor / vendor', 'Housing' => 'Suppliers / Add Supplier / supplier', 'Service type' => 'Suppliers / Add Supplier / supplier'] as $type => $expected) {
     $_SESSION['company_type'] = $type;
     if (supplier_display_text('Suppliers / Add Supplier / supplier') !== $expected) {
         throw new RuntimeException('Incorrect terminology for ' . $type);

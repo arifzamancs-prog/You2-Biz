@@ -286,6 +286,10 @@ function purchase_prepare_items($conn, $user_id)
             }
         }
 
+        if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'
+            && !product_uses_stock($conn, $product_id, $user_id)) {
+            throw new Exception('Prepared food is non-stock and cannot be received as purchased stock.');
+        }
         $product_variants = product_variant_names($conn, $product_id, $user_id);
         if(!empty($product_variants)){
             $line_variants = $variant_quantities[$key] ?? [];

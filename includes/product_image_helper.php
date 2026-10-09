@@ -29,14 +29,20 @@ function product_save_compressed_photo($upload, &$error = '')
 {
     if(empty($upload['tmp_name']) || (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return '';
     if((int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK){ $error = 'Product photo upload failed.'; return ''; }
+    $restaurant_photo_rules = (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe');
+    if($restaurant_photo_rules && (int)($upload['size'] ?? 0) > 2 * 1024 * 1024){ $error = 'Photo must be 2 MB or smaller.'; return ''; }
     $image = @getimagesize($upload['tmp_name']);
     if(!$image || !in_array($image[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true)){ $error = 'Use a JPG, PNG, or WEBP product photo.'; return ''; }
     $directory = product_image_upload_dir();
     if(!is_dir($directory) && !@mkdir($directory, 0775, true)){ $error = 'Product photo upload folder could not be created.'; return ''; }
-    $filename = 'product-' . date('YmdHis') . '-' . bin2hex(random_bytes(5)) . '.jpg';
+    $source_extension = $image[2] === IMAGETYPE_PNG ? 'png' : ($image[2] === IMAGETYPE_WEBP ? 'webp' : 'jpg');
+    // Restaurant uploads retain their valid original format if GD is unavailable.
+    // All existing non-restaurant upload behavior remains JPEG-only.
+    $extension = function_exists('imagecreatetruecolor') || !$restaurant_photo_rules ? 'jpg' : $source_extension;
+    $filename = 'product-' . date('YmdHis') . '-' . bin2hex(random_bytes(5)) . '.' . $extension;
     $target = $directory . '/' . $filename;
     if(!function_exists('imagecreatetruecolor')){
-        if((int)filesize($upload['tmp_name']) > 50 * 1024){ $error = 'Photo must be 50 KB or smaller.'; return ''; }
+        if(!$restaurant_photo_rules && (int)filesize($upload['tmp_name']) > 50 * 1024){ $error = 'Photo must be 50 KB or smaller.'; return ''; }
         if(!move_uploaded_file($upload['tmp_name'], $target)){ $error = 'Product photo could not be saved.'; return ''; }
         return $filename;
     }

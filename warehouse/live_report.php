@@ -7,7 +7,8 @@ require_once '../includes/product_image_helper.php';
 require_once '../includes/product_category_helper.php';
 $company_id = (int)$_SESSION['user_id'];
 ensure_product_subcategory_schema($conn);
-if (project_package_company_type($conn, $company_id) !== 'Fashion house'
+if (!in_array(project_package_company_type($conn, $company_id), ['Stock Product', 'Fashion house'], true)
+    || !company_multi_branch_enabled($conn, $company_id)
     || (is_manager_user() && !manager_has_permission('stock_live_report'))) {
     http_response_code(403); exit('Live report access is required.');
 }

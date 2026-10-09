@@ -48,13 +48,17 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     trim($_POST['category_name']);
     $sub_category = implode(', ', product_variant_options_from_text($_POST['sub_category_options'] ?? ''));
 
-    $category_type = 'stock_product';
+    $category_type = restaurant_catalog_enabled($conn, $user_id) && ($_POST['category_type'] ?? '') === 'non_stock'
+        ? 'non_stock' : 'stock_product';
 
     $status =
     $_POST['status'];
     $variant_options = implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''));
 
-    if($category_name === ''){
+    if ($category_type !== $category['category_type'] && product_category_has_usage($conn, $id, $user_id)) {
+        $message = 'This category is in use. Create a new category to use a different product type.';
+        $message_type = 'danger';
+    }elseif($category_name === ''){
         $message = 'Category name is required.';
         $message_type = 'danger';
     }elseif(product_category_name_exists($conn, $user_id, $category_name, $id)){
@@ -140,6 +144,15 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <form method="post">
+            <?php if (restaurant_catalog_enabled($conn, $user_id)) { ?>
+            <div class="form-group">
+                <label for="category_type">Product Type</label>
+                <select id="category_type" name="category_type" class="form-control">
+                    <option value="non_stock" <?= $category['category_type'] === 'non_stock' ? 'selected' : '' ?>>Non Stock</option>
+                    <option value="stock_product" <?= $category['category_type'] === 'stock_product' ? 'selected' : '' ?>>Stock Product</option>
+                </select>
+            </div>
+            <?php } ?>
 
             <div class="form-group">
 
@@ -156,6 +169,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
+            <?php if (!restaurant_catalog_enabled($conn, $user_id)) { ?>
             <div class="form-group">
                 <label>Sub Category <small class="text-muted">(Optional)</small></label>
                 <input type="hidden" name="sub_category_options" id="sub_category_options" value="<?= htmlspecialchars($category['sub_category'] ?? ''); ?>">
@@ -176,6 +190,7 @@ require_once '../includes/sidebar.php';
                 </div>
                 <div id="variant_list" class="mt-2 d-flex flex-wrap"></div>
             </div>
+            <?php } ?>
 
             <div class="form-group">
 
@@ -231,6 +246,7 @@ require_once '../includes/sidebar.php';
 
 </div>
 
+<?php if (!restaurant_catalog_enabled($conn, $user_id)) { ?>
 <script>
 (function(){
     const source=document.getElementById('sub_category_value'), hidden=document.getElementById('sub_category_options'), list=document.getElementById('sub_category_list'), add=document.getElementById('add_sub_category');
@@ -247,6 +263,7 @@ require_once '../includes/sidebar.php';
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});render();
 })();
 </script>
+<?php } ?>
 
 <?php
 require_once '../includes/footer.php';

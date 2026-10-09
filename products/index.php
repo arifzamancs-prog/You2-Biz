@@ -8,6 +8,13 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 require_once '../includes/project_package_helper.php';
 
+// Use the company's saved type so the Restaurant & Cafe catalogue is shown
+// even if an older staff session has not yet refreshed its session value.
+if(restaurant_catalog_enabled($conn, (int)$_SESSION['user_id'])){
+    require_once '../restaurant/products_index.php';
+    exit;
+}
+
 $user_id = $_SESSION['user_id'];
 ensure_product_management_columns($conn);
 ensure_product_image_column($conn);
@@ -206,6 +213,9 @@ require_once '../includes/sidebar.php';
 
                 <td>
                     <?= htmlspecialchars($row['category_name']); ?>
+                    <?php if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') { ?>
+                    <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
+                    <?php } ?>
                     <?php if(!empty($row['product_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['product_sub_category']); ?>]</div><?php } ?>
                 </td>
 
@@ -226,7 +236,7 @@ require_once '../includes/sidebar.php';
                 <?php } ?>
 
                 <td>
-                    <?= number_format($row['current_stock'], 0); ?>
+                    <?= $row['category_type'] === 'non_stock' ? 'Not tracked' : number_format($row['current_stock'], 0); ?>
                     <?php
                     $variant_quantities = [];
                     while($variant_stock = mysqli_fetch_assoc($variant_stocks)){
@@ -246,7 +256,7 @@ require_once '../includes/sidebar.php';
 
                 <?php if($multi_branch){ ?>
                     <td class="all-branch-stock-column">
-                        <?= number_format($row['total_stock'], 0); ?>
+                        <?= $row['category_type'] === 'non_stock' ? 'Not tracked' : number_format($row['total_stock'], 0); ?>
                         <?php
                         $total_variant_order = array_unique(array_merge(
                             product_variant_names($conn, (int)$row['id'], $user_id),

@@ -18,6 +18,7 @@ $show_expired_on = is_product_expiry_enabled($conn);
 
 $message = '';
 $message_type = '';
+$form_data = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : [];
 
 /*
 |----------------------------------
@@ -92,8 +93,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
 
-    if(!$is_stock_product){
-        $message = 'Please select an active FIFO product category.';
+    if(!product_category_allows_creation($conn, $category_id, $user_id)){
+        $message = 'Please select an active product category.';
         $message_type = 'danger';
     }else{
 
@@ -128,6 +129,10 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         ? (int)($_POST['current_stock'] ?? 0)
         : array_sum($variant_opening);
     $minimum_stock = (int)($_POST['minimum_stock'] ?? 0);
+    if (!$is_stock_product) {
+        $opening_stock = $minimum_stock = 0;
+        $variant_opening = array_fill_keys($category_variants, 0);
+    }
 
     $status =
     $_POST['status'];
@@ -236,6 +241,13 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     }
 }
 
+// Restaurant & Cafe has a concise product form: menu items do not need
+// inventory fields, while stock items reveal them only when selected.
+if (restaurant_catalog_enabled($conn, $user_id)) {
+    require_once '../restaurant/products_create.php';
+    exit;
+}
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -288,7 +300,7 @@ require_once '../includes/sidebar.php';
 
                             <?php while($cat = mysqli_fetch_assoc($categories)){ ?>
 
-                                <option value="<?= $cat['id']; ?>" data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>' data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'>
+                                <option value="<?= $cat['id']; ?>" data-product-type="<?= htmlspecialchars($cat['category_type'], ENT_QUOTES) ?>" <?= (string)$cat['id'] === (string)($form_data['category_id'] ?? '') ? 'selected' : '' ?> data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>' data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'>
 
                                     <?= htmlspecialchars($cat['category_name']); ?>
 
@@ -305,7 +317,7 @@ require_once '../includes/sidebar.php';
                 <div class="col-md-6">
                     <div class="form-group">
                         <label>Sub Category</label>
-                        <select name="sub_category" id="sub_category" class="form-control"><option value="">Select sub category</option></select>
+                        <select name="sub_category" id="sub_category" class="form-control" data-selected="<?= htmlspecialchars((string)($form_data['sub_category'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"><option value="">Select sub category</option></select>
                     </div>
                 </div>
 
@@ -321,6 +333,7 @@ require_once '../includes/sidebar.php';
                             type="text"
                             name="product_name"
                             class="form-control"
+                            value="<?= htmlspecialchars((string)($form_data['product_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
                             required>
 
                     </div>
@@ -344,7 +357,8 @@ require_once '../includes/sidebar.php';
                         <input
                             type="text"
                             name="sku"
-                            class="form-control">
+                            class="form-control"
+                            value="<?= htmlspecialchars((string)($form_data['sku'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 
                     </div>
 
@@ -369,7 +383,7 @@ require_once '../includes/sidebar.php';
                             min="0"
                             name="purchase_price"
                             class="form-control"
-                            value="0">
+                            value="<?= htmlspecialchars((string)($form_data['purchase_price'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>">
 
                     </div>
 
@@ -388,7 +402,7 @@ require_once '../includes/sidebar.php';
                             step="0.01"
                             name="sale_price"
                             class="form-control"
-                            value="0">
+                            value="<?= htmlspecialchars((string)($form_data['sale_price'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>">
 
                     </div>
 
@@ -406,7 +420,8 @@ require_once '../includes/sidebar.php';
                         <input
                             type="date"
                             name="expired_on"
-                            class="form-control">
+                            class="form-control"
+                            value="<?= htmlspecialchars((string)($form_data['expired_on'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 
                     </div>
 
@@ -431,7 +446,7 @@ require_once '../includes/sidebar.php';
                             min="0"
                             name="current_stock"
                             class="form-control"
-                            value="0">
+                            value="<?= htmlspecialchars((string)($form_data['current_stock'] ?? '0'), ENT_QUOTES, 'UTF-8') ?>">
 
                     </div>
 
@@ -451,7 +466,7 @@ require_once '../includes/sidebar.php';
                         min="0"
                         name="minimum_stock"
                         class="form-control"
-                        value="5">
+                        value="<?= htmlspecialchars((string)($form_data['minimum_stock'] ?? '5'), ENT_QUOTES, 'UTF-8') ?>">
 
                 </div>
 
@@ -469,11 +484,11 @@ require_once '../includes/sidebar.php';
                             name="status"
                             class="form-control">
 
-                            <option value="active">
+                            <option value="active" <?= ($form_data['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>
                                 Active
                             </option>
 
-                            <option value="inactive">
+                            <option value="inactive" <?= ($form_data['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>
                                 Inactive
                             </option>
 
@@ -512,17 +527,21 @@ require_once '../includes/sidebar.php';
 <script>
 (function(){
 const category=document.getElementById('category_id'), subCategory=document.getElementById('sub_category'), opening=document.querySelector('[name="current_stock"]'), wrap=document.getElementById('variant-opening-wrap'), fields=document.getElementById('variant-opening-fields');
+const savedVariantQuantities=<?= json_encode($form_data['variant_opening_qty'] ?? [], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 function syncVariants(){
   const option=category.options[category.selectedIndex]; let variants=[];
   let subCategories=[]; try{subCategories=JSON.parse(option.dataset.subCategories||'[]')}catch(e){}
   subCategory.innerHTML='<option value="">'+(subCategories.length?'Select sub category':'No sub category')+'</option>';
-  subCategories.forEach(name=>{const item=document.createElement('option');item.value=name;item.textContent=name;subCategory.appendChild(item);});
+  subCategories.forEach(name=>{const item=document.createElement('option');item.value=name;item.textContent=name;if(name===subCategory.dataset.selected)item.selected=true;subCategory.appendChild(item);});
   subCategory.disabled=subCategories.length===0;
   try{variants=JSON.parse(option.dataset.variants||'[]')}catch(e){}
   fields.innerHTML=''; wrap.classList.toggle('d-none',variants.length===0); opening.disabled=variants.length>0;
+  const nonStock=option.dataset.productType==='non_stock';
+  [opening, document.querySelector('[name="minimum_stock"]')].forEach(input=>{if(input){input.closest('.form-group').classList.toggle('d-none',nonStock);if(nonStock)input.value=0;}});
+  if(nonStock){wrap.classList.add('d-none');opening.disabled=true;return;}
   if(!variants.length){ return; }
   const updateTotal=()=>{let total=0; fields.querySelectorAll('input').forEach(input=>{total+=Math.max(0,parseInt(input.value,10)||0);}); opening.value=total;};
-  variants.forEach(variant=>{const div=document.createElement('div'); div.className='col-md-4'; const label=document.createElement('label'); label.textContent=variant; const input=document.createElement('input'); input.type='number'; input.min='0'; input.step='1'; input.value='0'; input.className='form-control'; input.name='variant_opening_qty['+variant+']'; input.addEventListener('input',updateTotal); div.append(label,input); fields.append(div);});
+  variants.forEach(variant=>{const div=document.createElement('div'); div.className='col-md-4'; const label=document.createElement('label'); label.textContent=variant; const input=document.createElement('input'); input.type='number'; input.min='0'; input.step='1'; input.value=savedVariantQuantities[variant] ?? '0'; input.className='form-control'; input.name='variant_opening_qty['+variant+']'; input.addEventListener('input',updateTotal); div.append(label,input); fields.append(div);});
   updateTotal();
 }
 category.addEventListener('change',syncVariants); syncVariants();

@@ -1,10 +1,20 @@
 <?php
 
+require_once __DIR__ . '/company_settings_helper.php';
+
 function ensure_restaurant_tables_table($conn)
 {
     $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'table_system_enabled'");
     if ($column && mysqli_num_rows($column) === 0) {
         mysqli_query($conn, "ALTER TABLE users ADD COLUMN table_system_enabled TINYINT(1) NOT NULL DEFAULT 1");
+    }
+    $reference_column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'restaurant_invoice_reference_type'");
+    if ($reference_column && mysqli_num_rows($reference_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN restaurant_invoice_reference_type VARCHAR(10) NOT NULL DEFAULT 'staff'");
+    }
+    $reference_enabled_column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'restaurant_invoice_reference_enabled'");
+    if ($reference_enabled_column && mysqli_num_rows($reference_enabled_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN restaurant_invoice_reference_enabled TINYINT(1) NOT NULL DEFAULT 1");
     }
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS restaurant_tables (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -26,7 +36,38 @@ function ensure_restaurant_tables_table($conn)
     }
 }
 
+function restaurant_invoice_reference_type($conn, $user_id)
+{
+    $stmt = mysqli_prepare($conn, 'SELECT restaurant_invoice_reference_type FROM users WHERE id=? LIMIT 1');
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return ($row['restaurant_invoice_reference_type'] ?? 'staff') === 'table' ? 'table' : 'staff';
+}
+
+function restaurant_invoice_reference_enabled($conn, $user_id)
+{
+    $stmt = mysqli_prepare($conn, 'SELECT restaurant_invoice_reference_enabled FROM users WHERE id=? LIMIT 1');
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return !isset($row['restaurant_invoice_reference_enabled']) || (int)$row['restaurant_invoice_reference_enabled'] === 1;
+}
+
 function table_system_enabled($conn, $user_id)
 {
-    return false;
+    $user_id = (int)$user_id;
+    if ($user_id <= 0) return false;
+
+    $stmt = mysqli_prepare($conn, 'SELECT company_type FROM users WHERE id=? AND role=\'admin\' LIMIT 1');
+    if (!$stmt) return false;
+
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+    return $company
+        && normalize_company_type($company['company_type'] ?? '') === 'Restaurant & Cafe';
 }

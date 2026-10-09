@@ -438,7 +438,7 @@ if($is_manager && !empty($user['staff_photo'])){
 
                         <div class="mt-2 text-left">
                             <strong>Company Type:</strong>
-                            <span><?= htmlspecialchars((string)($user['company_type'] ?? '')); ?></span>
+                            <span><?= htmlspecialchars(company_type_label($user['company_type'] ?? 'Housing')); ?></span>
                         </div>
 
                 </div>

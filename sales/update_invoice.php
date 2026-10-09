@@ -24,6 +24,8 @@ ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
 $table_system_is_enabled = table_system_enabled($conn, $user_id);
+$restaurant_invoice_reference_enabled = $table_system_is_enabled && restaurant_invoice_reference_enabled($conn, $user_id);
+$restaurant_invoice_reference_type = $table_system_is_enabled ? restaurant_invoice_reference_type($conn, $user_id) : 'staff';
 
 if($_SERVER['REQUEST_METHOD'] != 'POST'){
     header("Location: invoice_list.php");
@@ -64,12 +66,25 @@ try{
 
     $payment_status = $_POST['payment_status'];
     $notes          = trim($_POST['notes']);
-    $staff_id       = (int)($_POST['staff_id'] ?? 0);
-    $restaurant_table_id = (int)($_POST['restaurant_table_id'] ?? 0);
+    $existing_reference_stmt = mysqli_prepare($conn, 'SELECT staff_id, restaurant_table_id FROM invoices WHERE id=? AND user_id=? LIMIT 1');
+    mysqli_stmt_bind_param($existing_reference_stmt, 'ii', $invoice_id, $user_id);
+    mysqli_stmt_execute($existing_reference_stmt);
+    $existing_reference = mysqli_fetch_assoc(mysqli_stmt_get_result($existing_reference_stmt)) ?: [];
+    $staff_id       = array_key_exists('staff_id', $_POST) ? (int)$_POST['staff_id'] : (int)($existing_reference['staff_id'] ?? 0);
+    $restaurant_table_id = array_key_exists('restaurant_table_id', $_POST) ? (int)$_POST['restaurant_table_id'] : (int)($existing_reference['restaurant_table_id'] ?? 0);
     if(!$table_system_is_enabled){ $staff_id = 0; $restaurant_table_id = 0; }
+    $invoice_has_reference = (int)($existing_reference['staff_id'] ?? 0) > 0 || (int)($existing_reference['restaurant_table_id'] ?? 0) > 0;
+    if($restaurant_invoice_reference_enabled && $invoice_has_reference && (($restaurant_invoice_reference_type === 'table' && $restaurant_table_id <= 0) || ($restaurant_invoice_reference_type === 'staff' && $staff_id <= 0))){
+        throw new Exception('Please select a reference before updating the invoice.');
+    }
 
     if($restaurant_table_id > 0 && $staff_id === 0){
-        throw new Exception('Select the staff before selecting a table.');
+        $table_staff_stmt = mysqli_prepare($conn, "SELECT staff_id FROM restaurant_tables WHERE id=? AND user_id=? AND status='active'");
+        mysqli_stmt_bind_param($table_staff_stmt, 'ii', $restaurant_table_id, $user_id);
+        mysqli_stmt_execute($table_staff_stmt);
+        $table_staff = mysqli_fetch_assoc(mysqli_stmt_get_result($table_staff_stmt));
+        $staff_id = (int)($table_staff['staff_id'] ?? 0);
+        if($staff_id <= 0) throw new Exception('The selected table is not assigned to a staff member.');
     }
     if($staff_id > 0){
         $stmt = mysqli_prepare($conn, "SELECT id FROM staff WHERE id=? AND user_id=?");

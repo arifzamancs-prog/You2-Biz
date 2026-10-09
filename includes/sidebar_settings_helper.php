@@ -4,6 +4,7 @@ require_once __DIR__ . '/supplier_label_helper.php';
 require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 require_once __DIR__ . '/multi_branch_helper.php';
+require_once __DIR__ . '/restaurant_module_helper.php';
 
 function ensure_sidebar_settings_table($conn)
 {
@@ -133,7 +134,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('dump_approval', 'Dumps Approval', app_path('user_management/dump_approval.php'), 'admin', 135),
         sidebar_setting_item('invoice_charges', 'Invoice Charges', app_path('user_management/invoice_charges.php'), 'admin', 135),
         sidebar_setting_item('printing_option', 'Printing Option', app_path('user_management/printing_option.php'), 'admin', 136),
-        sidebar_setting_item('profit_cash_out', 'Profit Cash Out', app_path('profit_cash_out/index.php'), 'admin', 137),
+        sidebar_setting_item('profit_cash_out', 'Wallet Cash Out', app_path('profit_cash_out/index.php'), 'admin', 137),
         sidebar_setting_item('sidebar_settings', 'Slidebar Settings', app_path('user_management/sidebar_settings.php'), 'admin', 138),
         sidebar_setting_item('tools', 'Tools', '', '', 140),
         sidebar_setting_item('export_data', 'Export Data', app_path('tools/export.php'), 'tools', 141),
@@ -289,7 +290,17 @@ function sidebar_layout_items_for_current_user($items)
     foreach($items as $item){
         $id = (string)($item['id'] ?? '');
 
+        if (restaurant_module_active() && in_array($id, ['stock_product', 'stock_damaged_return', 'stock_receive_request', 'stock_report'], true)) {
+            continue;
+        }
+
         if($id === 'branch_manage' && (!($conn instanceof mysqli) || !company_multi_branch_enabled($conn, $company_id))){
+            continue;
+        }
+
+        // A single-branch company sells directly from Head Office; it has no
+        // separate Main Warehouse to manage.
+        if($id === 'warehouse' && (!($conn instanceof mysqli) || !company_multi_branch_enabled($conn, $company_id))){
             continue;
         }
 
@@ -305,7 +316,13 @@ function sidebar_layout_items_for_current_user($items)
             continue;
         }
 
-        if(in_array($id, ['dump_approval', 'live_report'], true) && !$is_fashion_house){
+        if($id === 'live_report' && (!($conn instanceof mysqli)
+            || !in_array(project_package_company_type($conn, $company_id), ['Stock Product', 'Fashion house'], true)
+            || !company_multi_branch_enabled($conn, $company_id))){
+            continue;
+        }
+
+        if($id === 'dump_approval' && !$is_fashion_house){
             continue;
         }
 

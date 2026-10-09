@@ -593,10 +593,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $company_type = normalize_company_type($company_type);
 
         $stock_enabled = company_type_uses_stock_products($company_type) ? 1 : 0;
+        $table_enabled = $company_type === 'Restaurant & Cafe' ? 1 : 0;
         $type_stmt = mysqli_prepare(
             $conn,
             "UPDATE users
-             SET company_type=?, fifo_enabled=?
+             SET company_type=?, fifo_enabled=?, table_system_enabled=?
              WHERE id=?
              AND role='admin'
              LIMIT 1"
@@ -606,7 +607,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Company type update failed.', 'danger');
         }
 
-        mysqli_stmt_bind_param($type_stmt, 'sii', $company_type, $stock_enabled, $company_id);
+        mysqli_stmt_bind_param($type_stmt, 'siii', $company_type, $stock_enabled, $table_enabled, $company_id);
 
         if(mysqli_stmt_execute($type_stmt)){
             super_admin_flash_and_redirect('Company type updated successfully.', 'success');
@@ -1150,7 +1151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 currency_code=?,
                 timezone_name=?,
                 date_format=?,
-                table_system_enabled=?
+                table_system_enabled=IF(company_type='Restaurant & Cafe', ?, 0)
             WHERE id=?
             AND role='admin'";
 
@@ -1444,7 +1445,6 @@ require_once '../includes/sidebar.php';
                 <tr>
                     <th>Company</th>
                     <th>Contact</th>
-                    <th>Status</th>
                     <th>Usage</th>
                     <th>Subscription</th>
                     <th width="360">Control</th>
@@ -1485,10 +1485,9 @@ require_once '../includes/sidebar.php';
                                 <div class="input-group input-group-sm">
                                     <?php $company_type = normalize_company_type($row['company_type'] ?? 'Housing'); ?>
                                     <select name="company_type" class="form-control">
-                                        <option value="Housing" <?= $company_type === 'Housing' ? 'selected' : ''; ?>>Housing</option>
-                                        <option value="Others" <?= $company_type === 'Others' ? 'selected' : ''; ?>>Others</option>
-                                        <option value="Stock Product" <?= $company_type === 'Stock Product' ? 'selected' : ''; ?>>Stock Product</option>
-                                        <option value="Fashion house" <?= $company_type === 'Fashion house' ? 'selected' : ''; ?>>Fashion house</option>
+                                        <?php foreach (company_type_options() as $type_key => $type_label) { ?>
+                                        <option value="<?= htmlspecialchars($type_key) ?>" <?= $company_type === $type_key ? 'selected' : '' ?>><?= htmlspecialchars($type_label) ?></option>
+                                        <?php } ?>
                                     </select>
                                     <div class="input-group-append">
                                         <button type="submit" class="btn btn-primary">Update</button>
@@ -1602,6 +1601,13 @@ require_once '../includes/sidebar.php';
                             </form>
                         </td>
                         <td>
+                            <?php $is_unlimited_plan = strtolower($row['subscription_status'] ?? '') === 'active'; ?>
+                            Managers: <?= (int)$row['manager_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_managers']; ?><br>
+                            Products: <?= (int)$row['product_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_products']; ?><br>
+                            Invoices: <?= (int)$row['invoice_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_invoices_monthly']; ?><br>
+                            SMS: <?= (int)$row['sms_quota_used']; ?> / <?= (int)$row['sms_quota_total']; ?>
+                        </td>
+                        <td>
                             <?php
                             $subscription_badge = [
                                 'trial' => 'info',
@@ -1614,22 +1620,10 @@ require_once '../includes/sidebar.php';
                             <span class="badge badge-<?= htmlspecialchars($subscription_badge[$subscription_key] ?? 'secondary'); ?>">
                                 <?= htmlspecialchars(ucfirst($subscription_key)); ?>
                             </span>
+                            <span class="badge badge-<?= (int)($row['email_verified'] ?? 0) === 1 ? 'success' : 'warning'; ?> ml-1">
+                                Email <?= (int)($row['email_verified'] ?? 0) === 1 ? 'Verified' : 'Not Verified'; ?>
+                            </span>
                             <br>
-                            <small class="text-muted">
-                                Email:
-                                <span class="badge badge-<?= (int)($row['email_verified'] ?? 0) === 1 ? 'success' : 'warning'; ?>">
-                                    <?= (int)($row['email_verified'] ?? 0) === 1 ? 'Verified' : 'Not Verified'; ?>
-                                </span>
-                            </small>
-                        </td>
-                        <td>
-                            <?php $is_unlimited_plan = strtolower($row['subscription_status'] ?? '') === 'active'; ?>
-                            Managers: <?= (int)$row['manager_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_managers']; ?><br>
-                            Products: <?= (int)$row['product_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_products']; ?><br>
-                            Invoices: <?= (int)$row['invoice_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_invoices_monthly']; ?><br>
-                            SMS: <?= (int)$row['sms_quota_used']; ?> / <?= (int)$row['sms_quota_total']; ?>
-                        </td>
-                        <td>
                             <?= htmlspecialchars(strtolower($row['subscription_plan']) === 'trial' ? 'Trial' : $row['subscription_plan']); ?><br>
                             <small class="text-muted">
                                 Expires: <?= htmlspecialchars(!empty($row['subscription_expires_at']) ? app_date($row['subscription_expires_at']) : '-'); ?>
@@ -1692,17 +1686,6 @@ require_once '../includes/sidebar.php';
                                             name="subscription_expires_at"
                                             class="form-control form-control-sm subscription-expires-input"
                                             value="<?= htmlspecialchars($row['subscription_expires_at'] ?? ''); ?>">
-                                    </div>
-                                </div>
-
-                                <div class="form-row">
-                                    <div class="form-group col-md-6">
-                                        <label>Table System</label>
-                                        <select name="table_system_enabled" class="form-control form-control-sm">
-                                            <option value="1" <?= (int)($row['table_system_enabled'] ?? 1) === 1 ? 'selected' : ''; ?>>Active</option>
-                                            <option value="0" <?= (int)($row['table_system_enabled'] ?? 1) === 0 ? 'selected' : ''; ?>>Disabled</option>
-                                        </select>
-                                        <small class="text-muted">Disabled hides all table features for this company.</small>
                                     </div>
                                 </div>
 
@@ -1945,22 +1928,12 @@ require_once '../includes/sidebar.php';
                 </div>
                 <div class="form-group">
                     <label>Company Type</label>
+                    <?php foreach (company_type_options() as $type_key => $type_label) { ?>
                     <div class="custom-control custom-radio">
-                        <input type="radio" id="create_company_type_housing" name="company_type" value="Housing" class="custom-control-input" required>
-                        <label class="custom-control-label" for="create_company_type_housing">Housing</label>
+                        <input type="radio" id="create_company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>" name="company_type" value="<?= htmlspecialchars($type_key) ?>" class="custom-control-input" required>
+                        <label class="custom-control-label" for="create_company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>"><?= htmlspecialchars($type_label) ?></label>
                     </div>
-                    <div class="custom-control custom-radio">
-                        <input type="radio" id="create_company_type_others" name="company_type" value="Others" class="custom-control-input" required>
-                        <label class="custom-control-label" for="create_company_type_others">Others</label>
-                    </div>
-                    <div class="custom-control custom-radio">
-                        <input type="radio" id="create_company_type_stock_product" name="company_type" value="Stock Product" class="custom-control-input" required>
-                        <label class="custom-control-label" for="create_company_type_stock_product">Stock Product</label>
-                    </div>
-                    <div class="custom-control custom-radio">
-                        <input type="radio" id="create_company_type_fashion_house" name="company_type" value="Fashion house" class="custom-control-input" required>
-                        <label class="custom-control-label" for="create_company_type_fashion_house">Fashion house</label>
-                    </div>
+                    <?php } ?>
                 </div>
                 <div class="form-group">
                     <label for="company_email">Email</label>

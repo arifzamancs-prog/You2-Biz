@@ -162,8 +162,8 @@ function stock_module_bootstrap($conn)
     $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT company_type, fifo_enabled FROM users WHERE id={$company_id}"));
     $_SESSION['company_type'] = normalize_company_type($row['company_type'] ?? 'Housing');
     $_SESSION['fifo_enabled'] = (int)($row['fifo_enabled'] ?? 0);
-    $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type'])
-        && $_SESSION['fifo_enabled'] === 1;
+    $_SESSION['stock_product_enabled'] = $_SESSION['company_type'] === 'Restaurant & Cafe'
+        || (company_type_uses_stock_products($_SESSION['company_type']) && $_SESSION['fifo_enabled'] === 1);
 
     // Dashboards and existing financial reports can read stock tables before
     // the first visit to a Stock page on a newly deployed installation.

@@ -87,16 +87,18 @@ function active_wallets_result($conn, $user_id)
     return mysqli_query(
         $conn,
         "SELECT
-            id,
-            wallet_name,
-            balance,
-            is_system
-         FROM wallets
-         WHERE user_id={$user_id}
-         " . ($branch_id > 0 ? "AND branch_id={$branch_id}" : '') . "
-         AND status='active'
-         ORDER BY is_system DESC,
-                  wallet_name ASC"
+            w.id,
+            w.wallet_name,
+            w.balance,
+            w.is_system,
+            COALESCE(NULLIF(b.branch_name, ''), 'Head Office') AS branch_name
+         FROM wallets w
+         LEFT JOIN branches b ON b.id=w.branch_id AND b.user_id=w.user_id
+         WHERE w.user_id={$user_id}
+         " . ($branch_id > 0 ? "AND w.branch_id={$branch_id}" : '') . "
+         AND w.status='active'
+         ORDER BY w.is_system DESC,
+                  w.wallet_name ASC"
     );
 }
 

@@ -9,6 +9,8 @@ require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 require_once __DIR__ . '/sidebar_settings_helper.php';
 require_once __DIR__ . '/multi_branch_helper.php';
 require_once __DIR__ . '/eshop_helper.php';
+require_once __DIR__ . '/restaurant_module_helper.php';
+require_once __DIR__ . '/product_category_helper.php';
 
 $sidebar_avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $sidebar_name = $_SESSION['user_name'] ?? 'Profile';
@@ -294,6 +296,7 @@ function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '', $badg
 
 function sidebar_tree($label, $icon, $items)
 {
+    $items = restaurant_module_menu($label, $items);
     $open = sidebar_group_active($items);
 ?>
     <li class="nav-item has-treeview<?= $open ? ' menu-open' : ''; ?>">
@@ -372,7 +375,7 @@ $sidebar_product_items = [
     ],
 ];
 
-if(isset($conn) && $conn instanceof mysqli && is_product_expiry_enabled($conn)){
+if(isset($conn) && $conn instanceof mysqli && !restaurant_catalog_enabled($conn, (int)($_SESSION['user_id'] ?? 0)) && is_product_expiry_enabled($conn)){
     $sidebar_product_items[] = [
         'href' => app_path('products/expired.php'),
         'label' => 'Expired Product',
@@ -517,6 +520,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(manager_has_permission('wallets')){
                         sidebar_tree('Wallets', 'fas fa-wallet', [
                             ['href' => app_path('wallets/index.php'), 'label' => 'Wallet List'],
+                            ['href' => app_path('wallets/cash_out_history.php'), 'label' => 'Cash Out History'],
                             ['href' => app_path('categories/index.php'), 'label' => 'Expense Categories'],
                             ['href' => app_path('moneyin/index.php'), 'label' => 'Money In'],
                             ['href' => app_path('expenses/index.php'), 'label' => 'Expenses'],
@@ -551,8 +555,8 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(products_module_enabled()){
                         if(manager_has_permission('products')) sidebar_tree('Products', 'fas fa-boxes', $sidebar_product_items);
                         if(manager_has_permission('suppliers') && stock_can_manage_warehouse($conn)) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]]);
-                        if(manager_has_permission('warehouse') && !(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && !company_multi_branch_enabled($conn, (int)$_SESSION['user_id']))) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
-                        if(manager_has_permission('stock_live_report') && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
+                        if(manager_has_permission('warehouse') && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                        if(manager_has_permission('stock_live_report') && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                         if(manager_has_permission('stock_sales')) {
                             $stock_sales_items = [
                                 ['href'=>app_path('sales/create_invoice.php'),'label'=>'Create Invoice'],
@@ -571,7 +575,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             sidebar_tree('Sales', 'fas fa-cash-register', $stock_sales_items);
                         }
                     }
-                    if(manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
+                    if(!restaurant_module_active() && manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
                 <?php }else{ ?>
 
@@ -633,6 +637,10 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             'label' => 'Wallet List',
                         ],
                         [
+                            'href' => app_path('wallets/cash_out_history.php'),
+                            'label' => 'Cash Out History',
+                        ],
+                        [
                             'href' => app_path('categories/index.php'),
                             'label' => 'Expense Categories',
                         ],
@@ -662,7 +670,15 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                         [
                             [
                                 'href' => app_path('table_management/index.php'),
-                                'label' => 'Table List',
+                                'label' => 'Table Manage',
+                            ],
+                            [
+                                'href' => app_path('table_management/sales_report.php'),
+                                'label' => 'Sales Report',
+                            ],
+                            [
+                                'href' => app_path('table_management/invoice_manage.php'),
+                                'label' => 'Invoice Manage',
                             ],
                         ]
                     );
@@ -734,8 +750,8 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                if(!(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && !company_multi_branch_enabled($conn, (int)$_SESSION['user_id']))) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
-                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
+                if(company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                 }
 
                 if(!products_module_enabled()) sidebar_tree(
@@ -755,7 +771,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                sidebar_tree(
+                if(!restaurant_module_active()) sidebar_tree(
                     'Lead Management',
                     'fas fa-filter',
                     [
@@ -841,7 +857,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') $sidebar_admin_items[] = ['href' => app_path('user_management/dump_approval.php'), 'label' => 'Dumps Approval', 'icon' => 'fas fa-dumpster'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('invoice_charges')) $sidebar_admin_items[] = ['href' => app_path('user_management/invoice_charges.php'), 'label' => 'Invoice Charges', 'icon' => 'fas fa-percentage'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('printing_option')) $sidebar_admin_items[] = ['href' => app_path('user_management/printing_option.php'), 'label' => 'Printing Option', 'icon' => 'fas fa-print'];
-                    if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Profit Cash Out', 'icon' => 'fas fa-coins'];
+                    if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Wallet Cash Out', 'icon' => 'fas fa-coins'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
                     if(products_module_enabled()
                         && project_package_company_type($conn, (int)$_SESSION['user_id']) !== 'Fashion house'
@@ -1020,7 +1036,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (sidebarLayout.length) return;
     if (!operationsHeader) return;
 
-    const orderedLabels = ['Sales / Invoice', 'Products', '<?= supplier_display_text('Suppliers'); ?>', 'Main Warehouse', 'Sales', 'Wallets', <?= json_encode($project_package_labels['module']); ?>, 'Customer Manage', 'Lead Management'];
+    const orderedLabels = <?= restaurant_module_active()
+        ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Customer Manage', 'Table Management', 'Notice Publish'])
+        : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management']); ?>;
     let previousItem = operationsHeader;
 
     orderedLabels.forEach(function (label) {
@@ -1036,6 +1054,33 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 </script>
+
+<?php if (restaurant_module_active()) { ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // In compact sidebar mode only the icons should be visible. Leaving a
+    // tree open makes its child links spill out beneath the icon column.
+    const closeCompactMenus = function () {
+        if (!document.body.classList.contains('sidebar-collapse')) return;
+        document.querySelectorAll('.main-sidebar .nav-item.has-treeview.menu-open').forEach(function (item) {
+            item.classList.remove('menu-open');
+        });
+    };
+
+    closeCompactMenus();
+    const sidebar = document.querySelector('.main-sidebar');
+    if (sidebar) {
+        sidebar.addEventListener('click', function () {
+            window.setTimeout(closeCompactMenus, 0);
+        });
+    }
+    new MutationObserver(closeCompactMenus).observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
+});
+</script>
+<?php } ?>
 
 <div class="content-wrapper">
 

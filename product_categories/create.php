@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$is_restaurant_catalog = restaurant_catalog_enabled($conn, $user_id);
 ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_variant_schema($conn);
 ensure_product_subcategory_schema($conn);
@@ -15,10 +16,15 @@ $message_type = '';
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $category_name = trim($_POST['category_name']);
-    $sub_category = implode(', ', product_variant_options_from_text($_POST['sub_category_options'] ?? ''));
-    $category_type = 'stock_product';
+    $sub_category = $is_restaurant_catalog
+        ? ''
+        : implode(', ', product_variant_options_from_text($_POST['sub_category_options'] ?? ''));
+    $category_type = $is_restaurant_catalog && ($_POST['category_type'] ?? '') === 'non_stock'
+        ? 'non_stock' : 'stock_product';
     $status = $_POST['status'];
-    $variant_options = implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''));
+    $variant_options = $is_restaurant_catalog
+        ? ''
+        : implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''));
 
     if($category_name === ''){
         $message = 'Category name is required.';
@@ -107,49 +113,59 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <form method="post">
-
             <div class="form-group">
 
-                <label>
+                <label for="category_name">
                     Category Name
                 </label>
 
                 <input
                     type="text"
+                    id="category_name"
                     name="category_name"
                     class="form-control"
                     required>
 
             </div>
 
-            <div class="form-group">
-                <label>Sub Category <small class="text-muted">(Optional)</small></label>
-                <input type="hidden" name="sub_category_options" id="sub_category_options" value="">
-                <div class="input-group">
-                    <input type="text" id="sub_category_value" class="form-control" placeholder="Type a sub category">
-                    <div class="input-group-append"><button class="btn btn-primary" id="add_sub_category" type="button" title="Add sub category"><i class="fas fa-plus"></i></button></div>
+            <?php if ($is_restaurant_catalog) { ?>
+                <div class="form-group">
+                    <label for="category_type">Category Type</label>
+                    <select id="category_type" name="category_type" class="form-control">
+                        <option value="non_stock">Non Stock</option>
+                        <option value="stock_product">Stock Product</option>
+                    </select>
                 </div>
-                <div id="sub_category_list" class="mt-2 d-flex flex-wrap"></div>
-            </div>
-
-            <div class="form-group">
-                <label>Variants <small class="text-muted">(Optional)</small></label>
-                <input type="hidden" name="variant_options" id="variant_options" value="">
-                <div class="input-group">
-                    <input type="text" id="variant_value" class="form-control" list="common_variants" placeholder="Select or type a variant">
-                    <datalist id="common_variants"><option value="Small"><option value="Medium"><option value="Large"><option value="XL"><option value="XXL"></datalist>
-                    <div class="input-group-append"><button class="btn btn-primary" id="add_variant" type="button" title="Add variant"><i class="fas fa-plus"></i></button></div>
+            <?php } else { ?>
+                <div class="form-group">
+                    <label>Sub Category <small class="text-muted">(Optional)</small></label>
+                    <input type="hidden" name="sub_category_options" id="sub_category_options" value="">
+                    <div class="input-group">
+                        <input type="text" id="sub_category_value" class="form-control" placeholder="Type a sub category">
+                        <div class="input-group-append"><button class="btn btn-primary" id="add_sub_category" type="button" title="Add sub category"><i class="fas fa-plus"></i></button></div>
+                    </div>
+                    <div id="sub_category_list" class="mt-2 d-flex flex-wrap"></div>
                 </div>
-                <div id="variant_list" class="mt-2 d-flex flex-wrap"></div>
-            </div>
+                <div class="form-group">
+                    <label>Variants <small class="text-muted">(Optional)</small></label>
+                    <input type="hidden" name="variant_options" id="variant_options" value="">
+                    <div class="input-group">
+                        <input type="text" id="variant_value" class="form-control" list="common_variants" placeholder="Select or type a variant">
+                        <datalist id="common_variants"><option value="Small"><option value="Medium"><option value="Large"><option value="XL"><option value="XXL"></datalist>
+                        <div class="input-group-append"><button class="btn btn-primary" id="add_variant" type="button" title="Add variant"><i class="fas fa-plus"></i></button></div>
+                    </div>
+                    <div id="variant_list" class="mt-2 d-flex flex-wrap"></div>
+                </div>
+            <?php } ?>
 
             <div class="form-group">
 
-                <label>
+                <label for="status">
                     Status
                 </label>
 
                 <select
+                    id="status"
                     name="status"
                     class="form-control">
 
@@ -189,6 +205,7 @@ require_once '../includes/sidebar.php';
 
 </div>
 
+<?php if (!$is_restaurant_catalog) { ?>
 <script>
 (function(){
     const source=document.getElementById('sub_category_value'), hidden=document.getElementById('sub_category_options'), list=document.getElementById('sub_category_list'), add=document.getElementById('add_sub_category');
@@ -205,6 +222,7 @@ require_once '../includes/sidebar.php';
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});
 })();
 </script>
+<?php } ?>
 
 <?php
 require_once '../includes/footer.php';

@@ -12,14 +12,18 @@ require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$restaurant_catalog_enabled = restaurant_catalog_enabled($conn, $user_id);
 ensure_invoice_posting_columns($conn);
 ensure_invoice_charge_columns($conn);
 ensure_staff_table($conn);
 ensure_restaurant_tables_table($conn);
 ensure_invoice_reference_columns($conn);
 $table_system_is_enabled = table_system_enabled($conn, $user_id);
+$restaurant_invoice_reference_type = $table_system_is_enabled ? restaurant_invoice_reference_type($conn, $user_id) : 'staff';
+$restaurant_invoice_reference_enabled = $table_system_is_enabled && restaurant_invoice_reference_enabled($conn, $user_id);
 
 $pay_customer_id = isset($_GET['pay_customer_id'])
     ? (int)$_GET['pay_customer_id']
@@ -153,7 +157,7 @@ require_once '../includes/sidebar.php';
 
             <div class="row">
 
-                <div class="col-md-4">
+                <div class="col-md-<?= $table_system_is_enabled ? '6' : '4' ?>">
 
                     <label>
 
@@ -286,7 +290,7 @@ require_once '../includes/sidebar.php';
 
 </div>
 
-<div
+<?php if(!$restaurant_catalog_enabled){ ?><div
     class="col-md-4 mt-3"
     id="instant_address_div">
 
@@ -299,7 +303,7 @@ require_once '../includes/sidebar.php';
         class="form-control"
         rows="2"></textarea>
 
-</div>
+</div><?php } ?>
 
             </div>
 
@@ -519,7 +523,7 @@ require_once '../includes/sidebar.php';
                         <input
                             type="number"
                             step="0.01"
-                            value="0"
+                            value="<?= ($charge['charge_value_type'] ?? 'fixed') === 'percent' ? number_format((float)($charge['default_value'] ?? 0), 2, '.', '') : '0'; ?>"
                             name="charge_amount[]"
                             class="form-control charge"
                             placeholder="<?= ($charge['charge_value_type'] ?? 'fixed') === 'percent' ? '%' : 'Amount'; ?>">
@@ -536,7 +540,7 @@ require_once '../includes/sidebar.php';
 
             <div class="row">
 
-                <div class="col-md-4">
+                <div class="col-md-<?= $table_system_is_enabled ? '6' : '4' ?>">
 
                     <label>
 
@@ -554,7 +558,7 @@ require_once '../includes/sidebar.php';
 
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-md-<?= $table_system_is_enabled ? '6' : '4' ?>">
 
     <label>
         Paid Amount
@@ -580,7 +584,7 @@ require_once '../includes/sidebar.php';
         For instant customers, the Paid Amount must be equal to the Grand Total.
     </div>
 
-    <div class="mt-2">
+    <?php if(!$restaurant_invoice_reference_enabled){ ?><div class="mt-2">
 
         <label>
 
@@ -611,12 +615,11 @@ require_once '../includes/sidebar.php';
 
         </select>
 
-    </div>
+    </div><?php } ?>
 
 </div>
 
-
-                <div class="col-md-4">
+                <?php if(!$table_system_is_enabled){ ?><div class="col-md-4">
 
                     <label>
 
@@ -632,32 +635,26 @@ require_once '../includes/sidebar.php';
                         class="form-control"
                         readonly>
 
-                </div>
+                </div><?php }else{ ?><input type="hidden" id="due_amount" name="due_amount"><?php } ?>
 
             </div>
 
-            <br>
-
-            <?php if($table_system_is_enabled){ ?><div class="form-group">
-                <label>Ref.</label>
-                <div class="row">
-                    <div class="col-md-6">
-                        <label class="font-weight-normal">Staff</label>
-                        <select name="staff_id" id="reference_staff_id" class="form-control">
-                            <option value="">Select Staff</option>
-                            <?php while($staff=mysqli_fetch_assoc($reference_staff)){ ?><option value="<?=$staff['id']?>"><?=htmlspecialchars($staff['name'])?><?= $staff['staff_code'] ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : '' ?></option><?php } ?>
-                        </select>
-                    </div>
-                    <?php if($table_system_is_enabled){ ?><div class="col-md-6">
-                        <label class="font-weight-normal">Table</label>
-                        <select name="restaurant_table_id" id="reference_table_id" class="form-control" disabled>
-                            <option value="">Select Table</option>
-                            <?php while($table=mysqli_fetch_assoc($reference_tables)){ ?><option value="<?=$table['id']?>" data-staff-id="<?=$table['staff_id']?>"><?=htmlspecialchars($table['table_name'])?></option><?php } ?>
-                        </select>
-                    </div>
-                    <?php } ?>
+            <?php if($restaurant_invoice_reference_enabled){ ?><div class="row mt-3">
+                <div class="col-md-6">
+                    <label>Receive To Wallet</label>
+                    <select name="receive_wallet_id" id="receive_wallet_id" class="form-control">
+                        <?php mysqli_data_seek($wallets, 0); while($wallet=mysqli_fetch_assoc($wallets)){ ?>
+                            <option value="<?= $wallet['id']; ?>" <?= $wallet['is_system']==1 ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option>
+                        <?php } ?>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label>Ref.</label>
+                    <?php if($restaurant_invoice_reference_type === 'table'){ ?><input type="hidden" name="staff_id" id="reference_staff_id" value=""><select name="restaurant_table_id" id="reference_table_id" class="form-control"><option value="">Search ref.</option><?php while($table=mysqli_fetch_assoc($reference_tables)){ ?><option value="<?=$table['id']?>" data-staff-id="<?=$table['staff_id']?>" <?= (int)$table['staff_id'] <= 0 ? 'disabled' : '' ?>><?=htmlspecialchars($table['table_name'])?></option><?php } ?></select><?php }else{ ?><select name="staff_id" id="reference_staff_id" class="form-control"><option value="">Search ref.</option><?php while($staff=mysqli_fetch_assoc($reference_staff)){ ?><option value="<?=$staff['id']?>"><?=htmlspecialchars($staff['name'])?><?= $staff['staff_code'] ? ' (' . htmlspecialchars($staff['staff_code']) . ')' : '' ?></option><?php } ?></select><?php } ?>
                 </div>
             </div><?php } ?>
+
+            <br>
 
             <div class="form-group">
                 <label>Notes</label>
@@ -676,7 +673,7 @@ require_once '../includes/sidebar.php';
     type="submit"
     name="action"
     value="save"
-    class="btn btn-primary btn-lg mb-2 mb-sm-0"
+    class="btn btn-primary btn-lg mb-2 mb-sm-0" id="save-invoice-button" <?= $restaurant_invoice_reference_enabled ? 'disabled' : '' ?>
     onclick="$('#action').val('save');">
 
     <i class="fas fa-save"></i>
@@ -691,7 +688,7 @@ require_once '../includes/sidebar.php';
     type="submit"
     name="action"
     value="print"
-    class="btn btn-success btn-lg ml-sm-2"
+    class="btn btn-success btn-lg ml-sm-2" id="print-invoice-button" <?= $restaurant_invoice_reference_enabled ? 'disabled' : '' ?>
     onclick="$('#action').val('print');">
 
     <i class="fas fa-print"></i>
@@ -806,6 +803,14 @@ $(document).ready(function(){
 
     initProductSelect($("#productTable"));
     initCustomerSupplierSelect($(document));
+    $("select#reference_staff_id, select#reference_table_id").each(function(){
+        $(this).select2({
+            theme: "bootstrap4",
+            width: "100%",
+            placeholder: this.id === "reference_table_id" ? "Search table" : "Search staff",
+            allowClear: true
+        });
+    });
     updateVariantColumnVisibility();
 
     /* Customer Type */
@@ -1042,7 +1047,8 @@ if($(this).val()=="instant"){
             if(printWindow && !printWindow.closed) printWindow.close();
             showInvoiceAjaxMessage(error.message || "Invoice could not be saved.", false);
         }finally{
-            buttons.prop("disabled", false);
+            const reference = document.getElementById("reference_table_id") || document.getElementById("reference_staff_id");
+            buttons.prop("disabled", reference ? !reference.value : false);
         }
     });
 
@@ -1585,20 +1591,18 @@ function calculateDue(){
 document.addEventListener("DOMContentLoaded", function(){
     const staff = document.getElementById("reference_staff_id");
     const table = document.getElementById("reference_table_id");
-    if(!staff || !table) return;
-    function filterTables(){
-        const selected = staff.value;
-        table.value = "";
-        table.disabled = !selected;
-        const matching = Array.from(table.options).filter(function(option){
-            if(!option.value) return;
-            option.hidden = !selected || option.dataset.staffId !== selected;
-            return selected && option.dataset.staffId === selected;
-        });
-        if(matching.length === 1){ table.value = matching[0].value; }
+    const save = document.getElementById("save-invoice-button");
+    const print = document.getElementById("print-invoice-button");
+    const reference = table || staff;
+    if(!reference) return;
+    function syncTableStaff(){
+        if(table && staff){ const selected = table.options[table.selectedIndex]; staff.value = selected && selected.dataset.staffId ? selected.dataset.staffId : ""; }
+        if(save) save.disabled = !reference.value;
+        if(print) print.disabled = !reference.value;
     }
-    staff.addEventListener("change", filterTables);
-    filterTables();
+    reference.addEventListener("change", syncTableStaff);
+    if(window.jQuery && jQuery.fn.select2){ jQuery(reference).on("change", syncTableStaff); }
+    syncTableStaff();
 });
 </script>
 

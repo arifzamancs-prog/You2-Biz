@@ -64,7 +64,7 @@ function available_manager_permissions($project_package_labels = null)
         'branch_management' => 'Branch Management',
         'invoice_charges' => 'Invoice Charges',
         'printing_option' => 'Printing Option',
-        'profit_cash_out' => 'Profit Cash Out',
+        'profit_cash_out' => 'Wallet Cash Out',
         'sidebar_settings' => 'Slidebar Settings',
         'admin_sidebar_configured' => 'Admin sidebar configured',
         'tools' => 'Tools',
@@ -82,7 +82,7 @@ function admin_sidebar_permissions()
         'branch_management' => 'Branch Management',
         'invoice_charges' => 'Invoice Charges',
         'printing_option' => 'Printing Option',
-        'profit_cash_out' => 'Profit Cash Out',
+        'profit_cash_out' => 'Wallet Cash Out',
         'sidebar_settings' => 'Slidebar Settings',
     ];
 }

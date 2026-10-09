@@ -1,5 +1,36 @@
 <?php
 
+require_once __DIR__ . '/company_settings_helper.php';
+
+function restaurant_catalog_enabled($conn, $user_id)
+{
+    // Read the owning company, not a posted type or a stale staff session.
+    $stmt = mysqli_prepare($conn, 'SELECT company_type FROM users WHERE id=?');
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return normalize_company_type($row['company_type'] ?? '') === 'Restaurant & Cafe';
+}
+
+// Restaurant & Cafe categories are fully user managed. Keep this compatibility
+// function for existing callers, but never create fixed/default categories.
+function ensure_restaurant_product_categories($conn, $user_id)
+{
+    ensure_product_category_type_column($conn);
+    return true;
+}
+
+function product_category_allows_creation($conn, $category_id, $user_id)
+{
+    $stmt = mysqli_prepare($conn, "SELECT category_type FROM product_categories WHERE id=? AND user_id=? AND status='active'");
+    mysqli_stmt_bind_param($stmt, 'ii', $category_id, $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    return $row && ($row['category_type'] === 'stock_product' || restaurant_catalog_enabled($conn, $user_id));
+}
+
 function product_sku_exists($conn, $user_id, $sku, $exclude_id = 0)
 {
     $sku = trim((string)$sku);
@@ -23,6 +54,9 @@ function ensure_default_product_categories($conn, $user_id)
 
 function ensure_fifo_only_product_categories($conn, $user_id)
 {
+    if (restaurant_catalog_enabled($conn, $user_id)) {
+        return ensure_restaurant_product_categories($conn, $user_id);
+    }
     ensure_product_category_type_column($conn);
     $user_id = (int)$user_id;
 
@@ -221,7 +255,10 @@ function product_variant_is_valid($conn, $product_id, $user_id, $variant_name)
 
 function product_category_type_label($category_type)
 {
-    return 'FIFO Stock';
+    if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') {
+        return $category_type === 'non_stock' ? 'Non Stock' : 'Stock Product';
+    }
+    return $category_type === 'non_stock' ? 'Non Stock (Prepared Food)' : 'FIFO Stock';
 }
 
 function product_category_is_stock($conn, $category_id, $user_id)
@@ -312,8 +349,7 @@ function product_uses_stock($conn, $product_id, $user_id)
 
 function product_category_is_default($category_name)
 {
-    // Kept as a compatibility helper for older callers. FIFO categories are
-    // user-managed, so none of them are locked as a system default.
+    // Restaurant & Cafe has no reserved category names.
     return false;
 }
 

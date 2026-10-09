@@ -5,7 +5,8 @@ require_once __DIR__ . '/product_category_helper.php';
 
 function fifo_inventory_is_enabled()
 {
-    return !isset($_SESSION['fifo_enabled']) || (bool)$_SESSION['fifo_enabled'];
+    return ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'
+        || !isset($_SESSION['fifo_enabled']) || (bool)$_SESSION['fifo_enabled'];
 }
 
 function fifo_inventory_item_branch($conn, $user_id, $item_id)

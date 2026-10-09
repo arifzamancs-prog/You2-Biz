@@ -109,14 +109,14 @@ require_once '../includes/sidebar.php';
 ?>
 <div class="card">
     <div class="card-header">
-        <h3 class="card-title"><i class="fas fa-edit mr-2"></i>Edit Profit Cash Out</h3>
+        <h3 class="card-title"><i class="fas fa-edit mr-2"></i>Edit Wallet Cash Out</h3>
     </div>
     <form method="post" class="card-body">
         <input type="hidden" name="id" value="<?= (int)$id; ?>">
         <?php if($message !== ''){ ?>
             <div class="alert alert-danger"><?= htmlspecialchars($message); ?></div>
         <?php } ?>
-        <div class="alert alert-info">This remains a profit cash out entry only. Updating it will adjust the wallet balance correctly and will not count as income or expense.</div>
+        <div class="alert alert-info">This remains a wallet cash out entry only. Updating it will adjust the wallet balance correctly and will not count as income or expense.</div>
         <div class="row">
             <div class="col-md-4 form-group">
                 <label>Wallet</label>

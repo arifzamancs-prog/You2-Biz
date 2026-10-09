@@ -1043,9 +1043,9 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
                             placeholder="Enter your password"
                             required>
                         <div class="input-group-append">
-                            <div class="input-group-text auth-icon">
-                                <span class="fas fa-lock"></span>
-                            </div>
+                            <button type="button" class="input-group-text auth-icon" data-password-toggle aria-label="Show password" aria-pressed="false" title="Show password">
+                                <span class="fas fa-eye" aria-hidden="true"></span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1091,5 +1091,6 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
 
 <script src="adminlte/dist/js/adminlte.min.js"></script>
 
+<?php require __DIR__ . '/includes/password_toggle.php'; ?>
 </body>
 </html>

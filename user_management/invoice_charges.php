@@ -85,11 +85,19 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $charge_name = trim($_POST['charge_name'] ?? '');
     $charge_type = normalize_charge_type($_POST['charge_type'] ?? 'add');
     $charge_value_type = normalize_charge_value_type($_POST['charge_value_type'] ?? 'fixed');
+    $default_value = (float)($_POST['default_value'] ?? 0);
 
     if($charge_name === ''){
         $message = 'Charge name is required.';
         $message_type = 'danger';
+    }elseif($charge_value_type === 'percent' && ($default_value < 0 || $default_value > 100)){
+        $message = 'Percentage value must be between 0 and 100.';
+        $message_type = 'danger';
     }else{
+        if($charge_value_type !== 'percent'){
+            $default_value = 0;
+        }
+
         $check_sql = "SELECT id
                       FROM invoice_charge_types
                       WHERE user_id=?
@@ -109,17 +117,19 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $update_sql = "UPDATE invoice_charge_types
                            SET charge_name=?,
                                charge_type=?,
-                               charge_value_type=?
+                               charge_value_type=?,
+                               default_value=?
                            WHERE id=?
                            AND user_id=?";
 
             $update_stmt = mysqli_prepare($conn, $update_sql);
             mysqli_stmt_bind_param(
                 $update_stmt,
-                "sssii",
+                "sssdii",
                 $charge_name,
                 $charge_type,
                 $charge_value_type,
+                $default_value,
                 $charge_id,
                 $user_id
             );
@@ -138,11 +148,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                                charge_name,
                                charge_type,
                                charge_value_type,
+                               default_value,
                                show_on_invoice,
                                status
                            )
                            VALUES
                            (
+                               ?,
                                ?,
                                ?,
                                ?,
@@ -154,11 +166,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $insert_stmt = mysqli_prepare($conn, $insert_sql);
             mysqli_stmt_bind_param(
                 $insert_stmt,
-                "isss",
+                "isssd",
                 $user_id,
                 $charge_name,
                 $charge_type,
-                $charge_value_type
+                $charge_value_type,
+                $default_value
             );
 
             if(mysqli_stmt_execute($insert_stmt)){
@@ -282,6 +295,9 @@ mysqli_stmt_bind_param($charges_stmt, "i", $user_id);
 mysqli_stmt_execute($charges_stmt);
 $charges = mysqli_stmt_get_result($charges_stmt);
 
+$form_charge_type = normalize_charge_type($_POST['charge_type'] ?? ($edit_charge['charge_type'] ?? 'add'));
+$form_charge_value_type = normalize_charge_value_type($_POST['charge_value_type'] ?? ($edit_charge['charge_value_type'] ?? 'fixed'));
+
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -328,12 +344,12 @@ require_once '../includes/sidebar.php';
                         <select id="charge_type" name="charge_type" class="form-control">
                             <option
                                 value="add"
-                                <?= (($edit_charge['charge_type'] ?? 'add') === 'add') ? 'selected' : ''; ?>>
+                                <?= ($form_charge_type === 'add') ? 'selected' : ''; ?>>
                                 Add (+)
                             </option>
                             <option
                                 value="less"
-                                <?= (($edit_charge['charge_type'] ?? '') === 'less') ? 'selected' : ''; ?>>
+                                <?= ($form_charge_type === 'less') ? 'selected' : ''; ?>>
                                 Less (-)
                             </option>
                         </select>
@@ -344,15 +360,34 @@ require_once '../includes/sidebar.php';
                         <select id="charge_value_type" name="charge_value_type" class="form-control">
                             <option
                                 value="fixed"
-                                <?= (($edit_charge['charge_value_type'] ?? 'fixed') === 'fixed') ? 'selected' : ''; ?>>
+                                <?= ($form_charge_value_type === 'fixed') ? 'selected' : ''; ?>>
                                 Fixed Amount
                             </option>
                             <option
                                 value="percent"
-                                <?= (($edit_charge['charge_value_type'] ?? '') === 'percent') ? 'selected' : ''; ?>>
+                                <?= ($form_charge_value_type === 'percent') ? 'selected' : ''; ?>>
                                 Percentage (%)
                             </option>
                         </select>
+                    </div>
+
+                    <div class="form-group <?= $form_charge_value_type === 'percent' ? '' : 'd-none'; ?>" id="charge-default-value-group">
+                        <label for="charge_default_value">Percentage Value</label>
+                        <div class="input-group">
+                            <input
+                                id="charge_default_value"
+                                type="number"
+                                name="default_value"
+                                class="form-control"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                value="<?= htmlspecialchars((string)($_POST['default_value'] ?? ($edit_charge['default_value'] ?? ''))); ?>"
+                                placeholder="e.g. 5">
+                            <div class="input-group-append">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
                     </div>
 
                     <button type="submit" class="btn btn-primary" id="invoice-charge-submit">
@@ -395,7 +430,11 @@ require_once '../includes/sidebar.php';
                                 <?= $charge['charge_type'] === 'less' ? 'Less (-)' : 'Add (+)'; ?>
                             </td>
                             <td>
-                                <?= ($charge['charge_value_type'] ?? 'fixed') === 'percent' ? 'Percentage (%)' : 'Fixed Amount'; ?>
+                                <?php if(($charge['charge_value_type'] ?? 'fixed') === 'percent'){ ?>
+                                    Percentage (<?= number_format((float)($charge['default_value'] ?? 0), 2); ?>%)
+                                <?php }else{ ?>
+                                    Fixed Amount
+                                <?php } ?>
                             </td>
                             <td>
                                 <?php if((int)($charge['show_on_invoice'] ?? 0) === 1){ ?>
@@ -453,11 +492,20 @@ function resetInvoiceChargeForm() {
     document.getElementById('charge_name').value = '';
     document.getElementById('charge_type').value = 'add';
     document.getElementById('charge_value_type').value = 'fixed';
+    document.getElementById('charge_default_value').value = '';
+    document.getElementById('charge-default-value-group').classList.add('d-none');
     document.getElementById('invoice-charge-form-title').textContent = 'Add Invoice Charge';
     document.getElementById('invoice-charge-submit').innerHTML = '<i class="fas fa-save"></i> Add Charge';
     document.getElementById('invoice-charge-cancel').classList.add('d-none');
     window.history.replaceState(null, '', 'invoice_charges.php');
 }
+
+function toggleChargeDefaultValue() {
+    const isPercentage = document.getElementById('charge_value_type').value === 'percent';
+    document.getElementById('charge-default-value-group').classList.toggle('d-none', !isPercentage);
+}
+
+document.getElementById('charge_value_type').addEventListener('change', toggleChargeDefaultValue);
 
 document.addEventListener('ajax-page-action-complete', function(event) {
     const detail = event.detail;
@@ -524,6 +572,8 @@ document.addEventListener('click', async function(event) {
             document.getElementById('charge_name').value = charge.charge_name;
             document.getElementById('charge_type').value = charge.charge_type;
             document.getElementById('charge_value_type').value = charge.charge_value_type || 'fixed';
+            document.getElementById('charge_default_value').value = charge.default_value || '';
+            toggleChargeDefaultValue();
             document.getElementById('invoice-charge-form-title').textContent = 'Edit Invoice Charge';
             document.getElementById('invoice-charge-submit').innerHTML = '<i class="fas fa-save"></i> Update Charge';
             document.getElementById('invoice-charge-cancel').classList.remove('d-none');

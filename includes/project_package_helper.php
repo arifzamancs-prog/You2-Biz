@@ -81,8 +81,13 @@ function project_package_company_type($conn, $user_id)
         return normalize_company_type($row['company_type'] ?? 'Housing');
     }
 
-    return in_array(($row['company_type'] ?? 'Housing'), ['Others', 'Stock Product', 'Fashion house'], true)
-        ? ($row['company_type'] ?? 'Housing')
+    $company_type = (string)($row['company_type'] ?? 'Housing');
+    if ($company_type === 'Others') {
+        return 'Service type';
+    }
+
+    return in_array($company_type, ['Service type', 'Stock Product', 'Fashion house'], true)
+        ? $company_type
         : 'Housing';
 }
 

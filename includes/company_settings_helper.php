@@ -17,22 +17,58 @@ function ensure_company_setting_columns($conn)
     }
 }
 
+function company_type_options()
+{
+    return [
+        'Housing' => 'Housing / Real Estate',
+        'Service type' => 'Service Business',
+        'Stock Product' => 'Inventory & Sales',
+        'Fashion house' => 'Fashion Retail',
+        'Restaurant & Cafe' => 'Restaurant & Cafe',
+    ];
+}
+
+function company_type_label($company_type)
+{
+    return company_type_options()[normalize_company_type($company_type)];
+}
+
+function registration_company_type_options()
+{
+    return company_type_options();
+}
+
 function normalize_company_type($company_type)
 {
     $company_type = trim((string)$company_type);
-    return in_array($company_type, ['Housing', 'Others', 'Stock Product', 'Fashion house'], true)
+    $key = array_search($company_type, company_type_options(), true);
+    if ($key !== false) {
+        return $key;
+    }
+    // Keep existing live databases compatible: the former "Others" value
+    // now has the clearer, customer-facing name "Service type".
+    if ($company_type === 'Others') {
+        return 'Service type';
+    }
+
+    return in_array($company_type, ['Housing', 'Service type', 'Stock Product', 'Fashion house'], true)
         ? $company_type
         : 'Housing';
 }
 
 function valid_company_type($company_type)
 {
-    return in_array(trim((string)$company_type), ['Housing', 'Others', 'Stock Product', 'Fashion house'], true);
+    // Accept the legacy submitted value during upgrades; normalization stores
+    // it as Service type for all new or updated companies.
+    $company_type = trim((string)$company_type);
+    return $company_type === 'Others'
+        || array_key_exists($company_type, company_type_options())
+        || in_array($company_type, company_type_options(), true);
 }
 
 function company_type_uses_stock_products($company_type)
 {
-    return in_array(trim((string)$company_type), ['Stock Product', 'Fashion house'], true);
+    return in_array(normalize_company_type($company_type), ['Stock Product', 'Fashion house', 'Restaurant & Cafe'], true);
 }
 
 function normalize_company_currency($currency)

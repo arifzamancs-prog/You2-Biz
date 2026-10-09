@@ -30,7 +30,7 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
         && $user['access_permissions'] !== null;
 
     $_SESSION['user_id'] = (int)$owner_id;
-    $_SESSION['company_type'] = trim((string)($account['company_type'] ?? 'Housing'));
+    $_SESSION['company_type'] = normalize_company_type($account['company_type'] ?? 'Housing');
     $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type']);
     $_SESSION['user_name'] = $account['name'];
     $_SESSION['avatar'] =

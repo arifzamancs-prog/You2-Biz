@@ -19,6 +19,7 @@ $reload_parent = isset($_GET['reload_parent'])
     ? trim((string)$_GET['reload_parent'])
     : '';
 $reload_parent_url = '';
+$auto_print = isset($_GET['auto_print']) && $_GET['auto_print'] === '1';
 
 if($reload_parent === 'invoice_list'){
     $reload_parent_url = 'invoice_list.php';
@@ -607,6 +608,9 @@ window.addEventListener('load', function () {
 });
 </script>
 <?php } ?>
+<?php if($auto_print){ ?>
+<script>window.addEventListener('load', function(){ window.setTimeout(function(){ window.print(); }, 250); });</script>
+<?php } ?>
 </head>
 
 <body>
@@ -1015,6 +1019,9 @@ window.addEventListener('load', function () {
     }
 });
 </script>
+<?php } ?>
+<?php if($auto_print){ ?>
+<script>window.addEventListener('load', function(){ window.setTimeout(function(){ window.print(); }, 250); });</script>
 <?php } ?>
 </head>
 

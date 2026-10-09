@@ -35,6 +35,19 @@ function ensure_invoice_charge_columns($conn)
              ADD charge_value_type VARCHAR(20) NOT NULL DEFAULT 'fixed'"
         );
     }
+
+    $default_value_result = mysqli_query(
+        $conn,
+        "SHOW COLUMNS FROM invoice_charge_types LIKE 'default_value'"
+    );
+
+    if(!$default_value_result || mysqli_num_rows($default_value_result) === 0){
+        mysqli_query(
+            $conn,
+            "ALTER TABLE invoice_charge_types
+             ADD default_value DECIMAL(15,2) NOT NULL DEFAULT 0.00"
+        );
+    }
 }
 
 function default_invoice_charges()

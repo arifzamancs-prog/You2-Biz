@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $password         = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
-    if(!valid_company_type($company_type)){
+    if(!valid_company_type($company_type) || !array_key_exists(normalize_company_type($company_type), registration_company_type_options())){
 
         $message = "Please select company type";
         $message_type = "danger";
@@ -103,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     (
                         name,
                         company_type,
+                        fifo_enabled,
                         email,
                         phone,
                         password,
@@ -121,6 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         ?,
                         ?,
                         ?,
+                        ?,
                         ?
                     )";
 
@@ -131,12 +133,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             );
 
             $normalized_company_type = normalize_company_type($company_type);
+            $stock_enabled = company_type_uses_stock_products($normalized_company_type) ? 1 : 0;
 
             mysqli_stmt_bind_param(
                 $stmt,
-                "ssssssiss",
+                "ssissssiss",
                 $name,
                 $normalized_company_type,
+                $stock_enabled,
                 $email,
                 $phone,
                 $hash,
@@ -864,26 +868,12 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
                 <div class="form-group">
                     <label>Company Type</label>
                     <div class="d-flex flex-wrap" style="gap: 16px;">
+                        <?php foreach (registration_company_type_options() as $type_key => $type_label) { ?>
                         <div class="custom-control custom-radio">
-                            <input
-                                type="radio"
-                                id="company_type_housing"
-                                name="company_type"
-                                value="Housing"
-                                class="custom-control-input"
-                                required>
-                            <label class="custom-control-label" for="company_type_housing">Housing</label>
+                            <input type="radio" id="company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>" name="company_type" value="<?= htmlspecialchars($type_key) ?>" class="custom-control-input" <?= isset($company_type) && valid_company_type($company_type) && normalize_company_type($company_type) === $type_key ? 'checked' : '' ?> required>
+                            <label class="custom-control-label" for="company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>"><?= htmlspecialchars($type_label) ?></label>
                         </div>
-                        <div class="custom-control custom-radio">
-                            <input
-                                type="radio"
-                                id="company_type_others"
-                                name="company_type"
-                                value="Others"
-                                class="custom-control-input"
-                                required>
-                            <label class="custom-control-label" for="company_type_others">Others</label>
-                        </div>
+                        <?php } ?>
                     </div>
                 </div>
 
@@ -934,9 +924,9 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
                                 placeholder="Password"
                                 required>
                             <div class="input-group-append">
-                                <div class="input-group-text auth-icon">
-                                    <span class="fas fa-lock"></span>
-                                </div>
+                                <button type="button" class="input-group-text auth-icon" data-password-toggle aria-label="Show password" aria-pressed="false" title="Show password">
+                                    <span class="fas fa-eye" aria-hidden="true"></span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -951,9 +941,9 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
                                 placeholder="Confirm password"
                                 required>
                             <div class="input-group-append">
-                                <div class="input-group-text auth-icon">
-                                    <span class="fas fa-lock"></span>
-                                </div>
+                                <button type="button" class="input-group-text auth-icon" data-password-toggle aria-label="Show password" aria-pressed="false" title="Show password">
+                                    <span class="fas fa-eye" aria-hidden="true"></span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -981,5 +971,6 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
 
 <script src="adminlte/dist/js/adminlte.min.js"></script>
 
+<?php require __DIR__ . '/includes/password_toggle.php'; ?>
 </body>
 </html>
