@@ -86,7 +86,7 @@ function project_package_company_type($conn, $user_id)
         return 'Service type';
     }
 
-    return in_array($company_type, ['Service type', 'Stock Product', 'Fashion house'], true)
+    return in_array($company_type, ['Service type', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
         ? $company_type
         : 'Housing';
 }

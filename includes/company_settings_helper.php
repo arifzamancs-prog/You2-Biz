@@ -25,6 +25,7 @@ function company_type_options()
         'Stock Product' => 'Inventory & Sales',
         'Fashion house' => 'Fashion Retail',
         'Restaurant & Cafe' => 'Restaurant & Cafe',
+        'Car Parking' => 'Car Parking',
     ];
 }
 
@@ -35,7 +36,9 @@ function company_type_label($company_type)
 
 function registration_company_type_options()
 {
-    return company_type_options();
+    $options = company_type_options();
+    unset($options['Car Parking']);
+    return $options;
 }
 
 function normalize_company_type($company_type)
@@ -51,7 +54,7 @@ function normalize_company_type($company_type)
         return 'Service type';
     }
 
-    return in_array($company_type, ['Housing', 'Service type', 'Stock Product', 'Fashion house'], true)
+    return in_array($company_type, ['Housing', 'Service type', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
         ? $company_type
         : 'Housing';
 }

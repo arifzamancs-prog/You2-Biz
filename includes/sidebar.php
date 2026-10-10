@@ -238,6 +238,8 @@ $sidebar_can_see_reports = is_admin_user()
 $sidebar_can_see_admin = is_admin_user()
     || (is_manager_user() && (manager_has_permission('admin') || manager_has_permission('tools')));
 $sidebar_table_system_enabled = false;
+$sidebar_dashboard_href = app_path('dashboard.php');
+$sidebar_is_car_parking = false;
 
 if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
     ensure_restaurant_tables_table($conn);
@@ -245,6 +247,10 @@ if(!$sidebar_is_super_admin && isset($conn) && $conn instanceof mysqli){
         $conn,
         (int)($_SESSION['user_id'] ?? 0)
     );
+    if(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Car Parking'){
+        $sidebar_is_car_parking = true;
+        $sidebar_dashboard_href = app_path('parking/index.php');
+    }
 }
 
 function sidebar_is_active($href)
@@ -390,7 +396,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
 <aside class="main-sidebar sidebar-dark-primary elevation-4 app-sidebar">
 
-    <a href="<?= htmlspecialchars(app_path('dashboard.php')); ?>"
+    <a href="<?= htmlspecialchars($sidebar_dashboard_href); ?>"
        class="brand-link app-brand">
         <img
             src="<?= htmlspecialchars($sidebar_avatar); ?>"
@@ -422,7 +428,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 $dashboard_menu_label = is_manager_user() && manager_has_permission('dashboard')
                     ? 'Branch Dashboard'
                     : 'Dashboard';
-                sidebar_item(app_path('dashboard.php'), $dashboard_menu_label, 'fas fa-home');
+                sidebar_item($sidebar_dashboard_href, $dashboard_menu_label, 'fas fa-home');
                 if(is_manager_user()){
                     sidebar_item(app_path('staff/leave_application.php'), 'Leave Application', 'fas fa-file-medical');
                 }
@@ -492,6 +498,10 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
                 <?php } ?>
 
+                <?php if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Car Parking' && (!is_manager_user() || manager_has_permission('parking_dashboard') || manager_has_permission('parking_entry') || manager_has_permission('parking_exit') || manager_has_permission('parking_reports') || manager_has_permission('parking_settings'))){ ?>
+                    <?php sidebar_item(app_path('parking/index.php'), 'Parking Management', 'fas fa-parking'); ?>
+                <?php } ?>
+
                 <?php if(is_manager_user()){ ?>
                 <?php
                     if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing' && manager_has_permission('land_ledger')){
@@ -501,7 +511,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             ['href'=>app_path('land/land_summary.php'),'label'=>'Land Summary'],
                         ]);
                     }
-                    if(!products_module_enabled() && manager_has_permission('sales')){
+                    if(!$sidebar_is_car_parking && !products_module_enabled() && manager_has_permission('sales')){
                     sidebar_tree(
                         'Sales / Invoice',
                         'fas fa-file-invoice',
@@ -528,8 +538,8 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             ['href' => app_path('transactions/index.php'), 'label' => 'Transactions'],
                         ]);
                     }
-                    if(!products_module_enabled() && manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
-                    if(manager_has_permission('customers')){
+                    if(!$sidebar_is_car_parking && !products_module_enabled() && manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
+                    if(!$sidebar_is_car_parking && manager_has_permission('customers')){
                         $sidebar_customer_items = [
                             ['href'=>app_path('customers/index.php'),'label'=>'Create Customer'],
                         ];
@@ -575,7 +585,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                             sidebar_tree('Sales', 'fas fa-cash-register', $stock_sales_items);
                         }
                     }
-                    if(!restaurant_module_active() && manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
+                    if(!$sidebar_is_car_parking && !restaurant_module_active() && manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
                     ?>
                 <?php }else{ ?>
 
@@ -697,7 +707,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     }
                 }
 
-                sidebar_tree(
+                if(!$sidebar_is_car_parking) sidebar_tree(
                     'Customer Manage',
                     'fas fa-users',
                     array_merge([
@@ -754,7 +764,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                 }
 
-                if(!products_module_enabled()) sidebar_tree(
+                if(!$sidebar_is_car_parking && !products_module_enabled()) sidebar_tree(
                     $project_package_labels['module'],
                     'fas fa-project-diagram',
                     [
@@ -771,7 +781,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                if(!restaurant_module_active()) sidebar_tree(
+                if(!$sidebar_is_car_parking && !restaurant_module_active()) sidebar_tree(
                     'Lead Management',
                     'fas fa-filter',
                     [
@@ -808,7 +818,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ]
                 );
 
-                if(!products_module_enabled()) sidebar_tree(
+                if(!$sidebar_is_car_parking && !products_module_enabled()) sidebar_tree(
                     'Sales / Invoice',
                     'fas fa-file-invoice',
                     array_merge([
@@ -832,17 +842,21 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
                 <?php } ?>
 
-                <?php if($sidebar_can_see_reports){ ?>
+                <?php if($sidebar_is_car_parking ? (is_admin_user() || (is_manager_user() && manager_has_permission('parking_reports'))) : $sidebar_can_see_reports){ ?>
 
                 <li class="nav-header">INSIGHTS</li>
 
                 <?php
+                if($sidebar_is_car_parking){
+                    sidebar_item(app_path('parking/reports.php'), 'Reports', 'fas fa-chart-bar');
+                }else{
                 $sidebar_report_items = [
                     ['href' => app_path('reports/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'],
                     ['href' => app_path('reports/category_expense.php'), 'label' => 'Expense Report', 'icon' => 'fas fa-receipt'],
                     ['href' => app_path('reports/profit_report.php'), 'label' => 'Profit Report', 'icon' => 'fas fa-coins'],
                 ];
                 sidebar_tree('Reports', 'fas fa-chart-bar', $sidebar_report_items);
+                }
                 ?>
                 <?php } ?>
 

@@ -70,6 +70,11 @@ function available_manager_permissions($project_package_labels = null)
         'tools' => 'Tools',
         'notice_publish' => 'Notice Publish',
         'reports' => 'Reports',
+        'parking_dashboard' => 'Parking Dashboard',
+        'parking_entry' => 'Parking Entry Terminal',
+        'parking_exit' => 'Parking Exit & Payment',
+        'parking_reports' => 'Parking Reports / Live Vehicles',
+        'parking_settings' => 'Parking Setup',
     ];
 }
 
