@@ -1589,12 +1589,12 @@ require_once '../includes/sidebar.php';
                             <form method="post" action="eshop.php" class="mt-3 border-top pt-2">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['eshop_csrf']) ?>">
-                                <label class="small mb-1" for="eshop-status-<?= (int)$row['id'] ?>">E-shop access</label>
+                                <label class="small mb-1" for="eshop-status-<?= (int)$row['id'] ?>">E-shop</label>
                                 <select id="eshop-status-<?= (int)$row['id'] ?>" name="enabled" class="form-control form-control-sm mb-2">
                                     <option value="0">Inactive</option>
                                     <option value="1" <?= !empty($company_shop['enabled']) ? 'selected' : '' ?>>Active</option>
                                 </select>
-                                <label class="small mb-1" for="eshop-slug-<?= (int)$row['id'] ?>">Shop URL name</label>
+                                <label class="small mb-1" for="eshop-slug-<?= (int)$row['id'] ?>">Shop URL</label>
                                 <input id="eshop-slug-<?= (int)$row['id'] ?>" name="slug" class="form-control form-control-sm" required minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9-]{1,62}[a-z0-9]" value="<?= htmlspecialchars($company_shop['slug'] ?? '') ?>" placeholder="company-name">
                                 <small class="text-muted d-block text-break mt-1">Reserved URL: <?= htmlspecialchars(eshop_reserved_url($company_shop['slug'] ?? 'company-name')) ?></small>
                                 <button type="submit" class="btn btn-primary btn-sm mt-2">Save E-shop</button>

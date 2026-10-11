@@ -110,6 +110,52 @@ $app_favicon_version = is_file($app_favicon_path) ? (string)filemtime($app_favic
         text-transform:uppercase;
     }
 
+    .app-brand-company-context{
+        color:rgba(255,255,255,.74);
+        display:flex;
+        flex-direction:column;
+        font-size:10px;
+        font-weight:600;
+        line-height:1.25;
+        margin-top:3px;
+        text-transform:uppercase;
+    }
+
+    .app-brand-company-context--inline{
+        align-items:center;
+        flex-direction:row;
+        white-space:nowrap;
+    }
+
+    .app-brand-context-divider{
+        display:none;
+    }
+
+    .app-brand-company-context--inline .app-brand-context-divider{
+        color:rgba(255,255,255,.42);
+        display:inline;
+        margin:0 5px;
+    }
+
+    .app-brand-company-type,
+    .app-brand-multi-branch{
+        flex-shrink:0;
+        white-space:nowrap;
+    }
+
+    .app-brand-context-divider{
+        flex-shrink:0;
+    }
+
+    .app-brand-multi-branch{
+        color:#7ee2a8;
+        margin-top:2px;
+    }
+
+    .app-brand-company-context--inline .app-brand-multi-branch{
+        margin-top:0;
+    }
+
     .app-sidebar .sidebar{
         padding-left:10px;
         padding-right:10px;

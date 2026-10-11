@@ -183,6 +183,9 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         $default_map[$id]['parent'] = (string)($saved_item['parent'] ?? '');
         $default_map[$id]['sort'] = (int)($saved_item['sort'] ?? $default_map[$id]['sort']);
         $default_map[$id]['visible'] = !isset($saved_item['visible']) || (int)$saved_item['visible'] === 1 ? 1 : 0;
+        if (in_array($saved_item['section'] ?? '', ['MAIN','OPERATIONS','INSIGHTS','ADMIN','HELP','SESSION'], true)) {
+            $default_map[$id]['section'] = $saved_item['section'];
+        }
     }
 
     // These are structural children of the Admin menu. Older saved sidebar
@@ -235,6 +238,35 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
                 $layout_item['sort'] = $warehouse_sort + 1;
             } elseif ((int)$layout_item['sort'] > $warehouse_sort) {
                 $layout_item['sort'] = (int)$layout_item['sort'] + 1;
+            }
+        }
+        unset($layout_item);
+    }
+    // Match the company-specific order applied by the visible sidebar,
+    // including when an older saved layout is present.
+    if (!$saved && function_exists('project_package_company_type')
+        && project_package_company_type($conn, (int)$user_id) === 'Fashion house'
+        && company_multi_branch_enabled($conn, (int)$user_id)) {
+        $operations_order = array_flip([
+            'stock_sales', 'wallets', 'products', 'suppliers', 'warehouse',
+            'staff_manage', 'live_report', 'customer_manage',
+            'lead_management', 'notice_publish',
+        ]);
+        foreach ($items as &$layout_item) {
+            if (isset($operations_order[$layout_item['id']])) {
+                $layout_item['section'] = 'OPERATIONS';
+                // The sidebar reorders top-level items; preserve custom submenus.
+                if ($layout_item['parent'] === '') {
+                    $layout_item['sort'] = 40 + $operations_order[$layout_item['id']];
+                }
+            } elseif ($layout_item['parent'] === '' && $layout_item['section'] === 'OPERATIONS') {
+                $layout_item['sort'] = 60 + (int)$layout_item['sort'];
+            }
+        }
+        unset($layout_item);
+        foreach ($items as &$layout_item) {
+            if ($layout_item['parent'] === 'staff_manage') {
+                $layout_item['section'] = 'OPERATIONS';
             }
         }
         unset($layout_item);
@@ -373,6 +405,7 @@ function sidebar_save_layout($conn, $user_id, $items)
             'parent' => $parent,
             'sort' => (int)($item['sort'] ?? 0),
             'visible' => !isset($item['visible']) || (int)$item['visible'] === 1 ? 1 : 0,
+            'section' => in_array($item['section'] ?? '', ['MAIN','OPERATIONS','INSIGHTS','ADMIN','HELP','SESSION'], true) ? $item['section'] : 'OPERATIONS',
         ];
     }
 
@@ -384,4 +417,76 @@ function sidebar_save_layout($conn, $user_id, $items)
     );
     mysqli_stmt_bind_param($stmt, 'is', $user_id, $json);
     return mysqli_stmt_execute($stmt);
+}
+
+// Build the editor and saved layout from the menus actually authorized and
+// rendered by sidebar.php. Disabled company features never enter this list.
+function sidebar_rendered_layout($html, $conn, $user_id, $labels = [])
+{
+    $document = new DOMDocument();
+    $previous = libxml_use_internal_errors(true);
+    $document->loadHTML('<?xml encoding="UTF-8">' . $html);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    $xpath = new DOMXPath($document);
+    $known = sidebar_load_layout($conn, $user_id, $labels);
+    $saved = [];
+    $stmt = mysqli_prepare($conn, 'SELECT layout_json FROM sidebar_settings WHERE user_id=?');
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+    foreach (json_decode($row['layout_json'] ?? '[]', true) ?: [] as $item) $saved[$item['id']] = $item;
+    $result = [];
+    $walk = function ($list, $parent = '', $section = 'MAIN') use (&$walk, &$result, $xpath, $known, $saved) {
+        foreach ($list->childNodes as $node) {
+            if (!($node instanceof DOMElement) || $node->tagName !== 'li') continue;
+            if (strpos($node->getAttribute('class'), 'nav-header') !== false) {
+                $section = trim($node->textContent);
+                continue;
+            }
+            $link = $xpath->query('./a', $node)->item(0);
+            if (!$link) continue;
+            $p = $xpath->query('./p', $link)->item(0);
+            $label = '';
+            if ($p) foreach ($p->childNodes as $part) if ($part instanceof DOMText) $label .= $part->textContent;
+            $label = trim($label);
+            $href = $link->getAttribute('href');
+            $href = $href === '#' ? '' : $href;
+            $match = null;
+            foreach ($known as $candidate) {
+                if (($href !== '' && $candidate['href'] === $href) || ($href === '' && $candidate['href'] === '' && $candidate['label'] === $label)) {
+                    $match = $candidate;
+                    break;
+                }
+            }
+            $id = $match['id'] ?? ('menu_' . substr(sha1($href ?: $label), 0, 16));
+            $item = sidebar_setting_item($id, $label, $href, $parent, count($result) * 10, $section);
+            if ($match) {
+                $item['section'] = $match['section'];
+                $item['sort'] = $match['sort'];
+            }
+            if (isset($saved[$id])) foreach (['parent','sort','visible','section'] as $key) {
+                if (isset($saved[$id][$key])) $item[$key] = $saved[$id][$key];
+            }
+            if ($id === 'sidebar_settings') $item['visible'] = 1;
+            $result[$id] = $item;
+            $children = $xpath->query('./ul', $node)->item(0);
+            if ($children) $walk($children, $id, $section);
+        }
+    };
+    $list = $xpath->query('//ul[contains(concat(" ",normalize-space(@class)," ")," nav-sidebar ")]')->item(0);
+    if ($list) $walk($list);
+    foreach ($result as $id => &$item) {
+        $seen = [$id => true];
+        $parent = $item['parent'];
+        while ($parent !== '') {
+            if (!isset($result[$parent]) || isset($seen[$parent])) { $item['parent'] = ''; break; }
+            $seen[$parent] = true;
+            $parent = $result[$parent]['parent'];
+        }
+    }
+    unset($item);
+    usort($result, static function ($a, $b) { return (int)$a['sort'] <=> (int)$b['sort']; });
+    return $result;
 }

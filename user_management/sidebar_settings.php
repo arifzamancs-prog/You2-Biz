@@ -28,6 +28,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 'parent' => $item['parent'] ?? '',
                 'sort' => $item['sort'] ?? 0,
                 'visible' => $item['visible'] ?? 1,
+                'section' => $item['section'] ?? 'OPERATIONS',
             ];
         }
         $status = sidebar_save_layout($conn, $user_id, $items) ? 'saved' : 'error';
@@ -49,7 +50,10 @@ if(isset($_SESSION['sidebar_settings_status'])){
     unset($_SESSION['sidebar_settings_status']);
 }
 
-$items = sidebar_layout_items_for_current_user(sidebar_load_layout($conn, $user_id, $project_package_labels));
+require_once '../includes/header.php';
+require_once '../includes/navbar.php';
+require_once '../includes/sidebar.php';
+$items = $sidebar_available_items;
 $item_map = sidebar_setting_map_by_id($items);
 $children_by_parent = [];
 foreach($items as $item){
@@ -57,9 +61,6 @@ foreach($items as $item){
 }
 $sidebar_sections = ['MAIN', 'OPERATIONS', 'INSIGHTS', 'ADMIN', 'HELP', 'SESSION'];
 
-require_once '../includes/header.php';
-require_once '../includes/navbar.php';
-require_once '../includes/sidebar.php';
 ?>
 
 <div class="card">
@@ -113,9 +114,6 @@ require_once '../includes/sidebar.php';
                     $section_items = array_values(array_filter($root_items, static function($item) use ($section){
                         return ($item['section'] ?? 'MAIN') === $section;
                     }));
-                    if(empty($section_items)){
-                        continue;
-                    }
                     ?>
                     <div class="builder-section">
                         <div class="builder-section-title"><?= htmlspecialchars($section); ?></div>
@@ -176,7 +174,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function canDrop(zone, item) {
         if (!zone || !item || isInsideSelf(zone, item)) return false;
-        if (zone.dataset.parent === '' && zone.dataset.section && item.dataset.section !== zone.dataset.section) return false;
         return true;
     }
 
@@ -225,13 +222,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.querySelectorAll('.builder-item').forEach(function (item) {
         item.addEventListener('dragstart', function (event) {
+            event.stopPropagation();
             dragging = item;
             item.classList.add('dragging');
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.setData('text/plain', item.dataset.id || '');
         });
 
-        item.addEventListener('dragend', function () {
+        item.addEventListener('dragend', function (event) {
+            event.stopPropagation();
             item.classList.remove('dragging');
             dragging = null;
             clearPlaceholder();
@@ -305,6 +304,11 @@ document.addEventListener('DOMContentLoaded', function () {
             visibleInput.name = 'items[' + id + '][visible]';
             visibleInput.value = item.dataset.visible === '0' ? '0' : '1';
             hiddenInputs.appendChild(visibleInput);
+            const sectionInput = document.createElement('input');
+            sectionInput.type = 'hidden';
+            sectionInput.name = 'items[' + id + '][section]';
+            sectionInput.value = item.closest('.root-zone').dataset.section;
+            hiddenInputs.appendChild(sectionInput);
             sort += 10;
         });
     });

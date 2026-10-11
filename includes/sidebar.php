@@ -197,6 +197,24 @@ $sidebar_role = is_super_admin_user()
         ? 'Staff Access'
         : 'Administrator');
 
+// Keep the account context visible in every screen. Managers use the owner
+// company id above, so this always reflects the company they are working for.
+$sidebar_company_type_label = '';
+$sidebar_multi_branch_enabled = false;
+$sidebar_show_company_context = is_admin_user() && !is_super_admin_user();
+if ($sidebar_show_company_context && isset($conn) && $conn instanceof mysqli) {
+    $sidebar_header_company_id = (int)($_SESSION['user_id'] ?? 0);
+    if ($sidebar_header_company_id > 0) {
+        $sidebar_company_type_label = company_type_label(
+            project_package_company_type($conn, $sidebar_header_company_id)
+        );
+        $sidebar_multi_branch_enabled = company_multi_branch_enabled(
+            $conn,
+            $sidebar_header_company_id
+        );
+    }
+}
+
 // A staff login is linked with a staff record. Show that person's actual
 // designation under the company name instead of the generic account type.
 if(is_manager_user() && isset($conn) && $conn instanceof mysqli){
@@ -394,6 +412,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
 ?>
 
+<?php ob_start(); ?>
 <aside class="main-sidebar sidebar-dark-primary elevation-4 app-sidebar">
 
     <a href="<?= htmlspecialchars($sidebar_dashboard_href); ?>"
@@ -410,6 +429,15 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
             <span class="app-brand-role">
                 <?= htmlspecialchars($sidebar_role); ?>
             </span>
+            <?php if ($sidebar_show_company_context && $sidebar_company_type_label !== '') { ?>
+                <span class="app-brand-company-context">
+                    <span class="app-brand-company-type"><?= htmlspecialchars($sidebar_company_type_label); ?></span>
+                    <?php if ($sidebar_multi_branch_enabled) { ?>
+                        <span class="app-brand-context-divider" aria-hidden="true">||</span>
+                        <span class="app-brand-multi-branch">Multi Branch</span>
+                    <?php } ?>
+                </span>
+            <?php } ?>
         </span>
     </a>
 
@@ -936,6 +964,15 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
 
 </aside>
 
+<?php
+$sidebar_rendered_html = ob_get_clean();
+$sidebar_available_items = sidebar_rendered_layout($sidebar_rendered_html, $conn, (int)($_SESSION['user_id'] ?? 0), $project_package_labels);
+if (sidebar_saved_layout_exists($conn, (int)($_SESSION['user_id'] ?? 0))) {
+    $sidebar_layout_items = $sidebar_available_items;
+}
+echo $sidebar_rendered_html;
+?>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const navigation = document.querySelector('.nav-sidebar');
@@ -945,7 +982,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function itemIdentity(item) {
         const link = item.querySelector(':scope > .nav-link');
-        const label = link ? (link.querySelector('p') ? link.querySelector('p').textContent.trim().replace(/\s+/g, ' ') : '') : '';
+        const text = link ? link.querySelector('p') : null;
+        const label = text ? Array.from(text.childNodes).filter(function (node) { return node.nodeType === 3; }).map(function (node) { return node.textContent; }).join('').trim().replace(/\s+/g, ' ') : '';
         const href = link ? link.getAttribute('href') : '';
         return { label, href: href || '' };
     }
@@ -1048,6 +1086,34 @@ document.addEventListener('DOMContentLoaded', function () {
         return item.classList.contains('nav-header') && item.textContent.trim() === 'OPERATIONS';
     });
     if (sidebarLayout.length) return;
+    const fashionMultiBranch = <?= json_encode(
+        !is_super_admin_user() && isset($conn) && $conn instanceof mysqli
+        && project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Fashion house'
+        && company_multi_branch_enabled($conn, (int)($_SESSION['user_id'] ?? 0))
+    ); ?>;
+    if (fashionMultiBranch && operationsHeader) {
+        // Apply this company-specific order after saved layouts, keeping their
+        // visibility and permission filtering intact.
+        const labels = ['Sales', 'Wallets', 'Products', <?= json_encode(supplier_display_text('Suppliers')); ?>,
+            'Main Warehouse', 'Staff Manage', 'Stock Live Report', 'Customer Manage',
+            'Lead Management', 'Notice Publish'];
+        let previous = operationsHeader;
+        labels.forEach(function (label) {
+            const item = Array.from(navigation.children).find(function (candidate) {
+                const text = candidate.querySelector(':scope > .nav-link > p');
+                if (!text) return false;
+                const plain = text.cloneNode(true);
+                plain.querySelectorAll('.right, .badge').forEach(function (badge) { badge.remove(); });
+                return plain.textContent.trim() === label;
+            });
+            if (item) {
+                previous.insertAdjacentElement('afterend', item);
+                previous = item;
+            }
+        });
+        return;
+    }
+    if (sidebarLayout.length) return;
     if (!operationsHeader) return;
 
     const orderedLabels = <?= restaurant_module_active()
@@ -1095,6 +1161,43 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <?php } ?>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const contexts = document.querySelectorAll('.app-brand-company-context');
+
+    const fitCompanyContext = function () {
+        contexts.forEach(function (context) {
+            const type = context.querySelector('.app-brand-company-type');
+            const divider = context.querySelector('.app-brand-context-divider');
+            const branch = context.querySelector('.app-brand-multi-branch');
+            if (!type || !divider || !branch) return;
+
+            // Measure natural inline widths. In column mode flex children
+            // stretch to the full row width, so summing scrollWidth is wrong.
+            context.classList.add('app-brand-company-context--inline');
+            const dividerStyle = window.getComputedStyle(divider);
+            const neededWidth = type.getBoundingClientRect().width
+                + divider.getBoundingClientRect().width
+                + branch.getBoundingClientRect().width
+                + parseFloat(dividerStyle.marginLeft)
+                + parseFloat(dividerStyle.marginRight);
+            context.classList.toggle('app-brand-company-context--inline',
+                neededWidth <= context.getBoundingClientRect().width);
+        });
+    };
+
+    fitCompanyContext();
+    window.addEventListener('resize', fitCompanyContext);
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(fitCompanyContext);
+    }
+    if (window.ResizeObserver) {
+        const observer = new ResizeObserver(fitCompanyContext);
+        contexts.forEach(function (context) { observer.observe(context); });
+    }
+});
+</script>
 
 <div class="content-wrapper">
 
