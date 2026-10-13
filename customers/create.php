@@ -127,7 +127,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             : null,
         $user_id,
         'photo',
-        $photo_upload_message
+        $photo_upload_message,
+        true
     );
     if($photo_upload_message !== ''){
         $message = $photo_upload_message;
@@ -153,7 +154,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     : null,
                 $user_id,
                 $field_key,
-                $upload_message
+                $upload_message,
+                true
             );
             if($upload_message !== ''){
                 $message = $upload_message;
@@ -512,7 +514,7 @@ require_once '../includes/sidebar.php';
                                 class="form-control"
                                 accept="image/jpeg,image/png,image/webp"
                                 <?= !empty($custom_field['is_required']) ? 'required' : ''; ?>>
-                            <small class="text-muted">Max 2MB. Photo will be saved as 250x250 px.</small>
+                            <small class="text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small>
                         <?php } elseif($custom_field['field_type'] === 'calendar'){ ?>
                             <?php $calendar_picker_id = 'customer_calendar_' . preg_replace('/[^a-z0-9_]/i', '_', $field_key); ?>
                             <div class="input-group date customer-calendar-picker" id="<?= htmlspecialchars($calendar_picker_id); ?>" data-target-input="nearest">

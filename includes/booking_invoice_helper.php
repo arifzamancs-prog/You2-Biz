@@ -201,9 +201,11 @@ function booking_default_invoice_types()
 {
     return [
         'booking' => 'Booking',
+        'down_payment' => 'Down Payment',
         'installment' => 'Installment',
+        'full_payment' => 'One time payment',
+        'fixed' => 'Service Charge',
         'cancel_return' => 'Cancel/Return',
-        'full_payment' => 'Full Payment',
     ];
 }
 
@@ -211,7 +213,9 @@ function booking_default_invoice_type_behaviors()
 {
     return [
         'booking' => 'income',
+        'down_payment' => 'income',
         'installment' => 'income',
+        'fixed' => 'income',
         'cancel_return' => 'expense',
         'full_payment' => 'income',
     ];
@@ -224,12 +228,12 @@ function booking_system_invoice_type_keys()
 
 /**
  * Payment types that collect against an existing booking in exactly the same
- * way as an Installment.  `monthly_service_charge` is deliberately kept as a
- * non-system type so it remains manageable from Payment Type settings.
+ * way as an Installment. `monthly_service_charge` remains manageable from
+ * Payment Type settings.
  */
 function booking_invoice_installment_like_type_keys()
 {
-    return ['installment', 'monthly_service_charge'];
+    return ['down_payment', 'installment', 'fixed', 'monthly_service_charge'];
 }
 
 function booking_invoice_existing_file_type_keys()
@@ -240,6 +244,11 @@ function booking_invoice_existing_file_type_keys()
 function booking_invoice_requires_existing_file($type)
 {
     return in_array(trim((string)$type), booking_invoice_existing_file_type_keys(), true);
+}
+
+function booking_invoice_is_service_charge_type($type)
+{
+    return trim((string)$type) === 'fixed';
 }
 
 function ensure_booking_invoice_type_table($conn, $user_id)
@@ -315,7 +324,10 @@ function booking_invoice_types($conn = null, $user_id = 0, $active_only = true)
     if($active_only){
         $sql .= " AND status='active'";
     }
-    $sql .= " ORDER BY type_name";
+    $sql .= " ORDER BY
+        CASE WHEN type_key IN ('booking','down_payment','installment','full_payment','fixed','cancel_return') THEN 0 ELSE 1 END ASC,
+        FIELD(type_key, 'booking','down_payment','installment','full_payment','fixed','cancel_return') ASC,
+        type_name ASC";
 
     $stmt = mysqli_prepare($conn, $sql);
     mysqli_stmt_bind_param($stmt, 'i', $user_id);

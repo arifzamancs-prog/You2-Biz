@@ -342,7 +342,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional, automatically compressed below 50 KB)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div></div></div>
+            <div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small></div></div></div>
 
             <div class="row">
 
@@ -534,9 +534,10 @@ function syncVariants(){
   subCategory.innerHTML='<option value="">'+(subCategories.length?'Select sub category':'No sub category')+'</option>';
   subCategories.forEach(name=>{const item=document.createElement('option');item.value=name;item.textContent=name;if(name===subCategory.dataset.selected)item.selected=true;subCategory.appendChild(item);});
   subCategory.disabled=subCategories.length===0;
+  subCategory.closest('.col-md-6').classList.toggle('d-none',subCategories.length===0);
   try{variants=JSON.parse(option.dataset.variants||'[]')}catch(e){}
   fields.innerHTML=''; wrap.classList.toggle('d-none',variants.length===0); opening.disabled=variants.length>0;
-  const nonStock=option.dataset.productType==='non_stock';
+  const nonStock=option?.dataset.productType==='non_stock';
   [opening, document.querySelector('[name="minimum_stock"]')].forEach(input=>{if(input){input.closest('.form-group').classList.toggle('d-none',nonStock);if(nonStock)input.value=0;}});
   if(nonStock){wrap.classList.add('d-none');opening.disabled=true;return;}
   if(!variants.length){ return; }
@@ -546,7 +547,7 @@ function syncVariants(){
 }
 category.addEventListener('change',syncVariants); syncVariants();
 })();
-(function(){const input=document.getElementById('product_photo'),form=document.getElementById('product-form'),status=document.getElementById('product-photo-status');if(!input||!window.DataTransfer)return;let busy=false;input.addEventListener('change',function(){const file=input.files[0];if(!file)return;busy=true;status.className='form-text text-muted';status.textContent='Compressing photo…';const reader=new FileReader();reader.onload=e=>{const image=new Image();image.onload=()=>{let max=1200;const attempt=()=>{const scale=Math.min(1,max/Math.max(image.width,image.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);let quality=.82;const save=()=>canvas.toBlob(blob=>{if(blob&&blob.size<=51200){const data=new DataTransfer();data.items.add(new File([blob],'product-photo.jpg',{type:'image/jpeg'}));input.files=data.files;busy=false;status.className='form-text text-success';status.textContent='Photo ready: '+Math.ceil(blob.size/1024)+' KB.';return;}if(quality>.1){quality-=.12;save();return;}if(max>96){max=Math.max(96,Math.round(max*.72));attempt();return;}busy=false;input.value='';status.className='form-text text-danger';status.textContent='Photo could not be compressed below 50 KB.';},'image/jpeg',quality);save();};attempt();};image.onerror=()=>{busy=false;status.textContent='Invalid photo selected.';};image.src=e.target.result;};reader.readAsDataURL(file);});form.addEventListener('submit',e=>{if(busy){e.preventDefault();status.className='form-text text-warning';status.textContent='Please wait for photo compression.';}});})();
+(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input)return;input.addEventListener('change',function(){const file=input.files[0];if(!file)return;status.className='form-text text-muted';status.textContent=file.size<=40960?'Photo will be kept unchanged.':'Photo will be optimized when the product is saved.';});})();
 </script>
 
 <?php

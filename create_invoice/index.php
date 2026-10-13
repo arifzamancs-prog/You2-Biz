@@ -41,7 +41,7 @@ $customer_projects = [];
 $customer_packages = [];
 $ptc = mysqli_query($conn, "SELECT DISTINCT customer_id, invoice_type FROM booking_invoices bi WHERE user_id={$user_id} AND status='confirmed'{$branch_scope}");
 while($ptc && $pr = mysqli_fetch_assoc($ptc)){ $payment_type_customers[$pr['invoice_type']][] = (int)$pr['customer_id']; }
-$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.branch_id=bi.branch_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed'{$branch_scope} AND bi.invoice_type IN ({$total_invoice_type_sql}) ORDER BY bi.invoice_date DESC");
+$purchase_map = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.invoice_date, pk.package_name, COALESCE(NULLIF(bi.total_price,0),pk.price,bi.amount) AS total_amount, (SELECT COALESCE(SUM(adj.amount),0) FROM booking_invoices adj WHERE adj.user_id=bi.user_id AND adj.branch_id=bi.branch_id AND adj.customer_id=bi.customer_id AND adj.project_id=bi.project_id AND adj.package_id=bi.package_id AND adj.status='confirmed' AND adj.invoice_type<>'fixed') AS paid_amount FROM booking_invoices bi LEFT JOIN packages pk ON pk.id=bi.package_id AND pk.user_id=bi.user_id WHERE bi.user_id={$user_id} AND bi.status='confirmed'{$branch_scope} AND bi.invoice_type IN ({$total_invoice_type_sql}) ORDER BY bi.invoice_date DESC");
 while($purchase_map && $pm = mysqli_fetch_assoc($purchase_map)){ $c=(int)$pm['customer_id']; $p=(int)$pm['project_id']; $customer_projects[$c][]=$p; $customer_packages[$c][$p][]=['id'=>(int)$pm['package_id'],'date'=>date('d-m-Y',strtotime($pm['invoice_date'])),'name'=>(string)($pm['package_name'] ?? ''),'total'=>(float)$pm['total_amount'],'paid'=>(float)$pm['paid_amount']]; }
 $type = '';
 $display_type = isset($_GET['type']) ? normalize_booking_invoice_type($_GET['type'], $invoice_types) : 'booking';
@@ -112,7 +112,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 $property_values[$field] = trim((string)($file_source[$field] ?? ''));
             }
         } else {
-            $message = 'Select a File No. created by a Booking or Full Payment invoice.';
+            $message = 'Select a File No. created by a Booking or One time payment invoice.';
         }
     }
 
@@ -125,12 +125,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if(($file_number_is_new && $file_number_exists) || ($requires_existing_file_number && !$file_number_exists)){
             $message = $file_number_is_new
                 ? 'This File No. is already used. Select a non-used File No.'
-                : 'Select an existing File No. for Installment, Monthly Service Charge or Cancel/Return.';
+                : 'Select an existing File No. for Down Payment, Installment, Service Charge, Monthly Service Charge or Cancel/Return.';
         }
     }
 
     // A plot allocation is unique too: a different File No. must not create a
-    // second Booking/Full Payment for the same project, package and plot.
+    // second Booking/One time payment for the same project, package and plot.
     if($message === '' && $is_housing_company && $file_number_is_new && $project_id > 0 && $package_id > 0){
         $plot_duplicate_stmt = mysqli_prepare(
             $conn,
@@ -282,7 +282,7 @@ if($is_housing_company){
                 COALESCE(NULLIF(bi.total_price, 0), 0) AS total_amount,
                 COALESCE((SELECT SUM(CASE WHEN related.invoice_type='cancel_return' THEN -related.amount ELSE related.amount END)
                           FROM booking_invoices related
-                          WHERE related.user_id=bi.user_id AND related.file_no=bi.file_no AND related.status='confirmed'), 0) AS paid_amount
+                          WHERE related.user_id=bi.user_id AND related.file_no=bi.file_no AND related.status='confirmed' AND related.invoice_type<>'fixed'), 0) AS paid_amount
          FROM booking_invoices bi
          WHERE bi.user_id={$user_id} AND bi.branch_id={$branch_id}
            AND bi.invoice_type IN ('booking', 'full_payment') AND bi.status='confirmed'

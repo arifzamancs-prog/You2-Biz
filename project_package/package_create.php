@@ -10,6 +10,11 @@ ensure_project_package_tables($conn);
 $user_id = (int)$_SESSION['user_id'];
 $labels = project_package_labels($conn, $user_id);
 $message = '';
+if(empty($_SESSION['package_project_token'])){
+    $_SESSION['package_project_token'] = bin2hex(random_bytes(32));
+}
+$creating_project = ($_POST['project_id'] ?? '') === '__new__';
+$new_project_name = trim((string)($_POST['new_project_name'] ?? ''));
 $project_id = (int)($_POST['project_id'] ?? 0);
 $package_name = trim($_POST['package_name'] ?? '');
 $price = trim($_POST['price'] ?? '');
@@ -34,10 +39,22 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if($description === '') $description = 'General';
     $price_value = is_numeric($price) ? (float)$price : -1;
 
-    if($project_id <= 0 || $package_name === '' || $price_value < 0){
+    $owned_project = in_array($project_id, array_map('intval', array_column($projects, 'id')), true);
+    if(!hash_equals($_SESSION['package_project_token'], (string)($_POST['token'] ?? ''))){
+        $message = 'Please refresh the page and try again.';
+    } elseif(($creating_project ? $new_project_name === '' : !$owned_project) || $package_name === '' || $price_value < 0){
         $message = $labels['project'] . ', ' . $labels['package_name'] . ' and valid Price are required.';
     } else {
-        if($message === ''){
+        mysqli_begin_transaction($conn);
+        try {
+            if($creating_project){
+                $new_code = 'PRJ-' . date('ymdHis') . '-' . bin2hex(random_bytes(5));
+                $new_description = '';
+                $new_stmt = mysqli_prepare($conn, "INSERT INTO projects (user_id, project_name, project_code, description, status) VALUES (?, ?, ?, ?, 'active')");
+                mysqli_stmt_bind_param($new_stmt, 'isss', $user_id, $new_project_name, $new_code, $new_description);
+                if(!mysqli_stmt_execute($new_stmt)) throw new RuntimeException('Project insert failed');
+                $project_id = (int)mysqli_insert_id($conn);
+            }
             $insert_stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO packages
@@ -56,11 +73,16 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             );
 
             if(mysqli_stmt_execute($insert_stmt)){
+                mysqli_commit($conn);
                 header('Location: packages.php');
                 exit;
             }
 
-            $message = 'Failed to save package.';
+            throw new RuntimeException('Package insert failed');
+        } catch(Throwable $e){
+            mysqli_rollback($conn);
+            if($creating_project) $project_id = 0;
+            $message = 'Failed to save package. Please try again.';
         }
     }
 }
@@ -81,16 +103,22 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <form method="post">
+            <input type="hidden" name="token" value="<?= htmlspecialchars($_SESSION['package_project_token'], ENT_QUOTES); ?>">
             <div class="form-group">
                 <label><?= htmlspecialchars($labels['project']); ?></label>
-                <select name="project_id" class="form-control" required>
+                <select name="project_id" id="project-select" class="form-control" required>
                     <option value=""><?= htmlspecialchars($labels['project_select']); ?></option>
                     <?php foreach($projects as $project){ ?>
                         <option value="<?= (int)$project['id']; ?>" <?= $project_id === (int)$project['id'] ? 'selected' : ''; ?>>
                             <?= htmlspecialchars($project['project_name']); ?>
                         </option>
                     <?php } ?>
+                    <option value="__new__" <?= $creating_project ? 'selected' : ''; ?>>+ <?= htmlspecialchars($labels['project'] === 'Project' ? 'Add New Project' : $labels['project_add']); ?></option>
                 </select>
+                <div id="new-project-panel" class="mt-2" <?= $creating_project ? '' : 'hidden'; ?>>
+                    <label for="new-project-name">New <?= htmlspecialchars($labels['project'] === 'Service Category' ? $labels['project'] : $labels['project_name']); ?></label>
+                    <input id="new-project-name" name="new_project_name" type="text" class="form-control" placeholder="<?= htmlspecialchars('Enter ' . strtolower($labels['project'] === 'Service Category' ? $labels['project'] : $labels['project_name']), ENT_QUOTES); ?>" value="<?= htmlspecialchars($new_project_name, ENT_QUOTES); ?>" <?= $creating_project ? 'required' : 'disabled'; ?>>
+                </div>
             </div>
 
             <div class="form-group">
@@ -114,6 +142,20 @@ require_once '../includes/sidebar.php';
     </div>
 </div>
 
+<script>
+(function(){
+    const select = document.getElementById('project-select');
+    const panel = document.getElementById('new-project-panel');
+    const name = document.getElementById('new-project-name');
+    select.addEventListener('change', function(){
+        const creating = select.value === '__new__';
+        panel.hidden = !creating;
+        name.disabled = !creating;
+        name.required = creating;
+        if(creating) name.focus();
+    });
+})();
+</script>
 <?php
 require_once '../includes/footer.php';
 ?>

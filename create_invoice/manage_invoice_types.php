@@ -77,7 +77,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     exit;
 }
 
-$types_result = mysqli_query($conn, "SELECT t.*, COUNT(bi.id) AS transaction_count FROM booking_invoice_types t LEFT JOIN booking_invoices bi ON bi.user_id=t.user_id AND bi.invoice_type=t.type_key WHERE t.user_id={$user_id} AND t.type_key<>'profit_return' GROUP BY t.id ORDER BY FIELD(t.type_key, 'booking', 'cancel_return', 'installment', 'full_payment') DESC, t.status='active' DESC, t.type_name");
+$types_result = mysqli_query($conn, "SELECT t.*, COUNT(bi.id) AS transaction_count FROM booking_invoice_types t LEFT JOIN booking_invoices bi ON bi.user_id=t.user_id AND bi.invoice_type=t.type_key WHERE t.user_id={$user_id} AND t.type_key<>'profit_return' GROUP BY t.id ORDER BY CASE WHEN t.type_key IN ('booking','down_payment','installment','full_payment','fixed','cancel_return') THEN 0 ELSE 1 END ASC, FIELD(t.type_key, 'booking','down_payment','installment','full_payment','fixed','cancel_return') ASC, t.status='active' DESC, t.type_name ASC");
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
 <div class="card"><div class="card-header"><h3 class="card-title">Manage Payment Type</h3></div><div class="card-body">

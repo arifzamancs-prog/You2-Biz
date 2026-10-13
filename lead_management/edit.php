@@ -34,10 +34,13 @@ $phone = trim($_POST['phone'] ?? $lead['phone']);
 $email = trim($_POST['email'] ?? $lead['email']);
 $note = trim($_POST['note'] ?? $lead['note']);
 $followup_date = trim($_POST['followup_date'] ?? $lead['followup_date']);
+$reference_options = lead_reference_options($conn, $user_id);
+$reference_user_id = (int)($_POST['reference_user_id'] ?? $lead['reference_user_id'] ?? 0);
+$reference_name = trim((string)($reference_options[$reference_user_id]['name'] ?? ''));
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    if($name === '' || $phone === '' || $followup_date === ''){
-        $message = 'Name, Phone and Followup Date are required.';
+    if($name === '' || $phone === '' || $followup_date === '' || $reference_name === ''){
+        $message = 'Name, Ref., Phone and Followup Date are required.';
     }elseif($followup_date < $today){
         $message = 'Followup Date cannot be earlier than today.';
     }else{
@@ -53,13 +56,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $update_stmt = mysqli_prepare(
                 $conn,
                 "UPDATE leads
-                 SET name=?, phone=?, email=?, note=?, followup_date=?
+                 SET name=?, phone=?, email=?, note=?, followup_date=?, reference_user_id=?, reference_name=?
                  WHERE id=? AND user_id=?{$lead_scope_sql}"
             );
             if(is_manager_user()){
-                mysqli_stmt_bind_param($update_stmt, 'sssssiiis', $name, $phone, $email, $note, $followup_date, $id, $user_id, $lead_owner_id, $lead_owner_name);
+                mysqli_stmt_bind_param($update_stmt, 'sssssisiiis', $name, $phone, $email, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id, $lead_owner_id, $lead_owner_name);
             }else{
-                mysqli_stmt_bind_param($update_stmt, 'sssssii', $name, $phone, $email, $note, $followup_date, $id, $user_id);
+                mysqli_stmt_bind_param($update_stmt, 'sssssisii', $name, $phone, $email, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id);
             }
 
             if(mysqli_stmt_execute($update_stmt)){
@@ -85,6 +88,7 @@ require_once '../includes/sidebar.php';
         <?php if($message){ ?><div class="alert alert-danger"><?= htmlspecialchars($message); ?></div><?php } ?>
         <form method="post">
             <div class="form-group"><label>Name</label><input type="text" name="name" class="form-control" value="<?= htmlspecialchars($name); ?>" required></div>
+            <div class="form-group"><label>Ref.</label><select name="reference_user_id" class="form-control" required><option value="">Select Ref.</option><?php foreach($reference_options as $option){ ?><option value="<?= (int)$option['login_user_id']; ?>" <?= $reference_user_id === (int)$option['login_user_id'] ? 'selected' : ''; ?>><?= htmlspecialchars($option['name'] . (!empty($option['designation']) ? ' (' . $option['designation'] . ')' : '')); ?></option><?php } ?></select></div>
             <div class="form-group"><label>Phone</label><input type="text" name="phone" class="form-control" value="<?= htmlspecialchars($phone); ?>" required></div>
             <div class="form-group"><label>Email</label><input type="email" name="email" class="form-control" value="<?= htmlspecialchars($email); ?>"></div>
             <div class="form-group"><label>Note</label><textarea name="note" class="form-control" rows="3"><?= htmlspecialchars($note); ?></textarea></div>

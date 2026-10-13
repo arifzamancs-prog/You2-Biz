@@ -96,7 +96,7 @@ function customer_form_is_valid_calendar_value($value)
     return $date && $date->format('d/m/Y') === $value;
 }
 
-function customer_form_upload_photo($file, $user_id, $field_key, &$message)
+function customer_form_upload_photo($file, $user_id, $field_key, &$message, $optimize_above_40kb = false)
 {
     if(empty($file) || !isset($file['error']) || (int)$file['error'] === UPLOAD_ERR_NO_FILE){
         return '';
@@ -107,7 +107,7 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message)
         return '';
     }
 
-    if((int)$file['size'] > 2 * 1024 * 1024){
+    if(!$optimize_above_40kb && (int)$file['size'] > 2 * 1024 * 1024){
         $message = 'Photo maximum size is 2MB.';
         return '';
     }
@@ -137,6 +137,18 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message)
     }
 
     $safe_field_key = preg_replace('/[^a-z0-9_]+/', '_', strtolower($field_key));
+
+    // Staff photos at or below 40 KB are kept exactly as selected. Larger
+    // photos are optimized below 50 KB when GD is available.
+    if($optimize_above_40kb && (int)$file['size'] <= 40 * 1024){
+        $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.' . $extension;
+        $path = $upload_dir . '/' . $file_name;
+        if(!move_uploaded_file($file['tmp_name'], $path)){
+            $message = 'Photo could not be saved.';
+            return '';
+        }
+        return 'uploads/customer_form/' . $file_name;
+    }
 
     if(!function_exists('imagecreatetruecolor')){
         $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.' . $extension;
@@ -175,7 +187,21 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message)
     $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.jpg';
     $path = $upload_dir . '/' . $file_name;
 
-    if(!imagejpeg($target, $path, 90)){
+    $saved = false;
+    if($optimize_above_40kb){
+        // The first result that fits is the highest-quality result under
+        // 50 KB, which keeps the output as close as possible to 40–50 KB.
+        foreach([100, 95, 92, 90, 88, 85, 82, 78, 74, 70, 65, 60, 55, 50, 45, 40, 30, 20, 10] as $quality){
+            if(@imagejpeg($target, $path, $quality) && (int)filesize($path) <= 50 * 1024){
+                $saved = true;
+                break;
+            }
+        }
+    }else{
+        $saved = @imagejpeg($target, $path, 90);
+    }
+
+    if(!$saved){
         $message = 'Photo could not be saved.';
         imagedestroy($source);
         imagedestroy($target);

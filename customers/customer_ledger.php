@@ -354,9 +354,15 @@ $wallet_transaction_stmt = mysqli_prepare($conn, $wallet_transaction_sql);
 mysqli_stmt_bind_param($wallet_transaction_stmt, 'ii', $customer_id, $user_id);
 mysqli_stmt_execute($wallet_transaction_stmt);
 $wallet_transactions = mysqli_stmt_get_result($wallet_transaction_stmt);
+$service_charge_rows = [];
 
 while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
     $invoice_type_key = normalize_booking_invoice_type($row['invoice_type'] ?? '', $invoice_types);
+    if(booking_invoice_is_service_charge_type($invoice_type_key)){
+        $row['invoice_type_key'] = $invoice_type_key;
+        $service_charge_rows[] = $row;
+        continue;
+    }
     $transaction_type = trim((string)($row['transaction_type'] ?? ''));
     $is_refund = $transaction_type !== ''
         ? $transaction_type === 'invoice_expense'
@@ -383,7 +389,7 @@ while($wallet_transactions && $row = mysqli_fetch_assoc($wallet_transactions)){
             trim((string)($row['road_no'] ?? '')) !== '' ? 'Road No: ' . trim((string)$row['road_no']) : '',
             trim((string)($row['plot_no'] ?? '')) !== '' ? 'Plot No: ' . trim((string)$row['plot_no']) : '',
         ]))),
-        // Booking, Full Payment, and custom income types establish a new
+        // Booking, One time payment, and custom income types establish a new
         // package/service total. Installment/refund types adjust an existing segment.
         'total_amount' => (!$is_refund && booking_invoice_establishes_total($conn, $user_id, $invoice_type_key)) ? (float)$row['package_price'] : 0,
         'sort_order' => $is_refund ? 3 : 2,
@@ -559,6 +565,34 @@ foreach($ledger as $origin_row){
     if($origin_details !== '' && $origin_no !== '' && booking_invoice_establishes_total($conn, $user_id, $origin_type)){
         $package_origin_groups[$origin_details] = 'invoice-' . md5($origin_no);
     }
+}
+
+// Service Charge is paid alongside a package, but it must not change that
+// package's paid amount or due balance. Keep it in its own per-package table.
+$service_charge_groups = [];
+foreach($service_charge_rows as $service_row){
+    $details = trim((string)($service_row['project_name'] ?? ''));
+    $package_name = trim((string)($service_row['package_name'] ?? ''));
+    if($details !== '' && $package_name !== '') $details .= ' - ';
+    $details .= $package_name;
+    $file_no = trim((string)($service_row['file_no'] ?? ''));
+    $group_key = ($is_housing_company && $file_no !== '')
+        ? 'file-' . md5($file_no)
+        : ($details !== '' && isset($package_origin_groups[$details])
+            ? $package_origin_groups[$details]
+            : 'service-' . md5($details . '|' . $file_no));
+    if(!isset($service_charge_groups[$group_key])){
+        $service_charge_groups[$group_key] = ['rows' => [], 'total_paid' => 0];
+    }
+    $amount = (float)($service_row['ledger_amount'] ?? $service_row['invoice_amount'] ?? 0);
+    $service_charge_groups[$group_key]['rows'][] = [
+        'date' => $service_row['ledger_date'] ?? $service_row['invoice_date'],
+        'payment_type' => booking_invoice_type_label($service_row['invoice_type'] ?? 'fixed', $invoice_types),
+        'note' => trim((string)($service_row['invoice_note'] ?? '')) ?: 'confirmed',
+        'wallet_name' => (string)($service_row['wallet_name'] ?? ''),
+        'amount' => $amount,
+    ];
+    $service_charge_groups[$group_key]['total_paid'] += $amount;
 }
 
 foreach($ledger as $row){
@@ -859,7 +893,7 @@ No ledger entries found.
 
 <?php } ?>
 
-<?php foreach($ledger_groups as $group){ ?>
+<?php foreach($ledger_groups as $group_key => $group){ ?>
 
 <hr>
 
@@ -963,6 +997,21 @@ echo $row_amount < 0
 </tfoot>
 
 </table>
+
+<?php if(!empty($service_charge_groups[$group_key]['rows'])){ $service_group = $service_charge_groups[$group_key]; ?>
+<h5 class="mt-3">Service Charge</h5>
+<table data-desktop-table="true" class="table table-bordered table-striped">
+<thead><tr><th>Date</th><th>Payment Type</th><th>Note</th><th>Payment By</th><th>Paid Amount</th></tr></thead>
+<tbody><?php foreach($service_group['rows'] as $service_row){ ?><tr>
+<td><?= htmlspecialchars(app_date($service_row['date'])); ?></td>
+<td><?= htmlspecialchars($service_row['payment_type']); ?></td>
+<td><?= htmlspecialchars($service_row['note']); ?></td>
+<td><?= htmlspecialchars($service_row['wallet_name'] ?: '-'); ?></td>
+<td><?= number_format((float)$service_row['amount'], 2); ?></td>
+</tr><?php } ?></tbody>
+<tfoot><tr><th colspan="4" class="text-right">Total</th><th><?= number_format((float)$service_group['total_paid'], 2); ?></th></tr></tfoot>
+</table>
+<?php } ?>
 
 <?php } ?>
 

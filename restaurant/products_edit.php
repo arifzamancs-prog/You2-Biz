@@ -37,7 +37,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label for="product_photo">Product Photo</label>
                         <input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control-file">
-                        <small class="form-text text-muted">Optional. Leave empty to keep the current photo. Max 2 MB.</small>
+                        <small class="form-text text-muted">Optional. Leave empty to keep the current photo. Photos above 40 KB are optimized to approximately 40–50 KB; 40 KB or smaller photos stay unchanged.</small>
                     </div>
                 </div>
             </div>

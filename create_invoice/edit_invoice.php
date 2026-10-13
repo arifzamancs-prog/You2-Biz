@@ -75,7 +75,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $package_id = (int)$source['package_id'];
             foreach(['block_name', 'road_no', 'plot_no'] as $field) $property_values[$field] = trim((string)($source[$field] ?? ''));
         } else {
-            $message = 'Select an existing File No. for Installment, Monthly Service Charge or Cancel/Return.';
+            $message = 'Select an existing File No. for Down Payment, Installment, Service Charge, Monthly Service Charge or Cancel/Return.';
         }
     }
 
@@ -165,7 +165,7 @@ $invoice_charges = booking_invoice_active_charges($conn, $user_id);
 $property_options = $is_housing_company ? booking_invoice_property_options($conn, $user_id) : [];
 $file_property_map = [];
 if($is_housing_company){
-    $source_properties = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.block_name, bi.road_no, bi.plot_no, bi.file_no, COALESCE(NULLIF(bi.total_price, 0), 0) AS total_amount, COALESCE((SELECT SUM(CASE WHEN related.invoice_type='cancel_return' THEN -related.amount ELSE related.amount END) FROM booking_invoices related WHERE related.user_id=bi.user_id AND related.file_no=bi.file_no AND related.status='confirmed'), 0) AS paid_amount FROM booking_invoices bi WHERE bi.user_id={$user_id} AND bi.invoice_type IN ('booking', 'full_payment') AND bi.status='confirmed' AND bi.file_no IS NOT NULL AND TRIM(bi.file_no)<>'' ORDER BY bi.id DESC");
+$source_properties = mysqli_query($conn, "SELECT bi.customer_id, bi.project_id, bi.package_id, bi.block_name, bi.road_no, bi.plot_no, bi.file_no, COALESCE(NULLIF(bi.total_price, 0), 0) AS total_amount, COALESCE((SELECT SUM(CASE WHEN related.invoice_type='cancel_return' THEN -related.amount ELSE related.amount END) FROM booking_invoices related WHERE related.user_id=bi.user_id AND related.file_no=bi.file_no AND related.status='confirmed' AND related.invoice_type<>'fixed'), 0) AS paid_amount FROM booking_invoices bi WHERE bi.user_id={$user_id} AND bi.invoice_type IN ('booking', 'full_payment') AND bi.status='confirmed' AND bi.file_no IS NOT NULL AND TRIM(bi.file_no)<>'' ORDER BY bi.id DESC");
     while($source_properties && $source_row = mysqli_fetch_assoc($source_properties)){
         $file_key = trim((string)$source_row['file_no']);
         if(!isset($file_property_map[$file_key])) $file_property_map[$file_key] = ['customer_id'=>(string)(int)$source_row['customer_id'], 'project_id'=>(string)(int)$source_row['project_id'], 'package_id'=>(string)(int)$source_row['package_id'], 'block_name'=>(string)$source_row['block_name'], 'road_no'=>(string)$source_row['road_no'], 'plot_no'=>(string)$source_row['plot_no'], 'total_amount'=>(float)$source_row['total_amount'], 'paid_amount'=>(float)$source_row['paid_amount']];

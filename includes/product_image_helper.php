@@ -30,7 +30,6 @@ function product_save_compressed_photo($upload, &$error = '')
     if(empty($upload['tmp_name']) || (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return '';
     if((int)($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK){ $error = 'Product photo upload failed.'; return ''; }
     $restaurant_photo_rules = (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe');
-    if($restaurant_photo_rules && (int)($upload['size'] ?? 0) > 2 * 1024 * 1024){ $error = 'Photo must be 2 MB or smaller.'; return ''; }
     $image = @getimagesize($upload['tmp_name']);
     if(!$image || !in_array($image[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true)){ $error = 'Use a JPG, PNG, or WEBP product photo.'; return ''; }
     $directory = product_image_upload_dir();
@@ -39,28 +38,40 @@ function product_save_compressed_photo($upload, &$error = '')
     // Restaurant uploads retain their valid original format if GD is unavailable.
     // All existing non-restaurant upload behavior remains JPEG-only.
     $extension = function_exists('imagecreatetruecolor') || !$restaurant_photo_rules ? 'jpg' : $source_extension;
-    $filename = 'product-' . date('YmdHis') . '-' . bin2hex(random_bytes(5)) . '.' . $extension;
+    $filename_extension = (int)($upload['size'] ?? 0) <= 40 * 1024
+        ? $source_extension
+        : $extension;
+    $filename = 'product-' . date('YmdHis') . '-' . bin2hex(random_bytes(5)) . '.' . $filename_extension;
     $target = $directory . '/' . $filename;
+
+    // Product photos at or below 40 KB retain their exact uploaded file.
+    // Larger valid images are optimized below.
+    if((int)($upload['size'] ?? 0) <= 40 * 1024){
+        if(!move_uploaded_file($upload['tmp_name'], $target)){ $error = 'Product photo could not be saved.'; return ''; }
+        return $filename;
+    }
+
     if(!function_exists('imagecreatetruecolor')){
-        if(!$restaurant_photo_rules && (int)filesize($upload['tmp_name']) > 50 * 1024){ $error = 'Photo must be 50 KB or smaller.'; return ''; }
         if(!move_uploaded_file($upload['tmp_name'], $target)){ $error = 'Product photo could not be saved.'; return ''; }
         return $filename;
     }
     $source = $image[2] === IMAGETYPE_JPEG ? @imagecreatefromjpeg($upload['tmp_name']) : ($image[2] === IMAGETYPE_PNG ? @imagecreatefrompng($upload['tmp_name']) : @imagecreatefromwebp($upload['tmp_name']));
     if(!$source){ $error = 'Product photo could not be processed.'; return ''; }
     $source_width = imagesx($source); $source_height = imagesy($source); $saved = false;
-    // Keep trying smaller dimensions/quality for detailed photos. A product
-    // image is only a thumbnail in the application, so preserving the 50 KB
-    // limit is preferable to rejecting an otherwise valid upload.
-    foreach([1200, 900, 700, 500, 350, 250, 180, 128, 96] as $max_dimension){
+    // Keep trying smaller dimensions/quality for detailed photos. The first
+    // result that fits is the highest-quality result under the 50 KB target.
+    $max_file_size = 50 * 1024;
+    $quality_steps = [100, 95, 92, 90, 88, 85, 82, 78, 74, 70, 65, 60, 55, 50, 45, 40, 30, 20, 10];
+    $dimension_steps = [1600, 1200, 900, 700, 500, 350, 250, 180, 128, 96];
+    foreach($dimension_steps as $max_dimension){
         $scale = min(1, $max_dimension / max($source_width, $source_height));
         $width = max(1, (int)round($source_width * $scale)); $height = max(1, (int)round($source_height * $scale));
         $canvas = imagecreatetruecolor($width, $height);
         imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
         imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $source_width, $source_height);
-        foreach([82, 68, 54, 40, 28, 18, 10] as $quality){
+        foreach($quality_steps as $quality){
             imagejpeg($canvas, $target, $quality);
-            if(filesize($target) <= 50 * 1024){ $saved = true; break 2; }
+            if(filesize($target) <= $max_file_size){ $saved = true; break 2; }
         }
         imagedestroy($canvas);
     }

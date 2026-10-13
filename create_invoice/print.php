@@ -52,12 +52,13 @@ if(!$invoice){
 }
 $invoice_type_key = normalize_booking_invoice_type($invoice['invoice_type'] ?? '', $invoice_types);
 $is_monthly_service_charge = $invoice_type_key === 'monthly_service_charge';
+$is_service_charge = booking_invoice_is_service_charge_type($invoice_type_key);
 $show_installment_ledger_total = in_array(project_package_company_type($conn, $user_id), ['Housing', 'Service type'], true)
-    && $invoice_type_key === 'installment';
+    && in_array($invoice_type_key, ['down_payment', 'installment'], true);
 $package_total_price = (float)($invoice['total_price'] ?? 0);
 if($package_total_price <= 0){ $package_total_price = (float)($invoice['amount'] ?? 0); }
 $package_paid_amount = (float)($invoice['amount'] ?? 0);
-$package_balance_stmt = mysqli_prepare($conn, "SELECT COALESCE(MAX(NULLIF(total_price,0)),0) AS package_total, COALESCE(SUM(amount),0) AS package_paid FROM booking_invoices WHERE user_id=? AND customer_id=? AND project_id=? AND package_id=? AND status='confirmed'");
+$package_balance_stmt = mysqli_prepare($conn, "SELECT COALESCE(MAX(NULLIF(total_price,0)),0) AS package_total, COALESCE(SUM(amount),0) AS package_paid FROM booking_invoices WHERE user_id=? AND customer_id=? AND project_id=? AND package_id=? AND status='confirmed' AND invoice_type<>'fixed'");
 mysqli_stmt_bind_param($package_balance_stmt, 'iiii', $user_id, $invoice['customer_id'], $invoice['project_id'], $invoice['package_id']);
 mysqli_stmt_execute($package_balance_stmt);
 $package_balance = mysqli_fetch_assoc(mysqli_stmt_get_result($package_balance_stmt));
@@ -65,7 +66,7 @@ if((float)($package_balance['package_total'] ?? 0) > 0) $package_total_price = (
 $package_paid_amount = (float)($package_balance['package_paid'] ?? $package_paid_amount);
 if ($show_installment_ledger_total) {
     // Match the ledger allocation: Housing uses File No., services use package.
-    $ledger_sql = "SELECT amount,invoice_type,total_price FROM booking_invoices WHERE user_id=? AND customer_id=? AND status='confirmed'";
+    $ledger_sql = "SELECT amount,invoice_type,total_price FROM booking_invoices WHERE user_id=? AND customer_id=? AND status='confirmed' AND invoice_type<>'fixed'";
     if ($is_housing_company && trim((string)($invoice['file_no'] ?? '')) !== '') {
         $ledger_stmt = mysqli_prepare($conn, $ledger_sql . ' AND file_no=?');
         mysqli_stmt_bind_param($ledger_stmt, 'iis', $user_id, $invoice['customer_id'], $invoice['file_no']);
@@ -86,8 +87,8 @@ if ($show_installment_ledger_total) {
     if ($ledger_total_price > 0) $package_total_price = $ledger_total_price;
 }
 $package_due_amount = max(0, $package_total_price - $package_paid_amount);
-$show_total_price = !$is_monthly_service_charge;
-$show_due_amount = !$is_monthly_service_charge && $package_due_amount > 0.009;
+$show_total_price = !$is_monthly_service_charge && !$is_service_charge;
+$show_due_amount = !$is_monthly_service_charge && !$is_service_charge && $package_due_amount > 0.009;
 $charge_stmt=mysqli_prepare($conn,'SELECT charge_name,charge_type,charge_amount FROM booking_invoice_charges WHERE booking_invoice_id=? ORDER BY id'); mysqli_stmt_bind_param($charge_stmt,'i',$id); mysqli_stmt_execute($charge_stmt); $charge_result=mysqli_stmt_get_result($charge_stmt); $booking_charges=[]; $base_amount=(float)$invoice['amount']; while($charge=mysqli_fetch_assoc($charge_result)){ $booking_charges[]=$charge; $base_amount += $charge['charge_type']==='less' ? (float)$charge['charge_amount'] : -(float)$charge['charge_amount']; }
 
 $GLOBALS['printing_branch_context'] = (int)($invoice['branch_id'] ?? 0);
@@ -102,7 +103,8 @@ $show_company_profile = should_print_company_profile($conn);
 $company_logo_url = should_print_company_logo($conn) ? current_print_company_logo_url($conn) : '';
 $has_print_logo = $company_logo_url !== '';
 $company_seal_url = should_print_company_seal($conn) ? current_company_seal_url($conn) : '';
-$paid_seal_url = should_print_paid_seal($conn) && ($invoice['status'] ?? 'pending') === 'confirmed' ? current_paid_seal_url($conn) : '';
+$invoice_is_confirmed = strtolower(trim((string) ($invoice['status'] ?? 'pending'))) === 'confirmed';
+$paid_seal_url = should_print_paid_seal($conn) && $invoice_is_confirmed ? current_paid_seal_url($conn) : '';
 $show_notes = should_print_invoice_notes($conn);
 $show_created_by = should_print_invoice_created_by($conn);
 $created_by_name = trim((string)($invoice['created_by_name'] ?? '')) ?: trim((string)($company_profile['name'] ?? 'System'));
@@ -182,7 +184,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             </table>
         </div>
 
-        <?php if($show_notes && !empty($invoice['notes'])){ ?>
+        <?php if(($show_notes || $is_service_charge) && !empty($invoice['notes'])){ ?>
             <div class="note">
                 <strong>Note:</strong><br>
                 <?= nl2br(htmlspecialchars($invoice['notes'])); ?>
