@@ -86,17 +86,15 @@ require_once '../includes/sidebar.php';
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="fas fa-parking mr-2"></i>Parking Management</h4>
     <div>
-        <?php if (is_admin_user() || manager_has_permission('parking_entry')) { ?><a class="btn btn-success btn-sm mr-1" href="entry.php"><i class="fas fa-car mr-1"></i>New Entry</a><?php } ?>
-        <?php if (is_admin_user() || manager_has_permission('parking_exit')) { ?><a class="btn btn-warning btn-sm mr-1" href="exit.php"><i class="fas fa-sign-out-alt mr-1"></i>Vehicle Exit</a><a class="btn btn-outline-warning btn-sm mr-1" href="lost_ticket.php"><i class="fas fa-exclamation-triangle mr-1"></i>Lost Ticket</a><a class="btn btn-outline-dark btn-sm mr-1" href="shift.php"><i class="fas fa-user-clock mr-1"></i>Shift</a><?php } ?>
-        <?php if (is_admin_user() || manager_has_permission('parking_reports')) { ?><a class="btn btn-info btn-sm mr-1" href="reports.php"><i class="fas fa-chart-bar mr-1"></i>Reports</a><?php } ?>
-        <?php if (is_admin_user() || manager_has_permission('parking_settings')) { ?><a class="btn btn-primary btn-sm" href="setup.php"><i class="fas fa-cog mr-1"></i>Setup</a><?php } ?>
+        <?php if (is_admin_user() || manager_has_permission('parking_entry')) { ?><a class="btn btn-success mr-1" href="entry.php"><i class="fas fa-car mr-1"></i>New Entry</a><?php } ?>
+        <?php if (is_admin_user() || manager_has_permission('parking_exit')) { ?><a class="btn btn-warning mr-1" href="exit.php"><i class="fas fa-sign-out-alt mr-1"></i>Vehicle Exit</a><a class="btn btn-outline-warning mr-1" href="lost_ticket.php"><i class="fas fa-exclamation-triangle mr-1"></i>Lost Ticket</a><a class="btn btn-outline-dark mr-1" href="shift.php"><i class="fas fa-user-clock mr-1"></i>Shift</a><?php } ?>
     </div>
 </div>
 
 <div class="row">
     <div class="col-lg-3 col-6"><div class="small-box bg-info"><div class="inner"><h3><?= (int)($today['entries'] ?? 0) ?></h3><p>Today's Entries</p></div><div class="icon"><i class="fas fa-car"></i></div></div></div>
     <div class="col-lg-3 col-6"><div class="small-box bg-success"><div class="inner"><h3><?= (int)($today['exits'] ?? 0) ?></h3><p>Today's Exits</p></div><div class="icon"><i class="fas fa-sign-out-alt"></i></div></div></div>
-    <div class="col-lg-3 col-6"><div class="small-box bg-warning"><div class="inner"><h3><?= (int)($today['active_vehicles'] ?? 0) ?></h3><p>Vehicles Inside</p></div><div class="icon"><i class="fas fa-parking"></i></div><a href="live.php" class="small-box-footer">View live list <i class="fas fa-arrow-circle-right"></i></a></div></div>
+    <div class="col-lg-3 col-6"><div class="small-box bg-warning"><div class="inner"><h3><?= (int)($today['active_vehicles'] ?? 0) ?></h3><p>Vehicles Inside</p></div><div class="icon"><i class="fas fa-parking"></i></div></div></div>
     <div class="col-lg-3 col-6"><div class="small-box bg-primary"><div class="inner"><h3>BDT <?= number_format((float)($collection['collection'] ?? 0), 2) ?></h3><p>Today's Collection</p></div><div class="icon"><i class="fas fa-wallet"></i></div></div></div>
 </div>
 

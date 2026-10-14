@@ -115,7 +115,7 @@ require_once '../includes/sidebar.php';
         <form method="post" enctype="multipart/form-data">
             <div class="form-group"><label>Staff ID <span class="text-danger">*</span></label><input class="form-control" name="staff_code" value="<?= htmlspecialchars($_POST['staff_code'] ?? $staff['staff_code'] ?? staff_code_from_id($staff['id'])) ?>" required></div>
             <?php if(!empty($staff['photo'])){ ?><div class="form-group"><label>Current Photo</label><div><img src="../<?= htmlspecialchars($staff['photo']) ?>" alt="Staff Photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"></div></div><?php } ?>
-            <div class="form-group"><label>Update Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><small class="text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small></div>
+            <div class="form-group"><label>Update Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
             <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? $staff['name']) ?>" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" value="<?= htmlspecialchars($staff['email'] ?? '') ?>" placeholder="staff@example.com"></div>
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($staff['phone']) ?>"></div>

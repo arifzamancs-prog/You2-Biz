@@ -457,21 +457,6 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     ? 'Branch Dashboard'
                     : 'Dashboard';
                 sidebar_item($sidebar_dashboard_href, $dashboard_menu_label, 'fas fa-home');
-                if(is_manager_user()){
-                    sidebar_item(app_path('staff/leave_application.php'), 'Leave Application', 'fas fa-file-medical');
-                }
-                ?>
-
-                <?php
-                $sidebar_staff_items = [
-                    ['href' => app_path('staff/index.php'), 'label' => 'Create Staff'],
-                    ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
-                    ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
-                    ['href' => app_path('staff/ledger.php'), 'label' => 'Other Payments'],
-                ];
-                if(!is_manager_user() || manager_has_permission('staff')){
-                    sidebar_tree('Staff Manage', 'fas fa-user-tie', $sidebar_staff_items);
-                }
                 ?>
 
                 <?php if(is_super_admin_user()){ ?>
@@ -522,12 +507,44 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 }
                 ?>
 
-                <?php if(is_admin_user() || manager_has_permission('notice_publish')){ ?>
-                    <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
-                <?php } ?>
+                <?php
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Car Parking'){
+                    $parking_action_items = [];
+                    if(is_admin_user() || manager_has_permission('parking_entry')){
+                        $parking_action_items[] = ['href' => app_path('parking/entry.php'), 'label' => 'New Entry', 'icon' => 'fas fa-car'];
+                    }
+                    if(is_admin_user() || manager_has_permission('parking_exit')){
+                        $parking_action_items[] = ['href' => app_path('parking/exit.php'), 'label' => 'Vehicle Exit', 'icon' => 'fas fa-sign-out-alt'];
+                        $parking_action_items[] = ['href' => app_path('parking/lost_ticket.php'), 'label' => 'Lost Ticket', 'icon' => 'fas fa-exclamation-triangle'];
+                        $parking_action_items[] = ['href' => app_path('parking/shift.php'), 'label' => 'Shift', 'icon' => 'fas fa-user-clock'];
+                    }
+                    if($parking_action_items){
+                        sidebar_tree('Action', 'fas fa-bolt', $parking_action_items);
+                    }
+                }
+                ?>
 
                 <?php if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Car Parking' && (!is_manager_user() || manager_has_permission('parking_dashboard') || manager_has_permission('parking_entry') || manager_has_permission('parking_exit') || manager_has_permission('parking_reports') || manager_has_permission('parking_settings'))){ ?>
-                    <?php sidebar_item(app_path('parking/index.php'), 'Parking Management', 'fas fa-parking'); ?>
+                    <?php sidebar_item(app_path('parking/setup.php'), 'Parking Management', 'fas fa-parking'); ?>
+                <?php } ?>
+
+                <?php
+                $sidebar_staff_items = [
+                    ['href' => app_path('staff/index.php'), 'label' => 'Create Staff'],
+                    ['href' => app_path('staff/attendance.php'), 'label' => 'Staff Attendance'],
+                    ['href' => app_path('staff/salary.php'), 'label' => 'Staff Salary'],
+                    ['href' => app_path('staff/ledger.php'), 'label' => 'Other Payments'],
+                ];
+                $can_manage_staff = !is_manager_user() || manager_has_permission('staff');
+                if(is_manager_user() && !$can_manage_staff) $sidebar_staff_items = [];
+                if(is_manager_user()) $sidebar_staff_items[] = ['href' => app_path('staff/leave_application.php'), 'label' => 'Leave Application', 'icon' => 'fas fa-file-medical'];
+                if($can_manage_staff || is_manager_user()){
+                    sidebar_tree('Staff Manage', 'fas fa-user-tie', $sidebar_staff_items);
+                }
+                ?>
+
+                <?php if(is_admin_user() || manager_has_permission('notice_publish')){ ?>
+                    <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
                 <?php } ?>
 
                 <?php if(is_manager_user()){ ?>
@@ -877,6 +894,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                 <?php
                 if($sidebar_is_car_parking){
                     sidebar_item(app_path('parking/reports.php'), 'Reports', 'fas fa-chart-bar');
+                    sidebar_item(app_path('parking/live.php'), 'Live Vehicles', 'fas fa-car');
                 }else{
                 $sidebar_report_items = [
                     ['href' => app_path('reports/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'],
@@ -1095,8 +1113,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Apply this company-specific order after saved layouts, keeping their
         // visibility and permission filtering intact.
         const labels = ['Sales', 'Wallets', 'Products', <?= json_encode(supplier_display_text('Suppliers')); ?>,
-            'Main Warehouse', 'Staff Manage', 'Stock Live Report', 'Customer Manage',
-            'Lead Management', 'Notice Publish'];
+            'Staff Manage', 'Customer Manage'];
         let previous = operationsHeader;
         labels.forEach(function (label) {
             const item = Array.from(navigation.children).find(function (candidate) {
@@ -1118,7 +1135,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const orderedLabels = <?= restaurant_module_active()
         ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Customer Manage', 'Table Management', 'Notice Publish'])
-        : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management']); ?>;
+        : (project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Housing'
+            ? json_encode(['Sales / Invoice', 'Wallets', $project_package_labels['module'], supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage', 'Lead Management', 'Notice Publish'])
+            : (in_array(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)), ['Stock Product', 'Fashion house'], true)
+                ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage'])
+                : ($sidebar_is_car_parking
+                    ? json_encode(['Action', 'Wallets', 'Parking Management', 'Staff Manage'])
+                    : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))) ?>;
     let previousItem = operationsHeader;
 
     orderedLabels.forEach(function (label) {

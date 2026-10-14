@@ -27,31 +27,46 @@ function leave_application_compress_photo($upload, $target_path){
     if(empty($upload['tmp_name']) || !is_uploaded_file($upload['tmp_name'])) return 'Please select an application photo.';
     $image_info = @getimagesize($upload['tmp_name']);
     if(!$image_info || !in_array($image_info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP], true)) return 'Only JPG, PNG or WEBP photos are allowed.';
-    // Some shared servers do not enable PHP GD. The browser compresses images
-    // before upload in that case; retain the strict 50 KB server-side limit.
+    if((int)($upload['size'] ?? 0) <= 40 * 1024){
+        return move_uploaded_file($upload['tmp_name'], $target_path) ? '' : 'Application photo could not be saved.';
+    }
+    // Without GD, retain the original rather than rejecting or degrading it.
     if(!function_exists('imagecreatetruecolor')){
-        if((int)filesize($upload['tmp_name']) > 50 * 1024) return 'Photo must be 50 KB or smaller.';
         return move_uploaded_file($upload['tmp_name'], $target_path) ? '' : 'Application photo could not be saved.';
     }
     $source = $image_info[2] === IMAGETYPE_JPEG ? @imagecreatefromjpeg($upload['tmp_name']) : ($image_info[2] === IMAGETYPE_PNG ? @imagecreatefrompng($upload['tmp_name']) : @imagecreatefromwebp($upload['tmp_name']));
     if(!$source) return 'Application photo could not be processed.';
     $source_width = imagesx($source); $source_height = imagesy($source);
-    $max_bytes = 50 * 1024;
+    $target_bytes = 50 * 1024;
     $saved = false;
-    foreach([1400, 1100, 900, 700, 550, 420, 320] as $max_dimension){
+    foreach([1400, 1100, 900, 700, 550] as $max_dimension){
         $scale = min(1, $max_dimension / max($source_width, $source_height));
         $width = max(1, (int)round($source_width * $scale)); $height = max(1, (int)round($source_height * $scale));
         $canvas = imagecreatetruecolor($width, $height);
         imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
         imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $source_width, $source_height);
-        foreach([80, 65, 50, 35] as $quality){
+        foreach([100, 95, 92, 90, 88, 85, 82, 78, 74, 70] as $quality){
             imagejpeg($canvas, $target_path, $quality);
-            if(filesize($target_path) <= $max_bytes){ $saved = true; break 2; }
+            if(filesize($target_path) <= $target_bytes){ $saved = true; break 2; }
         }
         imagedestroy($canvas);
     }
+    if(!$saved){
+        $max_dimension = 350;
+        $scale = min(1, $max_dimension / max($source_width, $source_height));
+        $width = max(1, (int)round($source_width * $scale)); $height = max(1, (int)round($source_height * $scale));
+        $canvas = imagecreatetruecolor($width, $height);
+        imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+        imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $source_width, $source_height);
+        foreach([95, 92, 90, 88, 85, 82, 80, 78, 75, 72, 70] as $quality){
+            imagejpeg($canvas, $target_path, $quality);
+            if(filesize($target_path) <= 120 * 1024){ $saved = true; break; }
+        }
+        imagedestroy($canvas);
+        if(!$saved && is_file($target_path) && filesize($target_path) > 0) $saved = true;
+    }
     imagedestroy($source);
-    if(!$saved){ @unlink($target_path); return 'Photo could not be compressed below 50 KB. Please use a simpler image.'; }
+    if(!$saved) return 'Application photo could not be saved.';
     return '';
 }
 
@@ -117,38 +132,9 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
  <input type="hidden" name="application_id" value="<?= (int)($editing_application['id'] ?? 0) ?>">
  <div class="col-md-4 form-group"><label>Date</label><input type="date" name="application_date" value="<?= htmlspecialchars($_POST['application_date'] ?? ($editing_application['application_date'] ?? date('Y-m-d'))) ?>" class="form-control" required></div>
  <div class="col-md-4 form-group"><label>Application Type</label><?php $selected_leave_type = $_POST['leave_type'] ?? ($editing_application['leave_type'] ?? ''); ?><select name="leave_type" class="form-control" required><option value="">Select type</option><option value="late" <?= $selected_leave_type==='late'?'selected':'' ?>>Late</option><option value="absent" <?= $selected_leave_type==='absent'?'selected':'' ?>>Absent</option><option value="casual_leave" <?= $selected_leave_type==='casual_leave'?'selected':'' ?>>Casual Leave</option><option value="medical_leave" <?= $selected_leave_type==='medical_leave'?'selected':'' ?>>Medical Leave</option></select></div>
- <div class="col-md-4 form-group"><label>Application Photo <small class="text-muted">(compressed to max 50 KB)</small></label><input type="file" name="application_photo" id="application_photo" accept="image/jpeg,image/png,image/webp" class="form-control" <?= $editing_application ? '' : 'required' ?>><small id="photo-compression-status" class="form-text text-muted"><?= $editing_application ? 'Leave empty to keep the existing photo.' : '' ?></small></div>
+ <div class="col-md-4 form-group"><label>Application Photo</label><input type="file" name="application_photo" id="application_photo" accept="image/jpeg,image/png,image/webp" class="form-control" <?= $editing_application ? '' : 'required' ?>></div>
  <div class="col-12"><button class="btn btn-primary"><i class="fas fa-paper-plane"></i> <?= $editing_application ? 'Update & Resubmit Application' : 'Submit Application' ?></button><?php if($editing_application){ ?><a href="leave_application.php" class="btn btn-secondary ml-2">Cancel Edit</a><?php } ?></div>
 </form>
 <hr><h4>Application History</h4><div class="table-responsive"><table class="table table-bordered table-striped"><thead><tr><th>Date</th><th>Type</th><th>Photo</th><th>Status</th><th>Submitted</th><th>Action</th></tr></thead><tbody><?php if(mysqli_num_rows($applications)===0){ ?><tr><td colspan="6" class="text-center text-muted">No application submitted yet.</td></tr><?php } while($row=mysqli_fetch_assoc($applications)){ ?><tr><td><?= date('d-m-Y',strtotime($row['application_date'])) ?></td><td><?= htmlspecialchars(ucwords(str_replace('_',' ',$row['leave_type']))) ?></td><td><?php if(!empty($row['photo_path'])){ ?><a href="../<?= htmlspecialchars($row['photo_path']) ?>" target="_blank" class="btn btn-outline-primary btn-sm"><i class="fas fa-image"></i> View</a><?php } ?></td><td><span class="badge badge-<?= $row['status']==='approved'?'success':($row['status']==='rejected'?'danger':'warning') ?>"><?= htmlspecialchars(ucfirst($row['status'])) ?></span></td><td><?= date('d-m-Y',strtotime($row['created_at'])) ?></td><td><?php if($row['status']==='rejected'){ ?><a href="leave_application.php?edit=<?= (int)$row['id'] ?>" class="btn btn-warning btn-sm"><i class="fas fa-edit"></i> Edit & Resubmit</a><?php } else { ?>-<?php } ?></td></tr><?php } ?></tbody></table></div>
 </div></div>
-<script>
-(function(){
- const photoInput=document.getElementById('application_photo'), status=document.getElementById('photo-compression-status');
- if(!photoInput || !window.FileReader || !window.DataTransfer) return;
- photoInput.addEventListener('change',function(){
-   const source=this.files&&this.files[0]; if(!source) return;
-   status.className='form-text text-muted'; status.textContent='Compressing photo…';
-   const reader=new FileReader();
-   reader.onload=function(event){
-     const image=new Image(); image.onload=function(){
-       let scale=Math.min(1,1400/Math.max(image.width,image.height));
-       const canvas=document.createElement('canvas'); canvas.width=Math.max(1,Math.round(image.width*scale)); canvas.height=Math.max(1,Math.round(image.height*scale));
-       canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
-       const attempts=[0.80,0.65,0.50,0.35]; let index=0;
-       const makeFile=function(){ canvas.toBlob(function(blob){
-         if(!blob){ status.className='form-text text-danger'; status.textContent='Photo compression failed.'; return; }
-         if(blob.size<=51200 || index>=attempts.length-1){
-           if(blob.size>51200){ status.className='form-text text-danger'; status.textContent='Photo cannot be compressed below 50 KB. Choose a simpler image.'; photoInput.value=''; return; }
-           const transfer=new DataTransfer(); transfer.items.add(new File([blob],'leave-application.jpg',{type:'image/jpeg'})); photoInput.files=transfer.files;
-           status.className='form-text text-success'; status.textContent='Photo ready: '+Math.ceil(blob.size/1024)+' KB.'; return;
-         }
-         index++; makeFile();
-       },'image/jpeg',attempts[index]); };
-       makeFile();
-     }; image.onerror=function(){ status.className='form-text text-danger'; status.textContent='Selected photo is invalid.'; }; image.src=event.target.result;
-   }; reader.readAsDataURL(source);
- });
-})();
-</script>
 <?php require_once '../includes/footer.php'; ?>

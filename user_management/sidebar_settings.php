@@ -16,8 +16,9 @@ $message_type = 'success';
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     if(($_POST['action'] ?? '') === 'reset'){
-        $stmt = mysqli_prepare($conn, 'DELETE FROM sidebar_settings WHERE user_id=?');
-        mysqli_stmt_bind_param($stmt, 'i', $user_id);
+        $company_type = sidebar_settings_company_type($conn, $user_id);
+        $stmt = mysqli_prepare($conn, 'DELETE FROM sidebar_settings WHERE user_id=? AND company_type=?');
+        mysqli_stmt_bind_param($stmt, 'is', $user_id, $company_type);
         $status = mysqli_stmt_execute($stmt) ? 'reset' : 'error';
     }else{
         $submitted = $_POST['items'] ?? [];

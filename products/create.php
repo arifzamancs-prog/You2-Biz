@@ -342,7 +342,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small></div></div></div>
+            <div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div></div></div>
 
             <div class="row">
 
@@ -547,7 +547,7 @@ function syncVariants(){
 }
 category.addEventListener('change',syncVariants); syncVariants();
 })();
-(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input)return;input.addEventListener('change',function(){const file=input.files[0];if(!file)return;status.className='form-text text-muted';status.textContent=file.size<=40960?'Photo will be kept unchanged.':'Photo will be optimized when the product is saved.';});})();
+(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input||!status)return;input.addEventListener('change',function(){status.textContent='';});})();
 </script>
 
 <?php

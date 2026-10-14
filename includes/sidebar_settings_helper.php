@@ -13,11 +13,35 @@ function ensure_sidebar_settings_table($conn)
         "CREATE TABLE IF NOT EXISTS sidebar_settings (
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id BIGINT UNSIGNED NOT NULL,
+            company_type VARCHAR(100) NOT NULL DEFAULT '',
             layout_json LONGTEXT NOT NULL,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uniq_sidebar_settings_user (user_id)
+            UNIQUE KEY uniq_sidebar_settings_user_type (user_id, company_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
     );
+
+    $has_company_type = false;
+    $columns = mysqli_query($conn, "SHOW COLUMNS FROM sidebar_settings LIKE 'company_type'");
+    if($columns && mysqli_fetch_assoc($columns)) $has_company_type = true;
+    if(!$has_company_type) mysqli_query($conn, "ALTER TABLE sidebar_settings ADD COLUMN company_type VARCHAR(100) NOT NULL DEFAULT '' AFTER user_id");
+
+    $has_legacy_key = false;
+    $has_type_key = false;
+    $indexes = mysqli_query($conn, 'SHOW INDEX FROM sidebar_settings');
+    while($indexes && ($index = mysqli_fetch_assoc($indexes))){
+        if($index['Key_name'] === 'uniq_sidebar_settings_user') $has_legacy_key = true;
+        if($index['Key_name'] === 'uniq_sidebar_settings_user_type') $has_type_key = true;
+    }
+    if($has_legacy_key) mysqli_query($conn, 'ALTER TABLE sidebar_settings DROP INDEX uniq_sidebar_settings_user');
+    if(!$has_type_key) mysqli_query($conn, 'ALTER TABLE sidebar_settings ADD UNIQUE KEY uniq_sidebar_settings_user_type (user_id, company_type)');
+}
+
+function sidebar_settings_company_type($conn, $user_id)
+{
+    if(function_exists('project_package_company_type')){
+        return trim((string)project_package_company_type($conn, (int)$user_id));
+    }
+    return '';
 }
 
 function sidebar_setting_section_for_sort($sort)
@@ -62,11 +86,12 @@ function sidebar_default_layout_items($project_package_labels = [])
 
     return [
         sidebar_setting_item('dashboard', 'Dashboard', app_path('dashboard.php'), '', 10),
-        sidebar_setting_item('staff_manage', 'Staff Manage', '', '', 20),
-        sidebar_setting_item('staff_create', 'Create Staff', app_path('staff/index.php'), 'staff_manage', 21),
-        sidebar_setting_item('staff_attendance', 'Staff Attendance', app_path('staff/attendance.php'), 'staff_manage', 22),
-        sidebar_setting_item('staff_salary', 'Staff Salary', app_path('staff/salary.php'), 'staff_manage', 23),
-        sidebar_setting_item('staff_ledger', 'Other Payments', app_path('staff/ledger.php'), 'staff_manage', 24),
+        sidebar_setting_item('staff_manage', 'Staff Manage', '', '', 42, 'OPERATIONS'),
+        sidebar_setting_item('staff_create', 'Create Staff', app_path('staff/index.php'), 'staff_manage', 43, 'OPERATIONS'),
+        sidebar_setting_item('staff_attendance', 'Staff Attendance', app_path('staff/attendance.php'), 'staff_manage', 44, 'OPERATIONS'),
+        sidebar_setting_item('staff_salary', 'Staff Salary', app_path('staff/salary.php'), 'staff_manage', 45, 'OPERATIONS'),
+        sidebar_setting_item('staff_ledger', 'Other Payments', app_path('staff/ledger.php'), 'staff_manage', 46, 'OPERATIONS'),
+        sidebar_setting_item('leave_application', 'Leave Application', app_path('staff/leave_application.php'), 'staff_manage', 47, 'OPERATIONS'),
         sidebar_setting_item('super_admin', 'Super Admin', '', '', 30),
         sidebar_setting_item('subscription', 'Subscription', app_path('super_admin/index.php'), 'super_admin', 31),
         sidebar_setting_item('eshop', 'E-shop', app_path('eshop/index.php'), '', 54),
@@ -74,7 +99,13 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('settings', 'Settings', app_path('super_admin/email_sms_settings.php'), 'super_admin', 33),
         sidebar_setting_item('company_delete_data', 'Company Delete Data', app_path('super_admin/company_delete_data.php'), 'super_admin', 34),
         sidebar_setting_item('marketing', 'Marketing', app_path('user_management/marketing.php'), 'super_admin', 35),
-        sidebar_setting_item('notice_publish', 'Notice Publish', app_path('user_management/notice_publish.php'), '', 40),
+        sidebar_setting_item('notice_publish', 'Notice Publish', app_path('user_management/notice_publish.php'), '', 48),
+        sidebar_setting_item('parking_action', 'Action', '', '', 40, 'OPERATIONS'),
+        sidebar_setting_item('parking_entry', 'New Entry', app_path('parking/entry.php'), 'parking_action', 41, 'OPERATIONS'),
+        sidebar_setting_item('parking_exit', 'Vehicle Exit', app_path('parking/exit.php'), 'parking_action', 42, 'OPERATIONS'),
+        sidebar_setting_item('parking_lost_ticket', 'Lost Ticket', app_path('parking/lost_ticket.php'), 'parking_action', 43, 'OPERATIONS'),
+        sidebar_setting_item('parking_shift', 'Shift', app_path('parking/shift.php'), 'parking_action', 44, 'OPERATIONS'),
+        sidebar_setting_item('parking_management', 'Parking Management', app_path('parking/setup.php'), '', 41, 'OPERATIONS'),
         sidebar_setting_item('sales', 'Sales / Invoice', '', '', 50),
         sidebar_setting_item('create_invoice', 'Create Invoice', app_path('create_invoice/index.php'), 'sales', 51),
         sidebar_setting_item('invoice_list', 'Invoice List', app_path('create_invoice/invoice_list.php'), 'sales', 52),
@@ -162,17 +193,33 @@ function sidebar_setting_map_by_id($items)
 function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
 {
     ensure_sidebar_settings_table($conn);
+    $company_type = sidebar_settings_company_type($conn, $user_id);
     $defaults = sidebar_default_layout_items($project_package_labels);
     $default_map = sidebar_setting_map_by_id($defaults);
     $saved = [];
 
-    $stmt = mysqli_prepare($conn, 'SELECT layout_json FROM sidebar_settings WHERE user_id=? LIMIT 1');
+    $stmt = mysqli_prepare($conn, 'SELECT layout_json FROM sidebar_settings WHERE user_id=? AND company_type=? LIMIT 1');
     if($stmt){
-        mysqli_stmt_bind_param($stmt, 'i', $user_id);
+        mysqli_stmt_bind_param($stmt, 'is', $user_id, $company_type);
         mysqli_stmt_execute($stmt);
         $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
         $decoded = json_decode($row['layout_json'] ?? '[]', true);
         $saved = is_array($decoded) ? $decoded : [];
+    }
+
+    // Migrate a pre-company-type preference to the company's current type.
+    if(!$saved && $company_type !== ''){
+        $legacy_stmt = mysqli_prepare($conn, "SELECT layout_json FROM sidebar_settings WHERE user_id=? AND company_type='' LIMIT 1");
+        mysqli_stmt_bind_param($legacy_stmt, 'i', $user_id);
+        mysqli_stmt_execute($legacy_stmt);
+        $legacy_row = mysqli_fetch_assoc(mysqli_stmt_get_result($legacy_stmt));
+        if($legacy_row){
+            $saved = json_decode($legacy_row['layout_json'] ?? '[]', true);
+            $saved = is_array($saved) ? $saved : [];
+            $move_stmt = mysqli_prepare($conn, "UPDATE sidebar_settings SET company_type=? WHERE user_id=? AND company_type=''");
+            mysqli_stmt_bind_param($move_stmt, 'si', $company_type, $user_id);
+            mysqli_stmt_execute($move_stmt);
+        }
     }
 
     foreach($saved as $saved_item){
@@ -271,6 +318,42 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         }
         unset($layout_item);
     }
+    $upgrade_housing_order = function_exists('project_package_company_type')
+        && project_package_company_type($conn, (int)$user_id) === 'Housing'
+        && !in_array('__housing_operations_v1', array_column($saved, 'id'), true);
+    $upgrade_inventory_order = in_array($company_type, ['Stock Product', 'Fashion house'], true)
+        && !in_array('__inventory_operations_v1', array_column($saved, 'id'), true);
+    $upgrade_parking_order = $company_type === 'Car Parking'
+        && !in_array('__parking_operations_v1', array_column($saved, 'id'), true);
+    if ($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order) {
+        // Keep company defaults and existing layouts consistent with the editor.
+        $operations_order = array_flip($upgrade_inventory_order ? [
+            'stock_sales', 'wallets', 'products', 'suppliers', 'staff_manage',
+            'customer_manage',
+        ] : [
+            'sales', 'wallets', 'project_package', 'suppliers', 'staff_manage',
+            'customer_manage', 'lead_management', 'notice_publish',
+        ]);
+        if ($upgrade_parking_order) {
+            $operations_order = array_flip(['parking_action', 'wallets', 'parking_management', 'staff_manage']);
+        }
+        foreach ($items as &$layout_item) {
+            if (isset($operations_order[$layout_item['id']])) {
+                $layout_item['section'] = 'OPERATIONS';
+                $layout_item['parent'] = '';
+                $layout_item['sort'] = 40 + $operations_order[$layout_item['id']];
+            } elseif ($layout_item['parent'] === '' && $layout_item['section'] === 'OPERATIONS') {
+                $layout_item['sort'] = 60 + (int)$layout_item['sort'];
+            }
+            if ($layout_item['parent'] === 'staff_manage') {
+                $layout_item['section'] = 'OPERATIONS';
+            }
+        }
+        unset($layout_item);
+    }
+    if (($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order) && $saved) {
+        sidebar_save_layout($conn, $user_id, $items);
+    }
     usort($items, static function($a, $b){
         return ((int)$a['sort'] <=> (int)$b['sort']) ?: strcmp($a['label'], $b['label']);
     });
@@ -281,11 +364,12 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
 function sidebar_saved_layout_exists($conn, $user_id)
 {
     ensure_sidebar_settings_table($conn);
-    $stmt = mysqli_prepare($conn, 'SELECT id FROM sidebar_settings WHERE user_id=? LIMIT 1');
+    $company_type = sidebar_settings_company_type($conn, $user_id);
+    $stmt = mysqli_prepare($conn, 'SELECT id FROM sidebar_settings WHERE user_id=? AND company_type=? LIMIT 1');
     if(!$stmt){
         return false;
     }
-    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_bind_param($stmt, 'is', $user_id, $company_type);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
     return $result && mysqli_fetch_assoc($result) !== null;
@@ -390,6 +474,7 @@ function sidebar_layout_items_for_current_user($items)
 function sidebar_save_layout($conn, $user_id, $items)
 {
     ensure_sidebar_settings_table($conn);
+    $company_type = sidebar_settings_company_type($conn, $user_id);
     $clean = [];
     foreach($items as $item){
         $id = trim((string)($item['id'] ?? ''));
@@ -409,13 +494,22 @@ function sidebar_save_layout($conn, $user_id, $items)
         ];
     }
 
+    if ($company_type === 'Housing') {
+        $clean[] = ['id' => '__housing_operations_v1'];
+    }
+    if (in_array($company_type, ['Stock Product', 'Fashion house'], true)) {
+        $clean[] = ['id' => '__inventory_operations_v1'];
+    }
+    if ($company_type === 'Car Parking') {
+        $clean[] = ['id' => '__parking_operations_v1'];
+    }
     $json = json_encode($clean);
     $stmt = mysqli_prepare(
         $conn,
-        'INSERT INTO sidebar_settings (user_id, layout_json) VALUES (?, ?)
+        'INSERT INTO sidebar_settings (user_id, company_type, layout_json) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE layout_json=VALUES(layout_json), updated_at=NOW()'
     );
-    mysqli_stmt_bind_param($stmt, 'is', $user_id, $json);
+    mysqli_stmt_bind_param($stmt, 'iss', $user_id, $company_type, $json);
     return mysqli_stmt_execute($stmt);
 }
 
@@ -430,9 +524,10 @@ function sidebar_rendered_layout($html, $conn, $user_id, $labels = [])
     libxml_use_internal_errors($previous);
     $xpath = new DOMXPath($document);
     $known = sidebar_load_layout($conn, $user_id, $labels);
+    $company_type = sidebar_settings_company_type($conn, $user_id);
     $saved = [];
-    $stmt = mysqli_prepare($conn, 'SELECT layout_json FROM sidebar_settings WHERE user_id=?');
-    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    $stmt = mysqli_prepare($conn, 'SELECT layout_json FROM sidebar_settings WHERE user_id=? AND company_type=?');
+    mysqli_stmt_bind_param($stmt, 'is', $user_id, $company_type);
     mysqli_stmt_execute($stmt);
     $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
     mysqli_stmt_close($stmt);

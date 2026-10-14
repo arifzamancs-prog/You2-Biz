@@ -133,7 +133,7 @@ require_once '../includes/sidebar.php';
                 </small>
                 <small id="staff_code_status" class="d-block mt-1 text-muted">Type a new Staff ID to check availability.</small>
             </div>
-            <div class="form-group"><label>Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><small class="text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small></div>
+            <div class="form-group"><label>Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
             <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? ''); ?>" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" placeholder="staff@example.com" value="<?= htmlspecialchars($_POST['email'] ?? ''); ?>"></div>
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($_POST['phone'] ?? ''); ?>"></div>

@@ -514,7 +514,6 @@ require_once '../includes/sidebar.php';
                                 class="form-control"
                                 accept="image/jpeg,image/png,image/webp"
                                 <?= !empty($custom_field['is_required']) ? 'required' : ''; ?>>
-                            <small class="text-muted">Photos above 40 KB are optimized to approximately 40–50 KB. Photos at or below 40 KB stay unchanged.</small>
                         <?php } elseif($custom_field['field_type'] === 'calendar'){ ?>
                             <?php $calendar_picker_id = 'customer_calendar_' . preg_replace('/[^a-z0-9_]/i', '_', $field_key); ?>
                             <div class="input-group date customer-calendar-picker" id="<?= htmlspecialchars($calendar_picker_id); ?>" data-target-input="nearest">

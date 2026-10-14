@@ -232,7 +232,7 @@ require_once '../includes/sidebar.php';
 <?php if ($flash) { ?><div class="alert alert-<?= htmlspecialchars($flash['type']) ?> alert-dismissible"><button type="button" class="close" data-dismiss="alert">&times;</button><?= htmlspecialchars($flash['message']) ?></div><?php } ?>
 
 <div class="card card-outline card-success">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-car mr-2"></i>New Parking Entry</h3><div class="card-tools"><a href="index.php" class="btn btn-outline-secondary btn-sm">Parking Management</a></div></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-car mr-2"></i>New Parking Entry</h3></div>
     <form method="post" autocomplete="off">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_entry_csrf']) ?>">
         <div class="card-body row">

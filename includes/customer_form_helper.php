@@ -139,7 +139,7 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message, $opt
     $safe_field_key = preg_replace('/[^a-z0-9_]+/', '_', strtolower($field_key));
 
     // Staff photos at or below 40 KB are kept exactly as selected. Larger
-    // photos are optimized below 50 KB when GD is available.
+    // photos are optimized with a quality-protection fallback.
     if($optimize_above_40kb && (int)$file['size'] <= 40 * 1024){
         $file_name = 'customer_' . (int)$user_id . '_' . $safe_field_key . '_' . time() . '_' . mt_rand(1000, 9999) . '.' . $extension;
         $path = $upload_dir . '/' . $file_name;
@@ -189,13 +189,22 @@ function customer_form_upload_photo($file, $user_id, $field_key, &$message, $opt
 
     $saved = false;
     if($optimize_above_40kb){
-        // The first result that fits is the highest-quality result under
-        // 50 KB, which keeps the output as close as possible to 40–50 KB.
-        foreach([100, 95, 92, 90, 88, 85, 82, 78, 74, 70, 65, 60, 55, 50, 45, 40, 30, 20, 10] as $quality){
+        // Prefer 50 KB, but keep a clear profile photo if that target would
+        // require excessive compression.
+        foreach([100, 95, 92, 90, 88, 85, 82, 78, 74, 70] as $quality){
             if(@imagejpeg($target, $path, $quality) && (int)filesize($path) <= 50 * 1024){
                 $saved = true;
                 break;
             }
+        }
+        if(!$saved){
+            foreach([95, 92, 90, 88, 85, 82, 80, 78, 75, 72, 70] as $quality){
+                if(@imagejpeg($target, $path, $quality) && (int)filesize($path) <= 120 * 1024){
+                    $saved = true;
+                    break;
+                }
+            }
+            if(!$saved && is_file($path) && (int)filesize($path) > 0) $saved = true;
         }
     }else{
         $saved = @imagejpeg($target, $path, 90);

@@ -58,11 +58,11 @@ function product_save_compressed_photo($upload, &$error = '')
     $source = $image[2] === IMAGETYPE_JPEG ? @imagecreatefromjpeg($upload['tmp_name']) : ($image[2] === IMAGETYPE_PNG ? @imagecreatefrompng($upload['tmp_name']) : @imagecreatefromwebp($upload['tmp_name']));
     if(!$source){ $error = 'Product photo could not be processed.'; return ''; }
     $source_width = imagesx($source); $source_height = imagesy($source); $saved = false;
-    // Keep trying smaller dimensions/quality for detailed photos. The first
-    // result that fits is the highest-quality result under the 50 KB target.
+    // First aim for 50 KB, but never shrink a product photo below 350 px.
+    // Highly detailed food photos cannot remain clear at 40–50 KB otherwise.
     $max_file_size = 50 * 1024;
-    $quality_steps = [100, 95, 92, 90, 88, 85, 82, 78, 74, 70, 65, 60, 55, 50, 45, 40, 30, 20, 10];
-    $dimension_steps = [1600, 1200, 900, 700, 500, 350, 250, 180, 128, 96];
+    $quality_steps = [100, 95, 92, 90, 88, 85, 82, 78, 74, 70];
+    $dimension_steps = [1600, 1200, 900, 700, 500];
     foreach($dimension_steps as $max_dimension){
         $scale = min(1, $max_dimension / max($source_width, $source_height));
         $width = max(1, (int)round($source_width * $scale)); $height = max(1, (int)round($source_height * $scale));
@@ -75,17 +75,31 @@ function product_save_compressed_photo($upload, &$error = '')
         }
         imagedestroy($canvas);
     }
-    imagedestroy($source);
     if(!$saved){
-        // A photo is optional and must never prevent product creation. The
-        // final pass is already a very small, low-quality thumbnail; retain
-        // it when an unusually detailed image cannot reach the 50 KB target.
-        if(is_file($target) && (int)filesize($target) > 0){
-            return $filename;
+        // Protect visual quality if 50 KB is not realistic. Keep at least
+        // 350 px and use the best JPEG quality that stays within 120 KB.
+        $scale = min(1, 350 / max($source_width, $source_height));
+        $width = max(1, (int)round($source_width * $scale));
+        $height = max(1, (int)round($source_height * $scale));
+        $canvas = imagecreatetruecolor($width, $height);
+        imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+        imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $source_width, $source_height);
+        foreach([95, 92, 90, 88, 85, 82, 80, 78, 75, 72, 70] as $quality){
+            imagejpeg($canvas, $target, $quality);
+            if(filesize($target) <= 120 * 1024){ $saved = true; break; }
         }
-        $error = 'Product photo could not be saved.';
-        return '';
+        imagedestroy($canvas);
+        if(!$saved && is_file($target) && (int)filesize($target) > 0){
+            // Keep the final 350 px result instead of creating a blurry thumbnail.
+            $saved = true;
+        }
+        if(!$saved){
+            imagedestroy($source);
+            $error = 'Product photo could not be saved.';
+            return '';
+        }
     }
+    imagedestroy($source);
     return $filename;
 }
 
