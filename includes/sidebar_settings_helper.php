@@ -132,6 +132,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('warehouse', 'Main Warehouse', app_path('warehouse/index.php'), '', 75),
         sidebar_setting_item('live_report', 'Stock Live Report', app_path('warehouse/live_report.php'), '', 76),
         sidebar_setting_item('stock_sales', 'Sales', '', '', 76),
+        sidebar_setting_item('menu_' . substr(sha1('Table Management'), 0, 16), 'Table Management', '', '', 77, 'OPERATIONS'),
         sidebar_setting_item('stock_create', 'Create Invoice', app_path('sales/create_invoice.php'), 'stock_sales', 1),
         sidebar_setting_item('stock_invoices', 'Invoice List', app_path('sales/invoice_list.php'), 'stock_sales', 2),
         sidebar_setting_item('stock_product', 'My Stock', app_path('sales/stock_product.php'), 'stock_sales', 3),
@@ -322,13 +323,15 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         && project_package_company_type($conn, (int)$user_id) === 'Housing'
         && !in_array('__housing_operations_v1', array_column($saved, 'id'), true);
     $upgrade_inventory_order = in_array($company_type, ['Stock Product', 'Fashion house'], true)
-        && !in_array('__inventory_operations_v1', array_column($saved, 'id'), true);
+        && !in_array('__inventory_operations_v2', array_column($saved, 'id'), true);
     $upgrade_parking_order = $company_type === 'Car Parking'
         && !in_array('__parking_operations_v1', array_column($saved, 'id'), true);
-    if ($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order) {
+    $upgrade_restaurant_order = $company_type === 'Restaurant & Cafe'
+        && !in_array('__restaurant_operations_v1', array_column($saved, 'id'), true);
+    if ($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order || $upgrade_restaurant_order) {
         // Keep company defaults and existing layouts consistent with the editor.
         $operations_order = array_flip($upgrade_inventory_order ? [
-            'stock_sales', 'wallets', 'products', 'suppliers', 'staff_manage',
+            'stock_sales', 'wallets', 'products', 'suppliers', 'warehouse', 'live_report', 'staff_manage',
             'customer_manage',
         ] : [
             'sales', 'wallets', 'project_package', 'suppliers', 'staff_manage',
@@ -336,6 +339,13 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         ]);
         if ($upgrade_parking_order) {
             $operations_order = array_flip(['parking_action', 'wallets', 'parking_management', 'staff_manage']);
+        }
+        if ($upgrade_restaurant_order) {
+            $operations_order = array_flip([
+                'stock_sales', 'wallets', 'products',
+                'menu_' . substr(sha1('Table Management'), 0, 16),
+                'suppliers', 'staff_manage', 'customer_manage',
+            ]);
         }
         foreach ($items as &$layout_item) {
             if (isset($operations_order[$layout_item['id']])) {
@@ -351,7 +361,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         }
         unset($layout_item);
     }
-    if (($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order) && $saved) {
+    if (($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order || $upgrade_restaurant_order) && $saved) {
         sidebar_save_layout($conn, $user_id, $items);
     }
     usort($items, static function($a, $b){
@@ -498,10 +508,13 @@ function sidebar_save_layout($conn, $user_id, $items)
         $clean[] = ['id' => '__housing_operations_v1'];
     }
     if (in_array($company_type, ['Stock Product', 'Fashion house'], true)) {
-        $clean[] = ['id' => '__inventory_operations_v1'];
+        $clean[] = ['id' => '__inventory_operations_v2'];
     }
     if ($company_type === 'Car Parking') {
         $clean[] = ['id' => '__parking_operations_v1'];
+    }
+    if ($company_type === 'Restaurant & Cafe') {
+        $clean[] = ['id' => '__restaurant_operations_v1'];
     }
     $json = json_encode($clean);
     $stmt = mysqli_prepare(

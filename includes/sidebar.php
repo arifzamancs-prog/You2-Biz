@@ -1113,7 +1113,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Apply this company-specific order after saved layouts, keeping their
         // visibility and permission filtering intact.
         const labels = ['Sales', 'Wallets', 'Products', <?= json_encode(supplier_display_text('Suppliers')); ?>,
-            'Staff Manage', 'Customer Manage'];
+            'Main Warehouse', 'Stock Live Report', 'Staff Manage', 'Customer Manage'];
         let previous = operationsHeader;
         labels.forEach(function (label) {
             const item = Array.from(navigation.children).find(function (candidate) {
@@ -1134,11 +1134,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!operationsHeader) return;
 
     const orderedLabels = <?= restaurant_module_active()
-        ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Customer Manage', 'Table Management', 'Notice Publish'])
+        ? json_encode(['Sales', 'Wallets', 'Products', 'Table Management', supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage'])
         : (project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Housing'
             ? json_encode(['Sales / Invoice', 'Wallets', $project_package_labels['module'], supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage', 'Lead Management', 'Notice Publish'])
             : (in_array(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)), ['Stock Product', 'Fashion house'], true)
-                ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage'])
+                ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Stock Live Report', 'Staff Manage', 'Customer Manage'])
                 : ($sidebar_is_car_parking
                     ? json_encode(['Action', 'Wallets', 'Parking Management', 'Staff Manage'])
                     : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))) ?>;
