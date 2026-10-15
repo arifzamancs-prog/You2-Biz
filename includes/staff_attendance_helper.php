@@ -40,6 +40,11 @@ function ensure_staff_attendance_tables($conn)
         mysqli_query($conn, "ALTER TABLE staff_attendance_settings ADD COLUMN absent_after_time TIME NOT NULL DEFAULT '12:00:00' AFTER late_after_time");
     }
 
+    $weekly_closed_days_column = mysqli_query($conn, "SHOW COLUMNS FROM staff_attendance_settings LIKE 'weekly_closed_days'");
+    if (!$weekly_closed_days_column || mysqli_num_rows($weekly_closed_days_column) === 0) {
+        mysqli_query($conn, "ALTER TABLE staff_attendance_settings ADD COLUMN weekly_closed_days VARCHAR(20) NOT NULL DEFAULT '' AFTER absent_after_time");
+    }
+
     // Upgrade only the former application defaults; custom attendance times stay unchanged.
     mysqli_query($conn, "UPDATE staff_attendance_settings
         SET office_start_time='10:00:00', late_after_time='10:15:00', absent_after_time='12:00:00'
@@ -194,6 +199,12 @@ function staff_attendance_settings($conn, $user_id, $branch_id = 0)
     return $settings;
 }
 
+function staff_attendance_is_weekly_closed_day($settings, $date)
+{
+    $closed_days = array_filter(array_map('trim', explode(',', (string)($settings['weekly_closed_days'] ?? ''))), 'strlen');
+    return in_array((string)(int)date('w', strtotime($date)), $closed_days, true);
+}
+
 function staff_attendance_is_mobile_request()
 {
     $agent = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
@@ -216,6 +227,7 @@ function staff_attendance_auto_mark_absent($conn, $company_user_id)
     if (date('H:i:s') <= '20:00:00') return 0;
 
     $today = date('Y-m-d');
+    if (staff_attendance_is_weekly_closed_day($settings, $today)) return 0;
     $closed_stmt = mysqli_prepare($conn, 'SELECT id FROM staff_office_closed_days WHERE user_id=? AND closed_date=? LIMIT 1');
     mysqli_stmt_bind_param($closed_stmt, 'is', $company_user_id, $today);
     mysqli_stmt_execute($closed_stmt);
@@ -272,7 +284,8 @@ function staff_attendance_record_login($conn, $login_user_id, $company_user_id)
     $closed_stmt = mysqli_prepare($conn, 'SELECT id FROM staff_office_closed_days WHERE user_id=? AND closed_date=? LIMIT 1');
     mysqli_stmt_bind_param($closed_stmt, 'is', $company_user_id, $today);
     mysqli_stmt_execute($closed_stmt);
-    $is_closed = mysqli_num_rows(mysqli_stmt_get_result($closed_stmt)) > 0;
+    $is_closed = staff_attendance_is_weekly_closed_day($settings, $today)
+        || mysqli_num_rows(mysqli_stmt_get_result($closed_stmt)) > 0;
 
     $now_time = date('H:i:s');
     $office_start_time = '08:00:00';
@@ -366,7 +379,7 @@ function staff_attendance_monthly_salary_rows($conn, $user_id, $year, $month, $a
             $end = new DateTime($month_end);
             while ($cursor <= $end) {
                 $day = $cursor->format('Y-m-d');
-                if (empty($closed_days[$day])) {
+                if (empty($closed_days[$day]) && !staff_attendance_is_weekly_closed_day($settings, $day)) {
                     $status = $attendance[$staff_id][$day] ?? null;
                     if ($status === 'late') $late_days++;
                     elseif ($status === 'absent') $absent_days++;

@@ -928,9 +928,6 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(is_admin_user() || manager_has_permission('tools')) {
                         $sidebar_tools_items = is_super_admin_user()
                             ? [
-                                ['href' => '#', 'label' => 'Export Data', 'class' => 'disabled text-muted'],
-                                ['href' => '#', 'label' => 'Import Data', 'class' => 'disabled text-muted'],
-                                ['href' => '#', 'label' => 'Delete All Data', 'class' => 'disabled text-muted'],
                                 ['href' => app_path('tools/database_export.php'), 'label' => 'Full DB Export'],
                                 ['href' => app_path('tools/database_import.php'), 'label' => 'Full DB Import', 'class' => 'text-danger'],
                             ]
