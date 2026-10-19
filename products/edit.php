@@ -8,6 +8,8 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$variants_enabled = product_variants_enabled($conn, $user_id);
+$product_photos_enabled = product_photos_enabled($conn, $user_id);
 ensure_product_management_columns($conn);
 ensure_product_image_column($conn);
 ensure_fifo_inventory_tables($conn);
@@ -127,7 +129,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $status         = $_POST['status'];
 
     $photo_error = '';
-    $new_photo_path = product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error);
+    $new_photo_path = $product_photos_enabled
+        ? product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error)
+        : '';
     if($photo_error !== ''){
         $_SESSION['error'] = $photo_error;
         header("Location: edit.php?id=" . $id);
@@ -254,7 +258,7 @@ require_once '../includes/sidebar.php';
 
         <form method="post" enctype="multipart/form-data" id="product-form">
 
-            <div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><div class="mb-2"><img src="<?= htmlspecialchars(product_image_url($conn, $product['photo_path'] ?? '')); ?>" alt="Product" style="width:70px;height:70px;object-fit:cover;border:1px solid #ddd;border-radius:4px"></div><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div>
+            <?php if($product_photos_enabled){ ?><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><div class="mb-2"><img src="<?= htmlspecialchars(product_image_url($conn, $product['photo_path'] ?? '')); ?>" alt="Product" style="width:70px;height:70px;object-fit:cover;border:1px solid #ddd;border-radius:4px"></div><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div><?php } ?>
 
             <div class="form-group">
 
@@ -271,7 +275,7 @@ require_once '../includes/sidebar.php';
                             value="<?= $cat['id']; ?>"
                             data-product-type="<?= htmlspecialchars($cat['category_type'], ENT_QUOTES) ?>"
                             data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'
-                            data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'
+                            data-variants='<?= htmlspecialchars(json_encode($variants_enabled ? product_variant_options_from_text($cat['variant_options'] ?? '') : []), ENT_QUOTES, 'UTF-8'); ?>'
                             <?= $product['category_id']==$cat['id']?'selected':''; ?>>
 
                             <?= htmlspecialchars($cat['category_name']); ?>

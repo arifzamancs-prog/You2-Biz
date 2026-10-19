@@ -6,6 +6,7 @@ require_once '../includes/product_expiry_helper.php';
 
 require_admin_user();
 ensure_product_management_columns($conn);
+$is_inventory_sales = normalize_company_type($_SESSION['company_type'] ?? '') === 'Stock Product';
 
 $message = '';
 $message_type = '';
@@ -14,12 +15,23 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $option = normalize_product_expiry_option($_POST['product_expiry_option'] ?? 'active');
 
     if(save_product_expiry_option($conn, $option)){
+        if($is_inventory_sales){
+            $_SESSION['product_management_message'] = 'Product management option updated successfully.';
+            header('Location: product_management.php');
+            exit;
+        }
         $message = 'Product management option updated successfully.';
         $message_type = 'success';
     }else{
         $message = 'Product management option could not be updated.';
         $message_type = 'danger';
     }
+}
+
+if($is_inventory_sales && isset($_SESSION['product_management_message'])){
+    $message = $_SESSION['product_management_message'];
+    $message_type = 'success';
+    unset($_SESSION['product_management_message']);
 }
 
 $current_option = current_product_expiry_option($conn);

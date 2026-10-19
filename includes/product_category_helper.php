@@ -13,6 +13,28 @@ function restaurant_catalog_enabled($conn, $user_id)
     return normalize_company_type($row['company_type'] ?? '') === 'Restaurant & Cafe';
 }
 
+function product_variants_enabled($conn, $user_id)
+{
+    static $enabled_by_company = [];
+    $user_id = (int)$user_id;
+    if (isset($enabled_by_company[$user_id])) {
+        return $enabled_by_company[$user_id];
+    }
+
+    $stmt = mysqli_prepare($conn, 'SELECT company_type FROM users WHERE id=? LIMIT 1');
+    if (!$stmt) {
+        return $enabled_by_company[$user_id] = true;
+    }
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+
+    // Inventory & Sales manages one stock balance per product. Variants remain
+    // available for business types that need size, colour, or similar options.
+    return $enabled_by_company[$user_id] = normalize_company_type($company['company_type'] ?? '') !== 'Stock Product';
+}
+
 // Restaurant & Cafe categories are fully user managed. Keep this compatibility
 // function for existing callers, but never create fixed/default categories.
 function ensure_restaurant_product_categories($conn, $user_id)
@@ -180,6 +202,9 @@ function product_variant_options_from_text($value)
 
 function product_category_variant_options($conn, $category_id, $user_id)
 {
+    if (!product_variants_enabled($conn, $user_id)) {
+        return [];
+    }
     ensure_product_variant_schema($conn);
     $stmt = mysqli_prepare($conn, 'SELECT variant_options FROM product_categories WHERE id=? AND user_id=? LIMIT 1');
     if(!$stmt){ return []; }
@@ -213,6 +238,9 @@ function product_category_name_exists($conn, $user_id, $category_name, $exclude_
 
 function product_variant_names($conn, $product_id, $user_id)
 {
+    if (!product_variants_enabled($conn, $user_id)) {
+        return [];
+    }
     ensure_product_variant_schema($conn);
     $stmt = mysqli_prepare($conn, 'SELECT variant_name FROM product_variants WHERE product_id=? AND user_id=? ORDER BY id');
     if(!$stmt){ return []; }

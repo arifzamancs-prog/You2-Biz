@@ -2,11 +2,18 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/company_settings_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+$hide_purchase_category_column = in_array(
+    normalize_company_type($_SESSION['company_type'] ?? ''),
+    ['Stock Product', 'Fashion house'],
+    true
+);
+$show_purchase_note_in_number = $hide_purchase_category_column;
 
 $sql = "SELECT
 
@@ -144,9 +151,9 @@ Create Purchase
 #example1 th{white-space:nowrap}
 #example1 th:nth-child(1),#example1 td:nth-child(1),
 #example1 th:nth-child(2),#example1 td:nth-child(2),
-#example1 th:nth-child(n+6),#example1 td:nth-child(n+6){width:1%;white-space:nowrap}
+#example1 th:nth-child(n+<?= $hide_purchase_category_column ? '5' : '6' ?>),#example1 td:nth-child(n+<?= $hide_purchase_category_column ? '5' : '6' ?>){width:1%;white-space:nowrap}
 #example1 td:nth-child(4){min-width:230px}
-#example1 td:nth-child(3),#example1 td:nth-child(4),#example1 td:nth-child(5){overflow-wrap:anywhere}
+#example1 td:nth-child(3),#example1 td:nth-child(4)<?= $hide_purchase_category_column ? '' : ',#example1 td:nth-child(5)' ?>{overflow-wrap:anywhere}
 #example1 td:last-child .btn{margin-bottom:2px}
 </style>
 <div class="table-responsive">
@@ -163,7 +170,7 @@ class="table table-bordered table-striped">
 <th>Date</th>
 <th><?= supplier_display_text('Supplier'); ?></th>
 <th>Product</th>
-<th>Category</th>
+<?php if(!$hide_purchase_category_column){ ?><th>Category</th><?php } ?>
 <th>Qty</th>
 <th>Total</th>
 <th>Paid</th>
@@ -187,6 +194,9 @@ mysqli_fetch_assoc($result)
 
 <td>
 <?= $row['purchase_no']; ?>
+<?php if($show_purchase_note_in_number && trim((string)($row['notes'] ?? '')) !== ''){ ?>
+    <div class="small text-muted mt-1"><strong>Note:</strong> <?= nl2br(htmlspecialchars(trim((string)$row['notes']))); ?></div>
+<?php } ?>
 </td>
 
 <td>
@@ -209,7 +219,7 @@ $row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$ro
 <?php if (empty($purchase_products[(int)$row['id']])) { ?>Missing Product Link<?php } ?>
 </td>
 
-<td><?= htmlspecialchars($row['category_names'] ?: '—'); ?><?php if(!empty($row['sub_category_names'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category_names']); ?></div><?php } ?></td>
+<?php if(!$hide_purchase_category_column){ ?><td><?= htmlspecialchars($row['category_names'] ?: '—'); ?><?php if(!empty($row['sub_category_names'])){ ?><div class="small text-muted mt-1"><?= htmlspecialchars($row['sub_category_names']); ?></div><?php } ?></td><?php } ?>
 
 <td>
 <?= number_format(

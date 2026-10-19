@@ -16,6 +16,8 @@ if(restaurant_catalog_enabled($conn, (int)$_SESSION['user_id'])){
 }
 
 $user_id = $_SESSION['user_id'];
+$variants_enabled = product_variants_enabled($conn, $user_id);
+$product_photos_enabled = product_photos_enabled($conn, $user_id);
 ensure_product_management_columns($conn);
 ensure_product_image_column($conn);
 ensure_fifo_inventory_tables($conn);
@@ -130,23 +132,30 @@ require_once '../includes/sidebar.php';
             #product-list .sale-price-column{min-width:130px!important;width:130px!important}
             #product-list .all-branch-stock-column{min-width:130px!important;width:130px!important}
             #product-list .product-action-column{width:88px!important;min-width:88px!important;white-space:nowrap}
+            #product-list.inventory-sales-product-list{table-layout:auto}
+            #product-list.inventory-sales-product-list .inventory-product-column{min-width:230px}
+            #product-list.inventory-sales-product-list .inventory-category-column{min-width:260px;overflow-wrap:anywhere}
+            #product-list.inventory-sales-product-list .inventory-code-column{width:90px;min-width:90px;white-space:nowrap}
+            #product-list.inventory-sales-product-list .purchase-price-column{width:125px;min-width:125px;word-break:normal;overflow-wrap:normal}
+            #product-list.inventory-sales-product-list .sale-price-column{width:105px!important;min-width:105px!important;white-space:nowrap}
+            #product-list.inventory-sales-product-list .product-action-column{width:78px!important;min-width:78px!important}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
             .product-photo-preview:hover img{transform:scale(1.08)}
         </style>
         <table
             id="product-list" data-csrf="<?= htmlspecialchars($_SESSION['product_delete_csrf']) ?>" data-stock-csrf="<?= htmlspecialchars(stock_csrf_token()) ?>"
-            class="table table-bordered table-striped">
+            class="table table-bordered table-striped<?= !$product_photos_enabled ? ' inventory-sales-product-list' : '' ?>">
 
             <thead>
 
             <tr>
 
-                <th class="product-sl-column">SL</th><th>Photo</th>
-                <th>Product</th>
-                <th>Category</th>
-                <th>Code</th>
-                <th>Purchase Price</th>
+                <th class="product-sl-column">SL</th><?php if($product_photos_enabled){ ?><th>Photo</th><?php } ?>
+                <th<?= !$product_photos_enabled ? ' class="inventory-product-column"' : '' ?>>Product</th>
+                <th<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>Category</th>
+                <th<?= !$product_photos_enabled ? ' class="inventory-code-column"' : '' ?>>Code</th>
+                <th<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>Purchase Price</th>
                 <th class="sale-price-column">Sale Price</th>
                 <?php if($show_expired_on){ ?>
                     <th>Expiry on</th>
@@ -205,13 +214,13 @@ require_once '../includes/sidebar.php';
             <tr>
                 <td><?= ++$serial ?></td>
 
-                <td><button type="button" class="product-photo-preview" data-photo-src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="<?= htmlspecialchars($row['product_name']); ?>" style="width:46px;height:46px;object-fit:cover;border-radius:4px"></button></td>
+                <?php if($product_photos_enabled){ ?><td><button type="button" class="product-photo-preview" data-photo-src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="<?= htmlspecialchars($row['product_name']); ?>" style="width:46px;height:46px;object-fit:cover;border-radius:4px"></button></td><?php } ?>
 
-                <td>
+                <td<?= !$product_photos_enabled ? ' class="inventory-product-column"' : '' ?>>
                     <?= htmlspecialchars($row['product_name']); ?>
                 </td>
 
-                <td>
+                <td<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>
                     <?= htmlspecialchars($row['category_name']); ?>
                     <?php if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') { ?>
                     <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
@@ -219,11 +228,11 @@ require_once '../includes/sidebar.php';
                     <?php if(!empty($row['product_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['product_sub_category']); ?>]</div><?php } ?>
                 </td>
 
-                <td>
+                <td<?= !$product_photos_enabled ? ' class="inventory-code-column"' : '' ?>>
                     <?= htmlspecialchars($row['sku']); ?>
                 </td>
 
-                <td>
+                <td<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>
                     BDT <?= number_format($row['purchase_price'],2); ?>
                 </td>
 
@@ -243,7 +252,9 @@ require_once '../includes/sidebar.php';
                         $variant_quantities[$variant_stock['variant_name']] = $variant_stock['quantity'];
                     }
                     mysqli_stmt_close($variant_stock_stmt);
-                    $variant_order = array_unique(array_merge(product_variant_names($conn, (int)$row['id'], $user_id), array_keys($variant_quantities)));
+                    $variant_order = $variants_enabled
+                        ? array_unique(array_merge(product_variant_names($conn, (int)$row['id'], $user_id), array_keys($variant_quantities)))
+                        : [];
                     $variant_parts = [];
                     foreach($variant_order as $variant_name){
                         if(array_key_exists($variant_name, $variant_quantities)){
@@ -258,10 +269,12 @@ require_once '../includes/sidebar.php';
                     <td class="all-branch-stock-column">
                         <?= $row['category_type'] === 'non_stock' ? 'Not tracked' : number_format($row['total_stock'], 0); ?>
                         <?php
-                        $total_variant_order = array_unique(array_merge(
-                            product_variant_names($conn, (int)$row['id'], $user_id),
-                            array_keys($total_variant_quantities)
-                        ));
+                        $total_variant_order = $variants_enabled
+                            ? array_unique(array_merge(
+                                product_variant_names($conn, (int)$row['id'], $user_id),
+                                array_keys($total_variant_quantities)
+                            ))
+                            : [];
                         $total_variant_parts = [];
                         foreach($total_variant_order as $variant_name){
                             if(array_key_exists($variant_name, $total_variant_quantities)){
@@ -363,14 +376,15 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
-$page_script = <<<'SCRIPT'
+$product_list_non_sortable_columns = $product_photos_enabled ? '[0,1]' : '[0]';
+$page_script = str_replace('__NON_SORTABLE_COLUMNS__', $product_list_non_sortable_columns, <<<'SCRIPT'
 <script>
 $(function () {
     const table = $('#product-list').DataTable({
         responsive: false, autoWidth: false, order: [], pageLength: 10,
         lengthMenu: [[10,25,50,100,200,-1],[10,25,50,100,200,'All loaded']],
         dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6 product-quick-search-slot">>rtip',
-        columnDefs: [{targets: [0,1], orderable: false, searchable: false}],
+        columnDefs: [{targets: __NON_SORTABLE_COLUMNS__, orderable: false, searchable: false}],
         drawCallback: function () {
             const api=this.api(), start=api.page.info().start;
             api.column(0,{page:'current'}).nodes().each(function(cell,i){cell.textContent=start+i+1;});
@@ -404,6 +418,7 @@ $(function () {
     });
 });
 </script>
-SCRIPT;
+SCRIPT
+);
 require_once '../includes/footer.php';
 ?>

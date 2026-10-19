@@ -65,7 +65,7 @@ function sidebar_setting_section_for_sort($sort)
     return 'MAIN';
 }
 
-function sidebar_setting_item($id, $label, $href = '', $parent = '', $sort = 0, $section = '')
+function sidebar_setting_item($id, $label, $href = '', $parent = '', $sort = 0, $section = '', $visible = 1)
 {
     return [
         'id' => $id,
@@ -74,15 +74,16 @@ function sidebar_setting_item($id, $label, $href = '', $parent = '', $sort = 0, 
         'parent' => $parent,
         'sort' => $sort,
         'section' => $section !== '' ? $section : sidebar_setting_section_for_sort($sort),
-        'visible' => 1,
+        'visible' => (int)$visible === 1 ? 1 : 0,
     ];
 }
 
-function sidebar_default_layout_items($project_package_labels = [])
+function sidebar_default_layout_items($project_package_labels = [], $company_type = '')
 {
     $module = $project_package_labels['module'] ?? 'Project & Package';
     $project = $project_package_labels['project'] ?? 'Project';
     $package_list = $project_package_labels['package_list'] ?? 'Package';
+    $lead_management_visible = !in_array($company_type, ['Stock Product', 'Fashion house'], true);
 
     return [
         sidebar_setting_item('dashboard', 'Dashboard', app_path('dashboard.php'), '', 10),
@@ -143,7 +144,7 @@ function sidebar_default_layout_items($project_package_labels = [])
         sidebar_setting_item('supplier_list', supplier_display_text('Suppliers'), app_path('suppliers/index.php'), 'suppliers', 101),
         sidebar_setting_item('purchases', 'Purchases', app_path('purchases/index.php'), 'suppliers', 102),
         sidebar_setting_item('supplier_due_payment', supplier_display_text('Supplier Due Payment'), app_path('suppliers/supplier_payment.php'), 'suppliers', 103),
-        sidebar_setting_item('lead_management', 'Lead Management', '', '', 110),
+        sidebar_setting_item('lead_management', 'Lead Management', '', '', 110, '', $lead_management_visible),
         sidebar_setting_item('new_lead', 'New Lead', app_path('lead_management/index.php?filter=lead'), 'lead_management', 111),
         sidebar_setting_item('qualified_list', 'Qualified List', app_path('lead_management/index.php?filter=successful'), 'lead_management', 112),
         sidebar_setting_item('not_qualified_list', 'Not Qualified List', app_path('lead_management/index.php?filter=not_qualified'), 'lead_management', 113),
@@ -195,7 +196,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
 {
     ensure_sidebar_settings_table($conn);
     $company_type = sidebar_settings_company_type($conn, $user_id);
-    $defaults = sidebar_default_layout_items($project_package_labels);
+    $defaults = sidebar_default_layout_items($project_package_labels, $company_type);
     $default_map = sidebar_setting_map_by_id($defaults);
     $saved = [];
 
@@ -233,6 +234,23 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         $default_map[$id]['visible'] = !isset($saved_item['visible']) || (int)$saved_item['visible'] === 1 ? 1 : 0;
         if (in_array($saved_item['section'] ?? '', ['MAIN','OPERATIONS','INSIGHTS','ADMIN','HELP','SESSION'], true)) {
             $default_map[$id]['section'] = $saved_item['section'];
+        }
+    }
+
+    $lead_management_default_hidden_update = in_array($company_type, ['Stock Product', 'Fashion house'], true)
+        && !in_array('__lead_management_default_hidden_v1', array_column($saved, 'id'), true);
+    if($lead_management_default_hidden_update){
+        if(isset($default_map['lead_management'])){
+            $default_map['lead_management']['visible'] = 0;
+        }
+    }
+    $lead_management_submenus_visible_update = in_array($company_type, ['Stock Product', 'Fashion house'], true)
+        && !in_array('__lead_management_submenus_visible_v2', array_column($saved, 'id'), true);
+    if($lead_management_submenus_visible_update){
+        foreach(['new_lead', 'qualified_list', 'not_qualified_list', 'visited_list', 'indecision_list', 'successful_list'] as $lead_item_id){
+            if(isset($default_map[$lead_item_id])){
+                $default_map[$lead_item_id]['visible'] = 1;
+            }
         }
     }
 
@@ -324,19 +342,26 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         && !in_array('__housing_operations_v1', array_column($saved, 'id'), true);
     $upgrade_inventory_order = in_array($company_type, ['Stock Product', 'Fashion house'], true)
         && !in_array('__inventory_operations_v2', array_column($saved, 'id'), true);
+    $stock_product_operations_order_update = $company_type === 'Stock Product'
+        && !in_array('__stock_product_operations_order_v3', array_column($saved, 'id'), true);
+    $fashion_house_operations_order_update = $company_type === 'Fashion house'
+        && !in_array('__fashion_house_operations_order_v3', array_column($saved, 'id'), true);
     $upgrade_parking_order = $company_type === 'Car Parking'
         && !in_array('__parking_operations_v1', array_column($saved, 'id'), true);
     $upgrade_restaurant_order = $company_type === 'Restaurant & Cafe'
         && !in_array('__restaurant_operations_v1', array_column($saved, 'id'), true);
-    if ($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order || $upgrade_restaurant_order) {
+    if ($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order) {
         // Keep company defaults and existing layouts consistent with the editor.
-        $operations_order = array_flip($upgrade_inventory_order ? [
+        $operations_order = array_flip(($stock_product_operations_order_update || $fashion_house_operations_order_update) ? [
+            'stock_sales', 'wallets', 'products', 'suppliers', 'warehouse', 'live_report',
+            'customer_manage', 'staff_manage', 'notice_publish',
+        ] : ($upgrade_inventory_order ? [
             'stock_sales', 'wallets', 'products', 'suppliers', 'warehouse', 'live_report', 'staff_manage',
             'customer_manage',
         ] : [
             'sales', 'wallets', 'project_package', 'suppliers', 'staff_manage',
             'customer_manage', 'lead_management', 'notice_publish',
-        ]);
+        ]));
         if ($upgrade_parking_order) {
             $operations_order = array_flip(['parking_action', 'wallets', 'parking_management', 'staff_manage']);
         }
@@ -361,7 +386,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         }
         unset($layout_item);
     }
-    if (($upgrade_housing_order || $upgrade_inventory_order || $upgrade_parking_order || $upgrade_restaurant_order) && $saved) {
+    if (($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order || $lead_management_default_hidden_update || $lead_management_submenus_visible_update) && $saved) {
         sidebar_save_layout($conn, $user_id, $items);
     }
     usort($items, static function($a, $b){
@@ -509,6 +534,14 @@ function sidebar_save_layout($conn, $user_id, $items)
     }
     if (in_array($company_type, ['Stock Product', 'Fashion house'], true)) {
         $clean[] = ['id' => '__inventory_operations_v2'];
+        $clean[] = ['id' => '__lead_management_default_hidden_v1'];
+        $clean[] = ['id' => '__lead_management_submenus_visible_v2'];
+    }
+    if ($company_type === 'Stock Product') {
+        $clean[] = ['id' => '__stock_product_operations_order_v3'];
+    }
+    if ($company_type === 'Fashion house') {
+        $clean[] = ['id' => '__fashion_house_operations_order_v3'];
     }
     if ($company_type === 'Car Parking') {
         $clean[] = ['id' => '__parking_operations_v1'];
@@ -573,6 +606,7 @@ function sidebar_rendered_layout($html, $conn, $user_id, $labels = [])
             if ($match) {
                 $item['section'] = $match['section'];
                 $item['sort'] = $match['sort'];
+                $item['visible'] = $match['visible'];
             }
             if (isset($saved[$id])) foreach (['parent','sort','visible','section'] as $key) {
                 if (isset($saved[$id][$key])) $item[$key] = $saved[$id][$key];

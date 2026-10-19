@@ -7,6 +7,11 @@ require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
+$hide_purchase_product_add = in_array(
+    normalize_company_type($_SESSION['company_type'] ?? ''),
+    ['Stock Product', 'Fashion house'],
+    true
+);
 $cafe_product_filter = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? " AND c.category_type='stock_product'" : '';
 if(!$housing_purchase) ensure_fifo_only_product_categories($conn, $user_id);
 
@@ -85,7 +90,7 @@ while($supplier = mysqli_fetch_assoc($suppliers)){
 $product_options_html = '';
 while($product = mysqli_fetch_assoc($products)){
     $label = product_option_label($product['product_name'], $product['sku'] ?? '', !$housing_purchase);
-    if(!empty($product['category_name'])){
+    if(!$hide_purchase_product_add && !empty($product['category_name'])){
         $label .= ' — ' . $product['category_name'];
         if(!empty($product['sub_category'])){ $label .= ' / ' . $product['sub_category']; }
     }
@@ -175,12 +180,12 @@ require_once '../includes/sidebar.php';
     <select name="product_id[]" class="form-control product">
         <option value="">Select Product</option>
         <?= $product_options_html; ?>
-        <option value="__new__">+ Add New Product</option>
+        <?php if(!$hide_purchase_product_add){ ?><option value="__new__">+ Add New Product</option><?php } ?>
     </select>
 
-    <div class="new-product-box mt-2" style="display:none;">
+    <?php if(!$hide_purchase_product_add){ ?><div class="new-product-box mt-2" style="display:none;">
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
-    </div>
+    </div><?php } ?>
 </td>
 <td class="variant-column"><div class="product-variant-quantities text-muted small">No variant</div></td>
 <?php if(!$housing_purchase){ ?><td>
@@ -207,10 +212,10 @@ require_once '../includes/sidebar.php';
 </tbody>
 </table>
 
-<button type="button" id="addRow" class="btn btn-success">
+<?php if(!$hide_purchase_product_add){ ?><button type="button" id="addRow" class="btn btn-success">
     <i class="fas fa-plus"></i>
     Add Product
-</button>
+</button><?php } ?>
 
 <hr>
 

@@ -95,7 +95,7 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
     }
 
     $backup = [
-        'backup_version' => '1.2',
+        'backup_version' => '1.3',
         'created_at' => date('Y-m-d H:i:s'),
         'company_id' => $company_id,
         'company_name' => $company['name'] ?? '',
@@ -117,28 +117,33 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
     while($table_result && $table_row = mysqli_fetch_array($table_result)){
         $table = $table_row[0];
 
-        if(company_backup_table_has_column($conn, $table, 'user_id')){
+        if($table === 'company_delete_backups') continue;
+
+        // Most modules are user-owned; Parking and a few company modules use
+        // company_id instead. Prefer company_id where both columns exist.
+        if(company_backup_table_has_column($conn, $table, 'company_id') || company_backup_table_has_column($conn, $table, 'user_id')){
             $tables[] = $table;
         }
     }
 
     foreach($tables as $table){
         $rows = [];
+        $owner_column = company_backup_table_has_column($conn, $table, 'company_id') ? 'company_id' : 'user_id';
         $sql = "SELECT *
                 FROM `{$table}`
-                WHERE user_id=?";
+                WHERE `{$owner_column}`=?";
         $stmt = mysqli_prepare($conn, $sql);
 
         if(!$stmt){
-            continue;
+            return [false, 'Could not export table: ' . $table, null];
         }
 
         mysqli_stmt_bind_param($stmt, "i", $company_id);
-        mysqli_stmt_execute($stmt);
+        if(!mysqli_stmt_execute($stmt)) return [false, 'Could not export table: ' . $table, null];
         $result = mysqli_stmt_get_result($stmt);
 
         while($row = mysqli_fetch_assoc($result)){
-            unset($row['user_id']);
+            unset($row[$owner_column]);
             $rows[] = $row;
         }
 
@@ -148,10 +153,13 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
     // Detail tables inherit company ownership from their parent record.
     // Include them explicitly so invoices and purchases restore completely.
     $related_tables = [
+        'booking_invoice_charges' => ['parent_table' => 'booking_invoices', 'foreign_key' => 'booking_invoice_id'],
         'purchase_items' => ['parent_table' => 'purchases', 'foreign_key' => 'purchase_id'],
         'invoice_items' => ['parent_table' => 'invoices', 'foreign_key' => 'invoice_id'],
         'invoice_charges' => ['parent_table' => 'invoices', 'foreign_key' => 'invoice_id'],
         'invoice_item_allocations' => ['parent_table' => 'invoice_items', 'foreign_key' => 'invoice_item_id'],
+        'stock_distribution_items' => ['parent_table' => 'stock_distributions', 'foreign_key' => 'distribution_id'],
+        'stock_damage_return_items' => ['parent_table' => 'stock_damage_returns', 'foreign_key' => 'damage_return_id'],
     ];
 
     foreach($related_tables as $table => $relation){
@@ -255,6 +263,11 @@ function company_backup_collect($conn, $company_id, $include_company_profile = f
     }
 
     $backup['data']['support_tickets'] = $support_tickets;
+
+    $backup['row_counts'] = [];
+    foreach($backup['data'] as $table => $rows){
+        if($table !== 'company_admin_profile') $backup['row_counts'][$table] = count($rows);
+    }
 
     return [true, '', $backup];
 }

@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$variants_enabled = product_variants_enabled($conn, $user_id);
 ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_variant_schema($conn);
 ensure_product_subcategory_schema($conn);
@@ -53,7 +54,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $status =
     $_POST['status'];
-    $variant_options = implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''));
+    $variant_options = $variants_enabled
+        ? implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''))
+        : (string)($category['variant_options'] ?? '');
 
     if ($category_type !== $category['category_type'] && product_category_has_usage($conn, $id, $user_id)) {
         $message = 'This category is in use. Create a new category to use a different product type.';
@@ -180,7 +183,7 @@ require_once '../includes/sidebar.php';
                 <div id="sub_category_list" class="mt-2 d-flex flex-wrap"></div>
             </div>
 
-            <div class="form-group">
+            <?php if ($variants_enabled) { ?><div class="form-group">
                 <label>Variants <small class="text-muted">(Optional)</small></label>
                 <input type="hidden" name="variant_options" id="variant_options" value="<?= htmlspecialchars($category['variant_options'] ?? ''); ?>">
                 <div class="input-group">
@@ -189,7 +192,7 @@ require_once '../includes/sidebar.php';
                     <div class="input-group-append"><button class="btn btn-primary" id="add_variant" type="button" title="Add variant"><i class="fas fa-plus"></i></button></div>
                 </div>
                 <div id="variant_list" class="mt-2 d-flex flex-wrap"></div>
-            </div>
+            </div><?php } ?>
             <?php } ?>
 
             <div class="form-group">
@@ -255,6 +258,7 @@ require_once '../includes/sidebar.php';
     function addSubCategory(){const name=source.value.trim();if(!name)return; if(!subCategories.some(item=>item.toLowerCase()===name.toLowerCase())){subCategories.push(name);render();} source.value='';source.focus();}
     add.addEventListener('click',addSubCategory);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addSubCategory();}});render();
 })();
+<?php if ($variants_enabled) { ?>
 (function(){
     const source=document.getElementById('variant_value'), hidden=document.getElementById('variant_options'), list=document.getElementById('variant_list'), add=document.getElementById('add_variant');
     let variants=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);
@@ -262,6 +266,7 @@ require_once '../includes/sidebar.php';
     function addVariant(){const name=source.value.trim();if(!name)return; if(!variants.some(item=>item.toLowerCase()===name.toLowerCase())){variants.push(name);render();} source.value='';source.focus();}
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});render();
 })();
+<?php } ?>
 </script>
 <?php } ?>
 

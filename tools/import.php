@@ -41,6 +41,29 @@ function import_restore_reference_maps()
 {
     return [
         'wallet_id' => 'wallets',
+        'booking_invoice_id' => 'booking_invoices',
+        'branch_id' => 'branches',
+        'from_branch_id' => 'branches',
+        'to_branch_id' => 'branches',
+        'brand_id' => 'branch_brands',
+        'payment_wallet_id' => 'wallets',
+        'receive_wallet_id' => 'wallets',
+        'paid_wallet_id' => 'wallets',
+        'paid_ledger_id' => 'staff_ledger_entries',
+        'source_batch_id' => 'stock_batches',
+        'destination_batch_id' => 'stock_batches',
+        'distribution_id' => 'stock_distributions',
+        'damage_return_id' => 'stock_damage_returns',
+        'completed_invoice_id' => 'invoices',
+        'restaurant_table_id' => 'restaurant_tables',
+        'vehicle_type_id' => 'parking_vehicle_types',
+        'rate_plan_id' => 'parking_rate_plans',
+        'zone_id' => 'parking_zones',
+        'slot_id' => 'parking_slots',
+        'entry_gate_id' => 'parking_gates',
+        'exit_gate_id' => 'parking_gates',
+        'gate_id' => 'parking_gates',
+        'ticket_id' => 'parking_tickets',
         'from_wallet_id' => 'wallets',
         'to_wallet_id' => 'wallets',
         'category_id' => 'categories',
@@ -65,6 +88,16 @@ function import_restore_reference_maps()
 function import_restore_priority($table)
 {
     static $priority = [
+        'branch_brands' => 1,
+        'branches' => 2,
+        'parking_settings' => 3,
+        'parking_vehicle_types' => 4,
+        'parking_rate_plans' => 5,
+        'parking_gates' => 6,
+        'parking_zones' => 7,
+        'parking_slots' => 8,
+        'parking_gate_staff_assignments' => 9,
+        'product_categories' => 3,
         'wallets' => 10,
         'categories' => 20,
         'staff' => 30,
@@ -86,6 +119,10 @@ function import_restore_priority($table)
         'expenses' => 110,
         'money_ins' => 120,
         'transfers' => 130,
+        'parking_tickets' => 140,
+        'parking_payments' => 145,
+        'parking_gate_logs' => 150,
+        'parking_shifts' => 155,
     ];
 
     return $priority[$table] ?? 500;
@@ -104,7 +141,7 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
     }
 
     if(import_table_has_column($conn, $table, 'user_id')){
-        $row['user_id'] = $user_id;
+        if($table !== 'parking_gate_staff_assignments') $row['user_id'] = $user_id;
     }else{
         unset($row['user_id']);
     }
@@ -113,11 +150,22 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
         $row['admin_user_id'] = $user_id;
     }
 
+    if(import_table_has_column($conn, $table, 'company_id')){
+        $row['company_id'] = $user_id;
+    }
+
+    // Parking assignment rows store the authenticated user in user_id, not
+    // the company owner. Keep that relation when restoring company-owned data.
+    if($table === 'parking_gate_staff_assignments' && isset($row['user_id'])){
+        $row['user_id'] = $manager_id_map[(int)$row['user_id']] ?? (int)$row['user_id'];
+    }
+
     if(isset($row['created_by']) && isset($manager_id_map[(int)$row['created_by']])){
         $row['created_by'] = $manager_id_map[(int)$row['created_by']];
     }
 
     foreach(import_restore_reference_maps() as $column => $map_table){
+        if($column === 'category_id' && $table === 'products') $map_table = 'product_categories';
         if(
             array_key_exists($column, $row) &&
             isset($id_maps[$map_table][(int)$row[$column]])
@@ -129,9 +177,36 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
     // Stock batches use a polymorphic source reference, so map it explicitly.
     if($table === 'stock_batches' && isset($row['source_id'], $row['source_type'])){
         $source_type = strtolower(trim((string)$row['source_type']));
-        $source_table = $source_type === 'purchase' ? 'purchases' : ($source_type === 'invoice' ? 'invoices' : null);
+        $source_table = ['purchase'=>'purchases', 'invoice'=>'invoices', 'sales_return'=>'invoice_items', 'product_opening'=>'products', 'opening'=>'products', 'distribution'=>'stock_distributions'][$source_type] ?? null;
 
         if($source_table && isset($id_maps[$source_table][(int)$row['source_id']])){
+            $row['source_id'] = $id_maps[$source_table][(int)$row['source_id']];
+        }
+    }
+
+    foreach(['created_by_user_id', 'login_user_id', 'reference_user_id'] as $actor_column){
+        if(isset($row[$actor_column], $manager_id_map[(int)$row[$actor_column]])){
+            $row[$actor_column] = $manager_id_map[(int)$row[$actor_column]];
+        }
+    }
+    foreach(['entry_operator_id', 'exit_operator_id', 'received_by', 'operator_id'] as $operator_column){
+        if(isset($row[$operator_column], $manager_id_map[(int)$row[$operator_column]])){
+            $row[$operator_column] = $manager_id_map[(int)$row[$operator_column]];
+        }
+    }
+    if($table === 'transactions'){
+        $reference_table = ['sales_invoice'=>'invoices', 'invoice'=>'invoices', 'invoice_payment'=>'customer_payments', 'purchase'=>'purchases', 'supplier_payment'=>'supplier_payments', 'expense'=>'expenses', 'money_in'=>'money_ins', 'transfer_in'=>'transfers', 'transfer_out'=>'transfers', 'transfer'=>'transfers'][$row['transaction_type'] ?? ''] ?? null;
+        if(in_array($row['transaction_type'] ?? '', ['invoice_income','invoice_expense'], true)) $reference_table = 'booking_invoices';
+        if(($row['transaction_type'] ?? '') === 'money_in'
+            && (preg_match('/parking|lost parking/i', (string)($row['note'] ?? '')) || str_starts_with((string)($row['txn_no'] ?? ''), 'PARK'))
+        ) $reference_table = 'parking_payments';
+        if($reference_table && isset($id_maps[$reference_table][(int)($row['reference_id'] ?? 0)])){
+            $row['reference_id'] = $id_maps[$reference_table][(int)$row['reference_id']];
+        }
+    }
+    if($table === 'expenses'){
+        $source_table = ['purchase_payment'=>'purchases', 'supplier_payment'=>'supplier_payments'][$row['source_type'] ?? ''] ?? null;
+        if($source_table && isset($id_maps[$source_table][(int)($row['source_id'] ?? 0)])){
             $row['source_id'] = $id_maps[$source_table][(int)$row['source_id']];
         }
     }
@@ -239,6 +314,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
             }else{
 
+                mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
                 mysqli_begin_transaction(
                     $conn
                 );
@@ -249,6 +325,18 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                 );
 
                 try{
+                    foreach(($backup['row_counts'] ?? []) as $count_table => $expected_count){
+                        if(!isset($backup['data'][$count_table]) || !is_array($backup['data'][$count_table])
+                            || count($backup['data'][$count_table]) !== (int)$expected_count){
+                            throw new Exception('Backup row count mismatch: ' . $count_table . '. No data was replaced.');
+                        }
+                    }
+                    // Reject partial financial backups before deleting anything.
+                    foreach(['wallets','invoices','transactions','expenses','money_ins','transfers'] as $required_table){
+                        if(!isset($backup['data'][$required_table]) || !is_array($backup['data'][$required_table])){
+                            throw new Exception('Incomplete backup: missing ' . $required_table . '. No data was replaced.');
+                        }
+                    }
 
                     /*
                     --------------------------------
@@ -258,6 +346,10 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
                     // Remove child rows first: these tables are linked to
                     // company-owned parents and do not have their own user_id.
+                    mysqli_query($conn, "DELETE d FROM booking_invoice_charges d INNER JOIN booking_invoices p ON p.id=d.booking_invoice_id WHERE p.user_id={$user_id}");
+                    foreach(['stock_distribution_items'=>['stock_distributions','distribution_id'], 'stock_damage_return_items'=>['stock_damage_returns','damage_return_id']] as $detail_table => [$parent_table, $parent_key]){
+                        mysqli_query($conn, "DELETE d FROM `{$detail_table}` d INNER JOIN `{$parent_table}` p ON p.id=d.`{$parent_key}` WHERE p.user_id={$user_id}");
+                    }
                     mysqli_query(
                         $conn,
                         "DELETE invoice_item_allocations
@@ -529,6 +621,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     });
 
                     $id_maps = [];
+                    $restored_rows = [];
 
                     foreach(
                         $restore_data
@@ -566,6 +659,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                             }
 
                             $new_id = import_insert_row($conn, $table, $prepared_row);
+                            if($new_id > 0 && array_key_exists('id', $row)){
+                                $restored_rows[] = [$table, $new_id, $row];
+                            }
 
                             if($old_id > 0 && $new_id > 0){
                                 if(!isset($id_maps[$table])){
@@ -641,14 +737,39 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                         }
                     }
 
-                    mysqli_query(
-                        $conn,
-                        "SET FOREIGN_KEY_CHECKS=1"
-                    );
+                    // Resolve forward and circular references using the ORIGINAL
+                    // backup values only, after every table has its new IDs.
+                    foreach($restored_rows as [$restored_table, $restored_id, $original_row]){
+                        $fixed = import_prepare_row_for_insert($conn, $restored_table, $original_row, $user_id, $manager_id_map, $id_maps);
+                        $fields = []; $values = [];
+                        foreach($fixed as $column => $value){
+                            if($column !== 'user_id' && str_ends_with($column, '_id')){
+                                $fields[] = "`{$column}`=?"; $values[] = $value;
+                            }
+                        }
+                        if($fields){
+                            $values[] = $restored_id;
+                            $repair = mysqli_prepare($conn, "UPDATE `{$restored_table}` SET " . implode(',', $fields) . ' WHERE id=?');
+                            mysqli_stmt_bind_param($repair, str_repeat('s', count($values)), ...$values);
+                            if(!mysqli_stmt_execute($repair)) throw new Exception(mysqli_stmt_error($repair));
+                            mysqli_stmt_close($repair);
+                        }
+                    }
+                    foreach($manager_rows as $original_manager){
+                        $old_manager = (int)($original_manager['_old_id'] ?? 0);
+                        $old_staff = (int)($original_manager['staff_id'] ?? 0);
+                        if(isset($manager_id_map[$old_manager], $id_maps['staff'][$old_staff])){
+                            $manager_fix = mysqli_prepare($conn, 'UPDATE users SET staff_id=? WHERE id=? AND owner_id=?');
+                            mysqli_stmt_bind_param($manager_fix, 'iii', $id_maps['staff'][$old_staff], $manager_id_map[$old_manager], $user_id);
+                            mysqli_stmt_execute($manager_fix);
+                        }
+                    }
+                    mysqli_query($conn, "SET FOREIGN_KEY_CHECKS=1");
 
                     mysqli_commit(
                         $conn
                     );
+                    unset($_SESSION['selected_branch_id']);
 
                     $message =
                     "Backup Restored Successfully";
@@ -656,7 +777,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     $message_type =
                     "success";
 
-                }catch(Exception $e){
+                }catch(Throwable $e){
 
                 mysqli_query(
                     $conn,

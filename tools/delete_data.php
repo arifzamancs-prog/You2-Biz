@@ -143,6 +143,9 @@ function delete_company_business_data($conn, $company_id)
 
     try{
         $child_deletes = [
+            "DELETE FROM booking_invoice_charges WHERE booking_invoice_id IN (SELECT id FROM booking_invoices WHERE user_id={$company_id})",
+            "DELETE FROM stock_distribution_items WHERE distribution_id IN (SELECT id FROM stock_distributions WHERE user_id={$company_id})",
+            "DELETE FROM stock_damage_return_items WHERE damage_return_id IN (SELECT id FROM stock_damage_returns WHERE user_id={$company_id})",
             "DELETE FROM invoice_item_allocations
              WHERE invoice_item_id IN (
                 SELECT id
@@ -174,11 +177,15 @@ function delete_company_business_data($conn, $company_id)
         while($tables_result && $table_row = mysqli_fetch_row($tables_result)){
             $table = $table_row[0];
 
-            if($table === 'users' || !delete_data_valid_table_name($table)){
+            if(in_array($table, ['users', 'company_delete_backups'], true) || !delete_data_valid_table_name($table)){
                 continue;
             }
 
-            if(delete_data_table_has_column($conn, $table, 'user_id')){
+            if(delete_data_table_has_column($conn, $table, 'company_id')){
+                if(!delete_data_by_value($conn, $table, 'company_id', $company_id)){
+                    throw new Exception(mysqli_error($conn));
+                }
+            }elseif(delete_data_table_has_column($conn, $table, 'user_id')){
                 if(!delete_data_by_ids($conn, $table, 'user_id', $user_ids)){
                     throw new Exception(mysqli_error($conn));
                 }

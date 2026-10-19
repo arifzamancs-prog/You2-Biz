@@ -2,15 +2,22 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/company_settings_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+$is_inventory_or_fashion = in_array(
+    normalize_company_type($_SESSION['company_type'] ?? ''),
+    ['Stock Product', 'Fashion house'],
+    true
+);
 
 $sql = "SELECT
             p.id,
             p.purchase_no,
+            p.notes,
             p.purchase_date,
             p.total_amount,
             p.paid_amount,
@@ -100,11 +107,12 @@ while($row = mysqli_fetch_assoc($result)){
             #example1 .date-column{min-width:120px;width:11%;white-space:nowrap}
             #example1 .amount-column{min-width:125px;width:12%;white-space:nowrap}
             #example1 .action-column{min-width:125px;width:125px;white-space:nowrap}
+            #example1.purchase-payment-compact .action-column{min-width:0;width:1%;white-space:nowrap}
         </style>
 
         <table
             id="example1"
-            class="table table-bordered table-striped">
+            class="table table-bordered table-striped<?= $is_inventory_or_fashion ? ' purchase-payment-compact' : '' ?>">
 
             <thead>
 
@@ -131,6 +139,9 @@ while($row = mysqli_fetch_assoc($result)){
 
                 <td>
                     <?= htmlspecialchars($row['purchase_no']); ?>
+                    <?php if($is_inventory_or_fashion && trim((string)($row['notes'] ?? '')) !== ''){ ?>
+                        <div class="small text-muted mt-1"><strong>Note:</strong> <?= nl2br(htmlspecialchars(trim((string)$row['notes']))); ?></div>
+                    <?php } ?>
                 </td>
 
                 <td>
@@ -173,7 +184,7 @@ while($row = mysqli_fetch_assoc($result)){
 
                 </td>
 
-                <td>
+                <td class="action-column">
 
                     <a
                         href="supplier_payment_entry.php?id=<?= $row['id']; ?>"

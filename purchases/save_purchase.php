@@ -13,6 +13,39 @@ require_once '../includes/expense_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
+function generate_compact_purchase_no($conn)
+{
+    for($attempt = 0; $attempt < 20; $attempt++){
+        $purchase_no = 'PUR-' . date('ymd') . '-' . random_int(1000, 9999);
+        $purchase_count = 0;
+        $transaction_count = 0;
+
+        $purchase_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM purchases WHERE purchase_no=?');
+        if($purchase_stmt){
+            mysqli_stmt_bind_param($purchase_stmt, 's', $purchase_no);
+            mysqli_stmt_execute($purchase_stmt);
+            $purchase_row = mysqli_fetch_assoc(mysqli_stmt_get_result($purchase_stmt));
+            $purchase_count = (int)($purchase_row['total'] ?? 0);
+            mysqli_stmt_close($purchase_stmt);
+        }
+
+        $transaction_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM transactions WHERE txn_no=?');
+        if($transaction_stmt){
+            mysqli_stmt_bind_param($transaction_stmt, 's', $purchase_no);
+            mysqli_stmt_execute($transaction_stmt);
+            $transaction_row = mysqli_fetch_assoc(mysqli_stmt_get_result($transaction_stmt));
+            $transaction_count = (int)($transaction_row['total'] ?? 0);
+            mysqli_stmt_close($transaction_stmt);
+        }
+
+        if($purchase_count === 0 && $transaction_count === 0){
+            return $purchase_no;
+        }
+    }
+
+    return 'PUR-' . date('ymd') . '-' . random_int(10000, 99999);
+}
+
 ensure_fifo_inventory_tables($conn);
 ensure_product_management_columns($conn);
 if(($_SESSION['company_type'] ?? '') !== 'Housing') ensure_fifo_only_product_categories($conn, $user_id);
@@ -127,6 +160,11 @@ function purchase_prepare_items($conn, $user_id)
 
     $items = [];
     $new_product_count = 0;
+    $hide_purchase_product_add = in_array(
+        normalize_company_type($_SESSION['company_type'] ?? ''),
+        ['Stock Product', 'Fashion house'],
+        true
+    );
 
     $limit_stmt = mysqli_prepare(
         $conn,
@@ -192,6 +230,9 @@ function purchase_prepare_items($conn, $user_id)
         }
 
         if($product_choice === '__new__'){
+            if($hide_purchase_product_add){
+                throw new Exception('Create products from the Products menu before adding them to a purchase.');
+            }
             $category_id = $stock_category_id;
             $product_name = trim((string)($new_product_names[$key] ?? ''));
 
@@ -390,7 +431,14 @@ try{
         }
     }
 
-    $purchase_no = generate_short_unique_txn_no($conn, 'PUR', 'purchases', 'purchase_no');
+    $use_compact_purchase_number = in_array(
+        normalize_company_type($_SESSION['company_type'] ?? ''),
+        ['Stock Product', 'Fashion house'],
+        true
+    );
+    $purchase_no = $use_compact_purchase_number
+        ? generate_compact_purchase_no($conn)
+        : generate_short_unique_txn_no($conn, 'PUR', 'purchases', 'purchase_no');
 
     $stmt = mysqli_prepare(
         $conn,

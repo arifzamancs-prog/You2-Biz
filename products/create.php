@@ -8,6 +8,8 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$variants_enabled = product_variants_enabled($conn, $user_id);
+$product_photos_enabled = product_photos_enabled($conn, $user_id);
 ensure_product_management_columns($conn);
 ensure_product_image_column($conn);
 ensure_fifo_inventory_tables($conn);
@@ -138,7 +140,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $_POST['status'];
 
     $photo_error = '';
-    $photo_path = product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error);
+    $photo_path = $product_photos_enabled
+        ? product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error)
+        : '';
     if($photo_error !== ''){
         $message = $photo_error;
         $message_type = 'danger';
@@ -300,7 +304,7 @@ require_once '../includes/sidebar.php';
 
                             <?php while($cat = mysqli_fetch_assoc($categories)){ ?>
 
-                                <option value="<?= $cat['id']; ?>" data-product-type="<?= htmlspecialchars($cat['category_type'], ENT_QUOTES) ?>" <?= (string)$cat['id'] === (string)($form_data['category_id'] ?? '') ? 'selected' : '' ?> data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>' data-variants='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['variant_options'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>'>
+                                <option value="<?= $cat['id']; ?>" data-product-type="<?= htmlspecialchars($cat['category_type'], ENT_QUOTES) ?>" <?= (string)$cat['id'] === (string)($form_data['category_id'] ?? '') ? 'selected' : '' ?> data-sub-categories='<?= htmlspecialchars(json_encode(product_variant_options_from_text($cat['sub_category'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>' data-variants='<?= htmlspecialchars(json_encode($variants_enabled ? product_variant_options_from_text($cat['variant_options'] ?? '') : []), ENT_QUOTES, 'UTF-8'); ?>'>
 
                                     <?= htmlspecialchars($cat['category_name']); ?>
 
@@ -342,7 +346,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div></div></div>
+            <?php if($product_photos_enabled){ ?><div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div></div></div><?php } ?>
 
             <div class="row">
 

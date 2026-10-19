@@ -406,9 +406,55 @@ if(isset($conn) && $conn instanceof mysqli && !restaurant_catalog_enabled($conn,
     ];
 }
 
-$sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_user() && sidebar_saved_layout_exists($conn, (int)($_SESSION['user_id'] ?? 0)))
-    ? sidebar_layout_items_for_current_user(sidebar_load_layout($conn, (int)($_SESSION['user_id'] ?? 0), $project_package_labels ?? []))
+$sidebar_settings_user_id = (int)($_SESSION['user_id'] ?? 0);
+$sidebar_settings_company_type = (isset($conn) && $conn instanceof mysqli)
+    ? project_package_company_type($conn, $sidebar_settings_user_id)
+    : '';
+$sidebar_has_saved_layout = isset($conn) && $conn instanceof mysqli
+    && is_admin_user()
+    && sidebar_saved_layout_exists($conn, $sidebar_settings_user_id);
+
+$sidebar_layout_items = $sidebar_has_saved_layout
+    ? sidebar_layout_items_for_current_user(sidebar_load_layout($conn, $sidebar_settings_user_id, $project_package_labels ?? []))
     : [];
+// Do not create a complete layout just to hide this one default menu: creating
+// it would replace an admin's unsaved sidebar order. The lightweight entry
+// below only removes the Lead Management tree from the rendered sidebar.
+if(
+    !$sidebar_has_saved_layout
+    && is_admin_user()
+    && in_array($sidebar_settings_company_type, ['Stock Product', 'Fashion house'], true)
+){
+    $sidebar_layout_items[] = [
+        'id' => 'lead_management',
+        'label' => 'Lead Management',
+        'href' => '',
+        'parent' => '',
+        'sort' => 110,
+        'section' => 'OPERATIONS',
+        'visible' => 0,
+    ];
+}
+if(
+    !$sidebar_has_saved_layout
+    && is_admin_user()
+    && in_array($sidebar_settings_company_type, ['Stock Product', 'Fashion house'], true)
+){
+    $stock_operations_order = array_flip([
+        'stock_sales', 'wallets', 'products', 'suppliers', 'warehouse', 'live_report',
+        'customer_manage', 'staff_manage', 'notice_publish',
+    ]);
+    foreach(sidebar_default_layout_items($project_package_labels ?? [], $sidebar_settings_company_type) as $default_sidebar_item){
+        if(!isset($stock_operations_order[$default_sidebar_item['id']])){
+            continue;
+        }
+        $default_sidebar_item['parent'] = '';
+        $default_sidebar_item['section'] = 'OPERATIONS';
+        $default_sidebar_item['sort'] = 40 + $stock_operations_order[$default_sidebar_item['id']];
+        $default_sidebar_item['visible'] = 1;
+        $sidebar_layout_items[] = $default_sidebar_item;
+    }
+}
 
 ?>
 
@@ -917,6 +963,7 @@ $sidebar_layout_items = (isset($conn) && $conn instanceof mysqli && is_admin_use
                     if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') $sidebar_admin_items[] = ['href' => app_path('user_management/dump_approval.php'), 'label' => 'Dumps Approval', 'icon' => 'fas fa-dumpster'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('invoice_charges')) $sidebar_admin_items[] = ['href' => app_path('user_management/invoice_charges.php'), 'label' => 'Invoice Charges', 'icon' => 'fas fa-percentage'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('printing_option')) $sidebar_admin_items[] = ['href' => app_path('user_management/printing_option.php'), 'label' => 'Printing Option', 'icon' => 'fas fa-print'];
+                    if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Stock Product') $sidebar_admin_items[] = ['href' => app_path('user_management/product_management.php'), 'label' => 'Product Management', 'icon' => 'fas fa-boxes'];
                     if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Wallet Cash Out', 'icon' => 'fas fa-coins'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
                     if(products_module_enabled()

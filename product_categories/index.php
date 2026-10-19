@@ -10,6 +10,8 @@ if(($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'){
 }
 
 $user_id = $_SESSION['user_id'];
+$variants_enabled = product_variants_enabled($conn, $user_id);
+$is_inventory_sales = normalize_company_type($_SESSION['company_type'] ?? '') === 'Stock Product';
 
 ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_variant_schema($conn);
@@ -82,11 +84,11 @@ require_once '../includes/sidebar.php';
 
                 <th>Category Name</th>
                 <th>Sub Category</th>
-                <th>Variants</th>
+                <?php if($variants_enabled){ ?><th>Variants</th><?php } ?>
                 <th>Status</th>
-                <th>Created</th>
+                <th<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>>Created</th>
                 <?php if(manager_can_modify()){ ?>
-                    <th width="150">Action</th>
+                    <th<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : ' width="150"' ?>>Action</th>
                 <?php } ?>
 
             </tr>
@@ -105,7 +107,7 @@ require_once '../includes/sidebar.php';
                     <?php } ?>
                 </td>
                 <td><?= htmlspecialchars($row['sub_category'] ?: '-'); ?></td>
-                <td><?= htmlspecialchars($row['variant_options'] ?: '-'); ?></td>
+                <?php if($variants_enabled){ ?><td><?= htmlspecialchars($row['variant_options'] ?: '-'); ?></td><?php } ?>
 
                 <td>
 
@@ -129,10 +131,10 @@ require_once '../includes/sidebar.php';
 
                 </td>
 
-                <td><?= !empty($row['created_at']) ? date('d-m-Y h:i A', strtotime($row['created_at'])) : '-'; ?></td>
+                <td<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>><?= !empty($row['created_at']) ? date($is_inventory_sales ? 'd-m-Y' : 'd-m-Y h:i A', strtotime($row['created_at'])) : '-'; ?></td>
 
                 <?php if(manager_can_modify()){ ?>
-                <td>
+                <td<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>>
 
                     <a
                         href="edit.php?id=<?= $row['id']; ?>"
@@ -173,6 +175,12 @@ require_once '../includes/sidebar.php';
     </div>
 
 </div>
+
+<?php if($is_inventory_sales){ ?>
+<style>
+#example1 .inventory-sales-fit-cell { width: 1%; white-space: nowrap; }
+</style>
+<?php } ?>
 
 <?php
 require_once '../includes/footer.php';
