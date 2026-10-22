@@ -108,7 +108,11 @@ function import_restore_priority($table)
         'packages' => 60,
         'purchases' => 70,
         'purchase_items' => 80,
+        'stock_distributions' => 81,
         'stock_batches' => 82,
+        'stock_distribution_items' => 91,
+        'stock_damage_returns' => 92,
+        'stock_damage_return_items' => 93,
         'invoice_charge_types' => 83,
         'invoices' => 84,
         'invoice_items' => 86,
@@ -126,6 +130,66 @@ function import_restore_priority($table)
     ];
 
     return $priority[$table] ?? 500;
+}
+
+// Preflight checks run before any company data is deleted.
+function import_preflight($conn, $backup)
+{
+    if(!isset($backup['data']) || !is_array($backup['data']) ||
+       ($backup['backup_version'] ?? '') !== '1.3'){
+        throw new Exception('Unsupported backup format/version. Expected You2 Biz 1.3.');
+    }
+    if(!isset($backup['row_counts']) || !is_array($backup['row_counts'])){
+        throw new Exception('Missing row_counts. Import cancelled.');
+    }
+    $required = ['branches','wallets','products','product_categories','customers',
+        'suppliers','invoices','invoice_items','invoice_item_allocations',
+        'purchases','purchase_items','stock_batches','stock_distributions',
+        'stock_distribution_items','transactions','expenses','money_ins','transfers'];
+    foreach($required as $table){
+        if(!isset($backup['data'][$table]) || !is_array($backup['data'][$table])){
+            throw new Exception('Missing required backup section: ' . $table);
+        }
+    }
+    foreach($backup['data'] as $table => $rows){
+        if($table === 'company_admin_profile') continue;
+        if(!import_valid_table_name($table) || !is_array($rows) ||
+           !array_key_exists($table, $backup['row_counts']) ||
+           count($rows) !== (int)$backup['row_counts'][$table]){
+            throw new Exception('Invalid table/row count: ' . $table);
+        }
+        if($table === 'users_manager_agents') continue;
+        $allowed_child_tables = ['purchase_items','invoice_items','invoice_charges',
+            'invoice_item_allocations','booking_invoice_charges',
+            'stock_distribution_items','stock_damage_return_items'];
+        if(!in_array($table, $allowed_child_tables, true) &&
+           !import_table_has_column($conn, $table, 'company_id') &&
+           !import_table_has_column($conn, $table, 'user_id') &&
+           !in_array($table, ['pricing_plan_requests','support_tickets'], true)){
+            throw new Exception('Table has no company ownership: ' . $table);
+        }
+        $check = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $table) . "'");
+        if(!$check || mysqli_num_rows($check) !== 1){
+            throw new Exception('Target table missing: ' . $table);
+        }
+        foreach($rows as $row){
+            if(!is_array($row)) throw new Exception('Invalid row in ' . $table);
+            foreach(array_keys($row) as $column){
+                if($column === '_replies') continue;
+                if(!import_valid_table_name($column) ||
+                   !import_table_has_column($conn, $table, $column)){
+                    throw new Exception('Unknown column ' . $table . '.' . $column);
+                }
+            }
+        }
+    }
+    // Rollback safety requires transactional tables; MyISAM changes cannot roll back.
+    $engines = mysqli_query($conn, "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'");
+    while($t = mysqli_fetch_assoc($engines)){
+        if(strcasecmp((string)$t['ENGINE'], 'InnoDB') !== 0){
+            throw new Exception('Non-InnoDB table detected: ' . $t['TABLE_NAME'] . '. Import cancelled.');
+        }
+    }
 }
 
 function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_id_map, $id_maps = [])
@@ -315,6 +379,13 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             }else{
 
                 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+                try {
+                    import_preflight($conn, $backup);
+                } catch (Throwable $e) {
+                    $message = $e->getMessage();
+                    $message_type = 'danger';
+                }
+                if($message_type !== 'danger'){
                 mysqli_begin_transaction(
                     $conn
                 );
@@ -380,61 +451,22 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                          WHERE purchases.user_id={$user_id}"
                     );
 
+                    // Delete only rows belonging to the selected company.
+                    // Prefer company_id, matching the export helper's ownership rule.
                     $tables = [];
-
-                    $result = mysqli_query(
-                        $conn,
-                        "SHOW TABLES"
-                    );
-
-                    while(
-                        $row =
-                        mysqli_fetch_array($result)
-                    ){
-
-                        $table = $row[0];
-
-                        $columns = mysqli_query(
-                            $conn,
-                            "SHOW COLUMNS FROM `$table`"
-                        );
-
-                        $has_user_id = false;
-
-                        while(
-                            $col =
-                            mysqli_fetch_assoc($columns)
-                        ){
-
-                            if(
-                                $col['Field']
-                                == 'user_id'
-                            ){
-
-                                $has_user_id = true;
-                                break;
-                            }
-                        }
-
-                        if(
-                            $has_user_id
-                        ){
-
-                            $tables[] =
-                            $table;
+                    $result = mysqli_query($conn, "SHOW TABLES");
+                    while($r = mysqli_fetch_row($result)){
+                        $table = $r[0];
+                        if(in_array($table, ['users','company_delete_backups','support_tickets',
+                            'support_ticket_replies','pricing_plan_requests'], true)) continue;
+                        if(import_table_has_column($conn, $table, 'company_id')){
+                            $tables[$table] = 'company_id';
+                        }elseif(import_table_has_column($conn, $table, 'user_id')){
+                            $tables[$table] = 'user_id';
                         }
                     }
-
-                    foreach(
-                        array_reverse($tables)
-                        as $table
-                    ){
-
-                        mysqli_query(
-                            $conn,
-                            "DELETE FROM `$table`
-                             WHERE user_id={$user_id}"
-                        );
+                    foreach(array_reverse($tables, true) as $table => $owner_column){
+                        mysqli_query($conn, "DELETE FROM `{$table}` WHERE `{$owner_column}`={$user_id}");
                     }
 
                     mysqli_query(
@@ -779,20 +811,17 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
                 }catch(Throwable $e){
 
-                mysqli_query(
-                    $conn,
-                    "SET FOREIGN_KEY_CHECKS=1"
-                );
-
                 mysqli_rollback(
                     $conn
                 );
+                mysqli_query($conn, "SET FOREIGN_KEY_CHECKS=1");
 
                 $message =
                 $e->getMessage();
 
                 $message_type =
                 "danger";
+            }
             }
             }
         }

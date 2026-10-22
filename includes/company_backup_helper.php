@@ -33,10 +33,23 @@ function company_backup_table_has_column($conn, $table, $column)
         return false;
     }
 
-    $column = mysqli_real_escape_string($conn, $column);
-    $result = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'");
+    // Cache schema metadata per connection/table for this PHP request.
+    // Original code repeatedly queried SHOW COLUMNS for every field check.
+    static $column_cache = [];
+    $connection_key = spl_object_id($conn);
 
-    return $result && mysqli_num_rows($result) > 0;
+    if(!array_key_exists($table, $column_cache[$connection_key] ?? [])){
+        $column_cache[$connection_key][$table] = [];
+        $result = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}`");
+        if($result){
+            while($row = mysqli_fetch_assoc($result)){
+                $column_cache[$connection_key][$table][$row['Field']] = true;
+            }
+            mysqli_free_result($result);
+        }
+    }
+
+    return isset($column_cache[$connection_key][$table][$column]);
 }
 
 function company_backup_root_dir_path()
