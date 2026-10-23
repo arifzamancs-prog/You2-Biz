@@ -25,7 +25,8 @@ function fifo_inventory_migrate_company($conn, $user_id)
     $user_id = (int)$user_id;
     if (isset($done[$user_id])) return;
     $done[$user_id] = true;
-    $head_id = stock_purchase_location_id($conn, $user_id);
+    $head_id = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'
+        ? stock_head_office_id($conn, $user_id) : stock_purchase_location_id($conn, $user_id);
     mysqli_query($conn, "INSERT IGNORE INTO stock_inventory_migrations(user_id) VALUES ({$user_id})");
     $existing = mysqli_fetch_assoc(mysqli_query($conn, "SELECT completed_at FROM stock_inventory_migrations WHERE user_id={$user_id}"));
     if (!empty($existing['completed_at'])) return;

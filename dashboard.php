@@ -20,6 +20,9 @@ $expense_scope = branch_scope_sql($conn);
 $invoice_scope = branch_scope_sql($conn);
 $purchase_scope = branch_scope_sql($conn);
 $transaction_scope = branch_scope_sql($conn, 't');
+$dashboard_uses_sales_invoices = sales_module_enabled();
+$dashboard_invoice_list_url = $dashboard_uses_sales_invoices ? 'sales/invoice_list.php' : 'create_invoice/invoice_list.php';
+$dashboard_invoice_print_url = $dashboard_uses_sales_invoices ? 'sales/print_invoice.php' : 'create_invoice/print.php';
 
 if($dashboard_is_staff_login && !manager_has_permission('dashboard')){
     require_once 'staff_dashboard.php';
@@ -168,21 +171,35 @@ $total_wallet_balance = dashboard_value(
     [$user_id]
 );
 
-$total_sales = dashboard_value(
-    $conn,
-    "SELECT COALESCE(SUM(bi.amount),0)
-     FROM booking_invoices bi
-     LEFT JOIN booking_invoice_types bit
-        ON bit.user_id=bi.user_id
-        AND bit.type_key=bi.invoice_type
-     WHERE bi.user_id=?
-     {$booking_scope}
-     AND bi.status='confirmed'
-     AND COALESCE(bit.behavior,'income')='income'
-     AND bi.invoice_date = CURDATE()",
-    "i",
-    [$user_id]
-);
+if ($dashboard_uses_sales_invoices) {
+    $total_sales = dashboard_value(
+        $conn,
+        "SELECT COALESCE(SUM(total_amount),0)
+         FROM invoices
+         WHERE user_id=?
+         {$invoice_scope}
+         AND accounting_status='posted'
+         AND invoice_date = CURDATE()",
+        "i",
+        [$user_id]
+    );
+} else {
+    $total_sales = dashboard_value(
+        $conn,
+        "SELECT COALESCE(SUM(bi.amount),0)
+         FROM booking_invoices bi
+         LEFT JOIN booking_invoice_types bit
+            ON bit.user_id=bi.user_id
+            AND bit.type_key=bi.invoice_type
+         WHERE bi.user_id=?
+         {$booking_scope}
+         AND bi.status='confirmed'
+         AND COALESCE(bit.behavior,'income')='income'
+         AND bi.invoice_date = CURDATE()",
+        "i",
+        [$user_id]
+    );
+}
 
 $total_purchases = dashboard_value(
     $conn,
@@ -296,24 +313,35 @@ $today_expense = dashboard_value(
     [$user_id]
 );
 
-$recent_invoices = dashboard_rows(
-    $conn,
-    "SELECT
-        bi.id,
-        bi.invoice_no,
-        bi.invoice_date,
-        bi.amount,
-        bi.status,
-        c.customer_name
-     FROM booking_invoices bi
-     LEFT JOIN customers c ON c.id=bi.customer_id
-     WHERE bi.user_id=?
-     {$booking_scope}
-     ORDER BY bi.invoice_date DESC, bi.id DESC
-     LIMIT 6",
-    "i",
-    [$user_id]
-);
+if ($dashboard_uses_sales_invoices) {
+    $recent_invoices = dashboard_rows(
+        $conn,
+        "SELECT i.id, i.invoice_no, i.invoice_date, i.total_amount AS amount,
+                CASE WHEN i.accounting_status='posted' THEN 'confirmed' ELSE 'pending' END AS status,
+                COALESCE(NULLIF(i.customer_name,''), c.customer_name, 'Walk-in Customer') AS customer_name
+         FROM invoices i
+         LEFT JOIN customers c ON c.id=i.customer_id AND c.user_id=i.user_id
+         WHERE i.user_id=?
+         {$invoice_scope}
+         ORDER BY i.invoice_date DESC, i.id DESC
+         LIMIT 6",
+        "i",
+        [$user_id]
+    );
+} else {
+    $recent_invoices = dashboard_rows(
+        $conn,
+        "SELECT bi.id, bi.invoice_no, bi.invoice_date, bi.amount, bi.status, c.customer_name
+         FROM booking_invoices bi
+         LEFT JOIN customers c ON c.id=bi.customer_id
+         WHERE bi.user_id=?
+         {$booking_scope}
+         ORDER BY bi.invoice_date DESC, bi.id DESC
+         LIMIT 6",
+        "i",
+        [$user_id]
+    );
+}
 
 $low_stock_products = dashboard_rows(
     $conn,
@@ -529,7 +557,7 @@ require_once 'includes/sidebar.php';
     </div>
 
     <div class="col-lg-3 col-6">
-        <a href="create_invoice/invoice_list.php" class="dashboard-card-link agent-dashboard-clickable">
+        <a href="<?= htmlspecialchars($dashboard_invoice_list_url); ?>" class="dashboard-card-link agent-dashboard-clickable">
         <div class="small-box bg-success">
             <div class="inner">
                 <h3>BDT <?= number_format($total_sales,2); ?></h3>
@@ -632,7 +660,7 @@ require_once 'includes/sidebar.php';
                     Recent Invoices
                 </h3>
                 <div class="card-tools">
-                    <a href="create_invoice/invoice_list.php" class="btn btn-tool">
+                    <a href="<?= htmlspecialchars($dashboard_invoice_list_url); ?>" class="btn btn-tool">
                         <i class="fas fa-arrow-right"></i>
                     </a>
                 </div>
@@ -660,7 +688,7 @@ require_once 'includes/sidebar.php';
                     <?php foreach($recent_invoices as $invoice){ ?>
                     <tr>
                         <td>
-                            <a href="create_invoice/print.php?id=<?= (int)$invoice['id']; ?>" target="_blank" rel="noopener">
+                            <a href="<?= htmlspecialchars($dashboard_invoice_print_url); ?>?id=<?= (int)$invoice['id']; ?>" target="_blank" rel="noopener">
                                 <?= htmlspecialchars($invoice['invoice_no']); ?>
                             </a>
                         </td>

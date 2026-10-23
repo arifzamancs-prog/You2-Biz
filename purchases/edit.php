@@ -55,7 +55,7 @@ $suppliers = mysqli_query(
 
      FROM suppliers
 
-     WHERE user_id='$user_id'
+     WHERE user_id='$user_id'" . restaurant_catalog_scope_sql($conn, '', true) . "
 
      ORDER BY supplier_name"
 
@@ -73,7 +73,7 @@ $products = mysqli_query(
      FROM products p
      LEFT JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id
 
-     WHERE p.user_id='$user_id'
+     WHERE p.user_id='$user_id'" . restaurant_catalog_scope_sql($conn, 'p', true) . "
 
      ORDER BY product_name"
 

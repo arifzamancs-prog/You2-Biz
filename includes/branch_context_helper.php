@@ -160,6 +160,16 @@ function selected_branch_id($conn, $for_write = false)
     $selected = array_key_exists('selected_branch_id', $_SESSION)
         ? max(0, (int)$_SESSION['selected_branch_id'])
         : $default_branch;
+    if ($selected > 0 && ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') {
+        $stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active'" . warehouse_branch_filter_sql() . " LIMIT 1");
+        mysqli_stmt_bind_param($stmt, 'ii', $selected, $company_id);
+        mysqli_stmt_execute($stmt);
+        if (!mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))) {
+            $selected = 0;
+            $_SESSION['selected_branch_id'] = 0;
+        }
+        mysqli_stmt_close($stmt);
+    }
     if (!$for_write || $selected > 0) return $selected;
 
     $stmt = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND is_head_office=1 LIMIT 1');

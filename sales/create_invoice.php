@@ -13,6 +13,7 @@ require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/project_package_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $restaurant_catalog_enabled = restaurant_catalog_enabled($conn, $user_id);
@@ -56,7 +57,7 @@ $products = mysqli_query(
      FROM products p
      LEFT JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id={$user_id}
-     AND p.status='active'
+     AND p.status='active'" . restaurant_catalog_scope_sql($conn, 'p', true) . "
      ORDER BY p.product_name"
 );
 
@@ -94,6 +95,11 @@ if (is_agent_user()) {
 }
 mysqli_stmt_execute($recent_stmt);
 $recent_invoices = mysqli_stmt_get_result($recent_stmt);
+// Inventory & Sales and Fashion Retail do not need the Due column in Recent Invoices.
+$recent_show_due = !in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true);
+$recent_widths = $recent_show_due
+    ? ['16%', '11%', '16%', '14%', '14%', '10%', '8%', '11%']
+    : ['18%', '12%', '18%', '16%', '16%', '0', '9%', '11%'];
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -714,7 +720,7 @@ require_once '../includes/sidebar.php';
     <div class="card-body table-responsive p-0">
         <table class="table table-bordered table-striped mb-0">
             <thead>
-                <tr><th>Invoice No</th><th>Date</th><th>Customer</th><th>Total</th><th>Paid</th><th>Due</th><th>Status</th><th>Action</th></tr>
+                <tr><th style="width:<?= $recent_widths[0] ?>">Invoice No</th><th style="width:<?= $recent_widths[1] ?>">Date</th><th style="width:<?= $recent_widths[2] ?>">Customer</th><th style="width:<?= $recent_widths[3] ?>">Total</th><th style="width:<?= $recent_widths[4] ?>">Paid</th><?php if ($recent_show_due) { ?><th style="width:<?= $recent_widths[5] ?>">Due</th><?php } ?><th style="width:<?= $recent_widths[6] ?>">Status</th><th style="width:<?= $recent_widths[7] ?>">Action</th></tr>
             </thead>
             <tbody id="recent-invoices-body">
             <?php while ($recent = mysqli_fetch_assoc($recent_invoices)) {
@@ -728,7 +734,7 @@ require_once '../includes/sidebar.php';
                     <td><?= htmlspecialchars($recent['customer_name']); ?></td>
                     <td><?= number_format((float)$recent['total_amount'], 2); ?></td>
                     <td><?= number_format((float)$recent['paid_amount'], 2); ?></td>
-                    <td><?= number_format((float)$recent['due_amount'], 2); ?></td>
+                    <?php if ($recent_show_due) { ?><td><?= number_format((float)$recent['due_amount'], 2); ?></td><?php } ?>
                     <td><span class="badge badge-<?= $recent_badge; ?>"><?= $recent_status; ?></span></td>
                     <td class="text-nowrap">
                         <a href="view_invoice.php?id=<?= (int)$recent['id']; ?>" class="btn btn-info btn-sm">View</a>
@@ -740,7 +746,7 @@ require_once '../includes/sidebar.php';
                     </td>
                 </tr>
             <?php } ?>
-            <?php if (mysqli_num_rows($recent_invoices) === 0) { ?><tr id="recent-invoices-empty"><td colspan="8" class="text-center text-muted">No invoices created yet.</td></tr><?php } ?>
+            <?php if (mysqli_num_rows($recent_invoices) === 0) { ?><tr id="recent-invoices-empty"><td colspan="<?= $recent_show_due ? 8 : 7 ?>" class="text-center text-muted">No invoices created yet.</td></tr><?php } ?>
             </tbody>
         </table>
     </div>
@@ -982,7 +988,7 @@ if($(this).val()=="instant"){
         $("<td>").text(invoice.customer_name).appendTo(row);
         $("<td>").text(invoice.total_amount).appendTo(row);
         $("<td>").text(invoice.paid_amount).appendTo(row);
-        $("<td>").text(invoice.due_amount).appendTo(row);
+        if (' . ($recent_show_due ? 'true' : 'false') . ') $("<td>").text(invoice.due_amount).appendTo(row);
         $("<td>").append($("<span>").addClass("badge badge-" + invoice.badge).text(invoice.status)).appendTo(row);
         const actions = $("<td>").addClass("text-nowrap");
         $("<a>").attr("href", "view_invoice.php?id=" + invoice.id).addClass("btn btn-info btn-sm").text("View").appendTo(actions);

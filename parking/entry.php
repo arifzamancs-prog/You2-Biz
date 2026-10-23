@@ -15,6 +15,37 @@ if (!parking_company_enabled($conn, $company_id)) {
 }
 
 parking_ensure_company_defaults($conn, $company_id);
+
+function parking_entry_recent_entries($conn, $company_id)
+{
+    $entries = [];
+    $stmt = mysqli_prepare($conn, "SELECT t.ticket_no, t.vehicle_number, t.entry_at, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.entry_gate_id WHERE t.company_id=? ORDER BY t.entry_at DESC, t.id DESC LIMIT 10");
+    mysqli_stmt_bind_param($stmt, 'i', $company_id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    while ($row = mysqli_fetch_assoc($result)) {
+        $status = (string)($row['ticket_status'] ?? '');
+        $entries[] = [
+            'ticket_no' => (string)$row['ticket_no'],
+            'vehicle_name' => (string)$row['vehicle_name'],
+            'vehicle_number' => (string)($row['vehicle_number'] ?: '—'),
+            'gate_name' => (string)($row['gate_name'] ?: '—'),
+            'entry_time' => date('d M Y, h:i A', strtotime((string)$row['entry_at'])),
+            'status' => $status,
+            'status_label' => ucwords(str_replace('_', ' ', $status)),
+        ];
+    }
+    mysqli_stmt_close($stmt);
+
+    return $entries;
+}
+
+if (($_GET['ajax'] ?? '') === 'recent_entries') {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => true, 'entries' => parking_entry_recent_entries($conn, $company_id)]);
+    exit;
+}
+
 if (empty($_SESSION['parking_entry_csrf'])) {
     $_SESSION['parking_entry_csrf'] = bin2hex(random_bytes(32));
 }
@@ -223,6 +254,7 @@ $gates = mysqli_query($conn, "SELECT id, gate_name, gate_code FROM parking_gates
 $entry_wallets = $prepaid_entry_enabled ? mysqli_query($conn, "SELECT id, wallet_name FROM wallets WHERE user_id={$company_id} AND status='active' ORDER BY is_system DESC, wallet_name ASC") : null;
 $zones = $slot_management_enabled ? mysqli_query($conn, "SELECT id, zone_name, zone_code FROM parking_zones WHERE company_id={$company_id} AND status='active' ORDER BY zone_name ASC") : null;
 $slots = $slot_management_enabled ? mysqli_query($conn, "SELECT s.id, s.zone_id, s.slot_code, s.vehicle_type_id FROM parking_slots s INNER JOIN parking_zones z ON z.id=s.zone_id WHERE s.company_id={$company_id} AND s.status='available' AND z.status='active' ORDER BY s.slot_code ASC") : null;
+$recent_entries = parking_entry_recent_entries($conn, $company_id);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -233,7 +265,7 @@ require_once '../includes/sidebar.php';
 
 <div class="card card-outline card-success">
     <div class="card-header"><h3 class="card-title"><i class="fas fa-car mr-2"></i>New Parking Entry</h3></div>
-    <form method="post" autocomplete="off">
+    <form method="post" autocomplete="off" target="_blank">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_entry_csrf']) ?>">
         <div class="card-body row">
             <div class="form-group col-md-4"><label>Vehicle Type</label><select class="form-control" id="vehicle_type_id" name="vehicle_type_id" required><option value="">Select vehicle</option><?php while ($vehicle = mysqli_fetch_assoc($vehicles)) { ?><option value="<?= (int)$vehicle['id'] ?>"><?= htmlspecialchars($vehicle['vehicle_name']) ?></option><?php } ?></select></div>
@@ -243,14 +275,55 @@ require_once '../includes/sidebar.php';
             <?php if ($prepaid_entry_enabled) { ?><div class="col-12"><div class="callout callout-info"><strong>Prepaid Fixed Fee</strong> — select a fixed-fee rate plan and receive payment before issuing this ticket.</div></div><div class="form-group col-md-4"><label>Receive Wallet</label><select class="form-control" name="entry_wallet_id"><option value="">Select wallet</option><?php while($wallet=mysqli_fetch_assoc($entry_wallets)){ ?><option value="<?= (int)$wallet['id'] ?>"><?= htmlspecialchars($wallet['wallet_name']) ?></option><?php } ?></select></div><div class="form-group col-md-4"><label>Payment Method</label><select class="form-control" name="entry_payment_method"><option value="cash">Cash</option><option value="card">Card</option><option value="bkash">bKash</option><option value="nagad">Nagad</option><option value="bank">Bank</option><option value="wallet">Wallet</option><option value="other">Other</option></select></div><div class="form-group col-md-4"><label>Reference</label><input class="form-control" name="entry_payment_reference" maxlength="150" placeholder="Optional"></div><?php } ?>
             <?php if ($slot_management_enabled) { ?><div class="form-group col-md-3"><label>Zone</label><select class="form-control" id="zone_id" name="zone_id" required><option value="">Select zone</option><?php while ($zone = mysqli_fetch_assoc($zones)) { ?><option value="<?= (int)$zone['id'] ?>"><?= htmlspecialchars($zone['zone_name'] . ' (' . $zone['zone_code'] . ')') ?></option><?php } ?></select></div><div class="form-group col-md-3"><label>Available Slot</label><select class="form-control" id="slot_id" name="slot_id" required><option value="">Select slot</option><?php while ($slot = mysqli_fetch_assoc($slots)) { ?><option value="<?= (int)$slot['id'] ?>" data-zone="<?= (int)$slot['zone_id'] ?>" data-vehicle="<?= (int)($slot['vehicle_type_id'] ?? 0) ?>"><?= htmlspecialchars($slot['slot_code']) ?></option><?php } ?></select></div><?php } ?>
         </div>
-        <div class="card-footer text-right"><button class="btn btn-success btn-lg"><i class="fas fa-ticket-alt mr-1"></i>Create & Print Entry Ticket</button></div>
+        <div class="card-footer text-right"><button class="btn btn-success btn-lg"><i class="fas fa-ticket-alt mr-1"></i>Print Entry Ticket</button></div>
     </form>
+</div>
+
+<div class="card card-outline card-info">
+    <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-history mr-2"></i>Last 10 Entries</h3>
+        <div class="card-tools"><button type="button" class="btn btn-sm btn-outline-primary" id="refresh-recent-entries"><i class="fas fa-sync-alt mr-1"></i>Refresh</button></div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Entry Gate</th><th>Entry Time</th><th>Status</th></tr></thead>
+                <tbody id="recent-entry-rows">
+                    <?php if (!$recent_entries) { ?>
+                        <tr><td colspan="6" class="text-center text-muted py-4">No parking entry found.</td></tr>
+                    <?php } else { foreach ($recent_entries as $recent_entry) { ?>
+                        <tr>
+                            <td><?= htmlspecialchars($recent_entry['ticket_no']) ?></td>
+                            <td><?= htmlspecialchars($recent_entry['vehicle_name']) ?></td>
+                            <td><?= htmlspecialchars($recent_entry['vehicle_number']) ?></td>
+                            <td><?= htmlspecialchars($recent_entry['gate_name']) ?></td>
+                            <td><?= htmlspecialchars($recent_entry['entry_time']) ?></td>
+                            <td><span class="badge badge-<?= in_array($recent_entry['status'], ['paid', 'exited'], true) ? 'success' : 'info' ?>"><?= htmlspecialchars($recent_entry['status_label']) ?></span></td>
+                        </tr>
+                    <?php } } ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const vehicle = document.getElementById('vehicle_type_id');
     const rate = document.getElementById('rate_plan_id');
+    const gate = document.querySelector('select[name="gate_id"]');
+    const preferenceKey = 'parking_entry_preferences_<?= (int)$company_id ?>';
+    function saveEntryPreferences() {
+        try {
+            localStorage.setItem(preferenceKey, JSON.stringify({
+                vehicle: vehicle.value,
+                rate: rate.value,
+                gate: gate ? gate.value : ''
+            }));
+        } catch (error) {
+            // The entry form still works when browser storage is unavailable.
+        }
+    }
     function filterRates() {
         const selected = vehicle.value;
         Array.from(rate.options).forEach(function (option, index) {
@@ -261,7 +334,19 @@ document.addEventListener('DOMContentLoaded', function () {
         if (rate.selectedOptions[0] && rate.selectedOptions[0].disabled) rate.value = '';
     }
     vehicle.addEventListener('change', filterRates);
-    filterRates();
+    try {
+        const saved = JSON.parse(localStorage.getItem(preferenceKey) || '{}');
+        if (saved.vehicle && vehicle.querySelector('option[value="' + CSS.escape(saved.vehicle) + '"]')) vehicle.value = saved.vehicle;
+        filterRates();
+        const savedRate = rate.querySelector('option[value="' + CSS.escape(saved.rate || '') + '"]');
+        if (savedRate && !savedRate.disabled) rate.value = saved.rate;
+        if (gate && saved.gate && gate.querySelector('option[value="' + CSS.escape(saved.gate) + '"]')) gate.value = saved.gate;
+    } catch (error) {
+        filterRates();
+    }
+    vehicle.addEventListener('change', saveEntryPreferences);
+    rate.addEventListener('change', saveEntryPreferences);
+    if (gate) gate.addEventListener('change', saveEntryPreferences);
     const zone = document.getElementById('zone_id');
     const slot = document.getElementById('slot_id');
     function filterSlots() {
@@ -278,6 +363,58 @@ document.addEventListener('DOMContentLoaded', function () {
     if (zone) zone.addEventListener('change', filterSlots);
     vehicle.addEventListener('change', filterSlots);
     filterSlots();
+
+    const recentRows = document.getElementById('recent-entry-rows');
+    const refreshRecentEntries = document.getElementById('refresh-recent-entries');
+    function statusClass(status) {
+        return ['paid', 'exited'].includes(status) ? 'badge-success' : 'badge-info';
+    }
+    function addCell(row, value) {
+        const cell = document.createElement('td');
+        cell.textContent = value || '—';
+        row.appendChild(cell);
+        return cell;
+    }
+    function renderRecentEntries(entries) {
+        recentRows.replaceChildren();
+        if (!entries.length) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 6;
+            cell.className = 'text-center text-muted py-4';
+            cell.textContent = 'No parking entry found.';
+            row.appendChild(cell);
+            recentRows.appendChild(row);
+            return;
+        }
+        entries.forEach(function (entry) {
+            const row = document.createElement('tr');
+            addCell(row, entry.ticket_no);
+            addCell(row, entry.vehicle_name);
+            addCell(row, entry.vehicle_number);
+            addCell(row, entry.gate_name);
+            addCell(row, entry.entry_time);
+            const statusCell = document.createElement('td');
+            const badge = document.createElement('span');
+            badge.className = 'badge ' + statusClass(entry.status);
+            badge.textContent = entry.status_label;
+            statusCell.appendChild(badge);
+            row.appendChild(statusCell);
+            recentRows.appendChild(row);
+        });
+    }
+    async function loadRecentEntries() {
+        try {
+            const response = await fetch('entry.php?ajax=recent_entries', {credentials: 'same-origin', cache: 'no-store'});
+            const data = await response.json();
+            if (response.ok && data.ok) renderRecentEntries(data.entries || []);
+        } catch (error) {
+            // Keep the server-rendered list visible if a refresh fails.
+        }
+    }
+    if (refreshRecentEntries) refreshRecentEntries.addEventListener('click', loadRecentEntries);
+    window.addEventListener('focus', loadRecentEntries);
+    window.setInterval(loadRecentEntries, 15000);
 });
 </script>
 

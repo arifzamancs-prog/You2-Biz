@@ -406,7 +406,9 @@ function block_manager_restricted_actions()
                 'printing_option' => ['user_management/printing_option.php'],
                 'profit_cash_out' => ['profit_cash_out/'],
                 'sidebar_settings' => ['user_management/sidebar_settings.php'],
-                'tools' => ['tools/'],
+                // Staff granted Tools may export a backup only. Importing or
+                // deleting data remains an administrator-only operation.
+                'tools' => ['tools/export.php'],
             ];
 
             if(!in_array($path, $always_allowed_paths, true)){

@@ -451,7 +451,8 @@ if(
         $default_sidebar_item['parent'] = '';
         $default_sidebar_item['section'] = 'OPERATIONS';
         $default_sidebar_item['sort'] = 40 + $stock_operations_order[$default_sidebar_item['id']];
-        $default_sidebar_item['visible'] = 1;
+        $default_sidebar_item['visible'] = ($sidebar_settings_company_type === 'Fashion house'
+            && $default_sidebar_item['id'] === 'customer_manage') ? 0 : 1;
         $sidebar_layout_items[] = $default_sidebar_item;
     }
 }
@@ -571,7 +572,7 @@ if(
                 ?>
 
                 <?php if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Car Parking' && (!is_manager_user() || manager_has_permission('parking_dashboard') || manager_has_permission('parking_entry') || manager_has_permission('parking_exit') || manager_has_permission('parking_reports') || manager_has_permission('parking_settings'))){ ?>
-                    <?php sidebar_item(app_path('parking/setup.php'), 'Parking Management', 'fas fa-parking'); ?>
+                    <?php sidebar_item(app_path('parking/setup.php'), 'Parking Setup', 'fas fa-parking'); ?>
                 <?php } ?>
 
                 <?php
@@ -630,6 +631,9 @@ if(
                         ]);
                     }
                     if(!$sidebar_is_car_parking && !products_module_enabled() && manager_has_permission('projects')){ sidebar_tree($project_package_labels['module'], 'fas fa-project-diagram', [['href'=>app_path('project_package/projects.php'),'label'=>$project_package_labels['project']],['href'=>app_path('project_package/packages.php'),'label'=>$project_package_labels['package_list']]]); }
+                    // Fashion Retail hides Customer Manage by default for the
+                    // admin layout, but a staff member explicitly granted this
+                    // permission must still receive the menu.
                     if(!$sidebar_is_car_parking && manager_has_permission('customers')){
                         $sidebar_customer_items = [
                             ['href'=>app_path('customers/index.php'),'label'=>'Create Customer'],
@@ -655,8 +659,8 @@ if(
                     }
                     if(products_module_enabled()){
                         if(manager_has_permission('products')) sidebar_tree('Products', 'fas fa-boxes', $sidebar_product_items);
-                        if(manager_has_permission('suppliers') && stock_can_manage_warehouse($conn)) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]]);
-                        if(manager_has_permission('warehouse') && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                        if(manager_has_permission('suppliers') && (restaurant_module_active() || stock_can_manage_warehouse($conn))) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]]);
+                        if(!restaurant_module_active() && manager_has_permission('warehouse') && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
                         if(manager_has_permission('stock_live_report') && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                         if(manager_has_permission('stock_sales')) {
                             $stock_sales_items = [
@@ -851,7 +855,7 @@ if(
                     ]
                 );
 
-                if(company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                if(!restaurant_module_active() && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
                 if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                 }
 
@@ -939,8 +943,10 @@ if(
 
                 <?php
                 if($sidebar_is_car_parking){
-                    sidebar_item(app_path('parking/reports.php'), 'Reports', 'fas fa-chart-bar');
-                    sidebar_item(app_path('parking/live.php'), 'Live Vehicles', 'fas fa-car');
+                    sidebar_tree('Reports', 'fas fa-chart-bar', [
+                        ['href' => app_path('parking/reports.php'), 'label' => 'Parking Reports', 'icon' => 'fas fa-chart-bar'],
+                        ['href' => app_path('parking/live.php'), 'label' => 'Live Parking', 'icon' => 'fas fa-parking'],
+                    ]);
                 }else{
                 $sidebar_report_items = [
                     ['href' => app_path('reports/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'],
@@ -966,11 +972,6 @@ if(
                     if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Stock Product') $sidebar_admin_items[] = ['href' => app_path('user_management/product_management.php'), 'label' => 'Product Management', 'icon' => 'fas fa-boxes'];
                     if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Wallet Cash Out', 'icon' => 'fas fa-coins'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
-                    if(products_module_enabled()
-                        && project_package_company_type($conn, (int)$_SESSION['user_id']) !== 'Fashion house'
-                        && (is_admin_user() || (manager_has_permission('admin') && manager_has_permission('stock_sales')))) {
-                        $sidebar_admin_items[] = ['href' => app_path('warehouse/sales_report.php'), 'label' => 'Sales Report', 'icon' => 'fas fa-chart-line'];
-                    }
                     if($sidebar_admin_items) sidebar_tree('Admin', 'fas fa-user-cog', $sidebar_admin_items);
                     if(is_admin_user() || manager_has_permission('tools')) {
                         $sidebar_tools_items = is_super_admin_user()
@@ -978,11 +979,13 @@ if(
                                 ['href' => app_path('tools/database_export.php'), 'label' => 'Full DB Export'],
                                 ['href' => app_path('tools/database_import.php'), 'label' => 'Full DB Import', 'class' => 'text-danger'],
                             ]
-                            : [
+                            : (is_admin_user() ? [
                                 ['href' => app_path('tools/export.php'), 'label' => 'Export Data'],
                                 ['href' => app_path('tools/import.php'), 'label' => 'Import Data'],
                                 ['href' => app_path('tools/delete_data.php'), 'label' => 'Delete All Data', 'class' => 'text-danger'],
-                            ];
+                            ] : [
+                                ['href' => app_path('tools/export.php'), 'label' => 'Export Data'],
+                            ]);
                         sidebar_tree('Tools', 'fas fa-tools', $sidebar_tools_items);
                     }
                     ?>
@@ -1029,6 +1032,17 @@ if(
 <?php
 $sidebar_rendered_html = ob_get_clean();
 $sidebar_available_items = sidebar_rendered_layout($sidebar_rendered_html, $conn, (int)($_SESSION['user_id'] ?? 0), $project_package_labels);
+// Restaurant & Cafe keeps Customer Manage hidden for the company by default.
+// A staff member who is explicitly granted that module must still receive it,
+// even though the company's saved admin layout marks the menu hidden.
+if (is_manager_user() && manager_has_permission('customers')) {
+    foreach ($sidebar_available_items as &$sidebar_available_item) {
+        if (($sidebar_available_item['id'] ?? '') === 'customer_manage') {
+            $sidebar_available_item['visible'] = 1;
+        }
+    }
+    unset($sidebar_available_item);
+}
 if (sidebar_saved_layout_exists($conn, (int)($_SESSION['user_id'] ?? 0))) {
     $sidebar_layout_items = $sidebar_available_items;
 }
@@ -1099,6 +1113,20 @@ document.addEventListener('DOMContentLoaded', function () {
             itemMap.delete(entry.id);
         }
     });
+
+    // Customer Manage is opt-in for Restaurant & Cafe.  The layout editor
+    // already records it as hidden, but match it by its rendered label as a
+    // fallback for legacy sidebars whose DOM identity was not captured above.
+    // A staff member receives no hidden customer layout entry; their explicit
+    // Customer Manage permission therefore continues to show the menu.
+    const customerManageLayout = sidebarLayout.find(function (entry) {
+        return entry.id === 'customer_manage';
+    });
+    if (customerManageLayout && Number(customerManageLayout.visible) === 0) {
+        Array.from(navigation.querySelectorAll(':scope > li.nav-item')).forEach(function (item) {
+            if (itemIdentity(item).label === 'Customer Manage') item.remove();
+        });
+    }
 
     sidebarLayout.forEach(function (entry) {
         const item = itemMap.get(entry.id);
@@ -1184,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', function () {
             : (in_array(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)), ['Stock Product', 'Fashion house'], true)
                 ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Stock Live Report', 'Staff Manage', 'Customer Manage'])
                 : ($sidebar_is_car_parking
-                    ? json_encode(['Action', 'Wallets', 'Parking Management', 'Staff Manage'])
+                    ? json_encode(['Action', 'Wallets', 'Parking Setup', 'Staff Manage'])
                     : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))) ?>;
     let previousItem = operationsHeader;
 

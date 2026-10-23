@@ -1,12 +1,18 @@
 <?php
 
-function ensure_restaurant_supplier_code_column($conn)
+function ensure_supplier_code_column($conn)
 {
     $column = mysqli_query($conn, "SHOW COLUMNS FROM suppliers LIKE 'supplier_code'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE suppliers ADD COLUMN supplier_code VARCHAR(100) NULL AFTER user_id");
         mysqli_query($conn, "ALTER TABLE suppliers ADD UNIQUE KEY uniq_supplier_code_per_user (user_id, supplier_code)");
     }
+}
+
+// Backwards-compatible name for existing Restaurant & Cafe callers.
+function ensure_restaurant_supplier_code_column($conn)
+{
+    ensure_supplier_code_column($conn);
 }
 
 function supplier_has_transactions($conn, $supplier_id, $user_id)

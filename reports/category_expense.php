@@ -3,10 +3,14 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/report_owner_scope_helper.php';
 
-$user_id = $_SESSION['user_id'];
-ensure_branch_accounting_columns($conn, $user_id);
+$user_id = (int)($_SESSION['user_id'] ?? 0);
+if ($user_id > 0) {
+    ensure_branch_accounting_columns($conn, $user_id);
+}
 $branch_scope = branch_scope_sql($conn, 'e');
+$owner_scope = report_owner_scope_sql('e', $user_id);
 
 $month = isset($_GET['month']) ? (int)$_GET['month'] : date('m');
 $year  = isset($_GET['year']) ? (int)$_GET['year'] : date('Y');
@@ -17,7 +21,8 @@ $sql = "SELECT
         FROM expenses e
         INNER JOIN categories c
             ON c.id = e.category_id
-        WHERE e.user_id=?
+        WHERE 1=1
+        {$owner_scope}
         {$branch_scope}
         AND e.approval_status='approved'
         AND MONTH(e.txn_date)=?
@@ -29,8 +34,7 @@ $stmt = mysqli_prepare($conn,$sql);
 
 mysqli_stmt_bind_param(
     $stmt,
-    "iii",
-    $user_id,
+    "ii",
     $month,
     $year
 );
@@ -245,6 +249,10 @@ require_once '../includes/sidebar.php';
 
             </tr>
 
+            <?php } ?>
+
+            <?php if(empty($chart_labels)){ ?>
+            <tr><td colspan="2" class="text-center text-muted">No approved expenses found for this month.</td></tr>
             <?php } ?>
 
             </tbody>

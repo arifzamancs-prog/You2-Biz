@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/company_settings_helper.php';
+require_once __DIR__ . '/restaurant_catalog_branch_helper.php';
 
 function restaurant_catalog_enabled($conn, $user_id)
 {
@@ -57,7 +58,7 @@ function product_sku_exists($conn, $user_id, $sku, $exclude_id = 0)
 {
     $sku = trim((string)$sku);
     if ($sku === '') return false;
-    $stmt = mysqli_prepare($conn, 'SELECT id FROM products WHERE user_id=? AND UPPER(TRIM(sku))=UPPER(?) AND id<>? LIMIT 1');
+    $stmt = mysqli_prepare($conn, 'SELECT id FROM products WHERE user_id=? AND UPPER(TRIM(sku))=UPPER(?) AND id<>?' . restaurant_catalog_scope_sql($conn, '', true) . ' LIMIT 1');
     mysqli_stmt_bind_param($stmt, 'isi', $user_id, $sku, $exclude_id);
     mysqli_stmt_execute($stmt);
     $exists = (bool)mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
@@ -220,7 +221,7 @@ function product_category_name_exists($conn, $user_id, $category_name, $exclude_
     $category_name = trim((string)$category_name);
     $exclude_id = (int)$exclude_id;
     if($category_name === ''){ return false; }
-    $sql = 'SELECT id FROM product_categories WHERE user_id=? AND LOWER(TRIM(category_name))=LOWER(TRIM(?))';
+    $sql = 'SELECT id FROM product_categories WHERE user_id=? AND LOWER(TRIM(category_name))=LOWER(TRIM(?))' . restaurant_catalog_scope_sql($conn, '', true);
     if($exclude_id > 0){ $sql .= ' AND id<>?'; }
     $sql .= ' LIMIT 1';
     $stmt = mysqli_prepare($conn, $sql);

@@ -12,6 +12,11 @@ $hide_purchase_product_add = in_array(
     ['Stock Product', 'Fashion house'],
     true
 );
+$hide_new_product_option = in_array(
+    normalize_company_type($_SESSION['company_type'] ?? ''),
+    ['Stock Product', 'Fashion house', 'Restaurant & Cafe'],
+    true
+);
 $cafe_product_filter = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? " AND c.category_type='stock_product'" : '';
 if(!$housing_purchase) ensure_fifo_only_product_categories($conn, $user_id);
 
@@ -19,7 +24,7 @@ $suppliers = mysqli_query(
     $conn,
     "SELECT id, supplier_name, phone
      FROM suppliers
-     WHERE user_id='$user_id'
+     WHERE user_id='$user_id'" . restaurant_catalog_scope_sql($conn, '', true) . "
      AND status='active'
      ORDER BY supplier_name"
 );
@@ -29,7 +34,7 @@ $products = mysqli_query(
     "SELECT p.id, p.product_name, p.sku, p.sub_category, c.category_name
      FROM products p
      INNER JOIN product_categories c ON c.id=p.category_id
-     WHERE p.user_id='$user_id'
+     WHERE p.user_id='$user_id'" . restaurant_catalog_scope_sql($conn, 'p', true) . "
      AND p.status='active'
      {$cafe_product_filter}
      ORDER BY product_name"
@@ -62,7 +67,7 @@ $purchase_history = mysqli_query(
      LEFT JOIN suppliers s ON s.id=pu.supplier_id
      LEFT JOIN purchase_items pi ON pi.purchase_id=pu.id
      LEFT JOIN products p ON p.id=pi.product_id
-     WHERE pu.user_id='$user_id'
+     WHERE pu.user_id='$user_id'" . restaurant_catalog_scope_sql($conn, 'pu') . "
      GROUP BY pu.id, pu.purchase_no, pu.purchase_date, pu.total_amount, pu.paid_amount, pu.due_amount, pu.payment_status, s.supplier_name
      ORDER BY pu.purchase_date DESC, pu.id DESC
      LIMIT 100"
@@ -180,10 +185,10 @@ require_once '../includes/sidebar.php';
     <select name="product_id[]" class="form-control product">
         <option value="">Select Product</option>
         <?= $product_options_html; ?>
-        <?php if(!$hide_purchase_product_add){ ?><option value="__new__">+ Add New Product</option><?php } ?>
+        <?php if(!$hide_new_product_option){ ?><option value="__new__">+ Add New Product</option><?php } ?>
     </select>
 
-    <?php if(!$hide_purchase_product_add){ ?><div class="new-product-box mt-2" style="display:none;">
+    <?php if(!$hide_new_product_option){ ?><div class="new-product-box mt-2" style="display:none;">
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
     </div><?php } ?>
 </td>

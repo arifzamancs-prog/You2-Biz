@@ -29,7 +29,7 @@ $sql = "SELECT
         LEFT JOIN wallets w
             ON w.id = sp.wallet_id
             AND w.user_id = sp.user_id
-        WHERE sp.user_id=?
+        WHERE sp.user_id=?" . restaurant_catalog_scope_sql($conn, 'sp') . "
         ORDER BY sp.payment_date DESC, sp.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);

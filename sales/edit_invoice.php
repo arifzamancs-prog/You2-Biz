@@ -169,7 +169,7 @@ $products = mysqli_query(
      FROM products p
      LEFT JOIN product_categories c ON c.id=p.category_id
      WHERE p.user_id={$user_id}
-     AND p.status='active'
+     AND p.status='active'" . restaurant_catalog_scope_sql($conn, 'p', true) . "
      ORDER BY product_name"
 );
 

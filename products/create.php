@@ -8,6 +8,9 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$catalog_branch_id = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : 0;
+$catalog_branch_column = $catalog_branch_id > 0 ? 'branch_id,' : '';
+$catalog_branch_value = $catalog_branch_id > 0 ? $catalog_branch_id . ',' : '';
 $variants_enabled = product_variants_enabled($conn, $user_id);
 $product_photos_enabled = product_photos_enabled($conn, $user_id);
 ensure_product_management_columns($conn);
@@ -21,6 +24,8 @@ $show_expired_on = is_product_expiry_enabled($conn);
 $message = '';
 $message_type = '';
 $form_data = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : [];
+// The Add Product form saves through AJAX so several products can be added without leaving the page.
+$is_ajax_save = $_SERVER['REQUEST_METHOD'] === 'POST' && strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
 
 /*
 |----------------------------------
@@ -30,7 +35,7 @@ $form_data = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : [];
 
 $sql = "SELECT *
         FROM product_categories
-        WHERE user_id=?
+        WHERE user_id=?" . restaurant_catalog_scope_sql($conn, '', true) . "
         AND status='active'
         ORDER BY category_name ASC";
 
@@ -152,6 +157,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     $sql = "INSERT INTO products
             (
+                {$catalog_branch_column}
                 user_id,
                 category_id,
                 sub_category,
@@ -169,7 +175,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             )
             VALUES
             (
-                ?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                {$catalog_branch_value}?,?,?,?,?,?,?,?,?,?,?,?,?,?
             )";
 
     $stmt = mysqli_prepare(
@@ -205,12 +211,12 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             foreach($variant_opening as $variant => $variant_qty){
                 mysqli_stmt_bind_param($variant_stmt, 'iis', $user_id, $product_id, $variant);
                 $stock_saved = mysqli_stmt_execute($variant_stmt) && $stock_saved;
-                $stock_saved = fifo_inventory_create_batch($conn, $user_id, $product_id, $variant_qty, $purchase_price, 'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d'), null, $variant) && $stock_saved;
+                $stock_saved = fifo_inventory_create_batch($conn, $user_id, $product_id, $variant_qty, $purchase_price, 'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d'), $catalog_branch_id > 0 ? $catalog_branch_id : null, $variant) && $stock_saved;
             }
         }else{
             $stock_saved = fifo_inventory_create_batch(
                 $conn, $user_id, $product_id, $opening_stock, $purchase_price,
-                'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d')
+                'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d'), $catalog_branch_id > 0 ? $catalog_branch_id : null
             );
         }
 
@@ -221,6 +227,16 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             $message_type = "danger";
         }else{
             mysqli_commit($conn);
+
+            if($is_ajax_save){
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode([
+                    'ok' => true,
+                    'message' => 'Product "' . $product_name . '" saved successfully.',
+                    'product' => ['id' => $product_id, 'name' => $product_name, 'sku' => $sku, 'stock' => $opening_stock],
+                ]);
+                exit;
+            }
 
             header(
                 "Location: index.php"
@@ -243,6 +259,12 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     }
 
     }
+}
+
+if($is_ajax_save){
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => false, 'message' => $message !== '' ? $message : 'Product could not be saved. Please try again.']);
+    exit;
 }
 
 // Restaurant & Cafe has a concise product form: menu items do not need
@@ -273,6 +295,8 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
+
+        <div id="product-save-message" aria-live="polite"></div>
 
         <?php if($message){ ?>
 
@@ -506,6 +530,7 @@ require_once '../includes/sidebar.php';
 
             <button
                 type="submit"
+                id="save-product-btn"
                 class="btn btn-primary">
 
                 <i class="fas fa-save"></i>
@@ -523,6 +548,11 @@ require_once '../includes/sidebar.php';
             </a>
 
         </form>
+
+        <div id="recent-products-wrap" class="mt-4 d-none">
+            <h6 class="font-weight-bold mb-2"><i class="fas fa-check-circle text-success mr-1"></i>Added on this page</h6>
+            <ul class="list-group" id="recent-products-list"></ul>
+        </div>
 
     </div>
 
@@ -552,6 +582,47 @@ function syncVariants(){
 category.addEventListener('change',syncVariants); syncVariants();
 })();
 (function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input||!status)return;input.addEventListener('change',function(){status.textContent='';});})();
+// Save products with AJAX and keep the form open for the next product.
+(function(){
+  const form=document.getElementById('product-form'), button=document.getElementById('save-product-btn'), box=document.getElementById('product-save-message');
+  const recentWrap=document.getElementById('recent-products-wrap'), recentList=document.getElementById('recent-products-list');
+  if(!form||!button||!window.fetch||!window.FormData)return;
+  const buttonHtml=button.innerHTML;
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const show=(ok,text)=>{box.innerHTML='<div class="alert alert-'+(ok?'success':'danger')+' alert-dismissible fade show">'+esc(text)+'<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>';};
+  const resetForNext=()=>{
+    ['product_name','sku'].forEach(n=>{const f=form.querySelector('[name="'+n+'"]');if(f)f.value='';});
+    ['purchase_price','sale_price','current_stock'].forEach(n=>{const f=form.querySelector('[name="'+n+'"]');if(f)f.value='0';});
+    const min=form.querySelector('[name="minimum_stock"]'); if(min)min.value='5';
+    const exp=form.querySelector('[name="expired_on"]'); if(exp)exp.value='';
+    const status=form.querySelector('[name="status"]'); if(status)status.value='active';
+    const photo=document.getElementById('product_photo'); if(photo)photo.value='';
+    form.querySelectorAll('#variant-opening-fields input').forEach(f=>{f.value='0';f.dispatchEvent(new Event('input'));});
+    const name=form.querySelector('[name="product_name"]'); if(name)name.focus();
+  };
+  form.addEventListener('submit',async function(e){
+    e.preventDefault();
+    if(button.disabled)return;
+    document.querySelectorAll('.card-body > .alert').forEach(a=>a.remove());
+    button.disabled=true; button.innerHTML='<span class="spinner-border spinner-border-sm mr-1" role="status"></span>Saving…';
+    try{
+      const response=await fetch(window.location.href,{method:'POST',body:new FormData(form),headers:{'X-Requested-With':'XMLHttpRequest'},credentials:'same-origin'});
+      const result=await response.json();
+      show(!!result.ok,result.message||'Product could not be saved. Please try again.');
+      if(result.ok){
+        const p=result.product||{};
+        recentWrap.classList.remove('d-none');
+        recentList.insertAdjacentHTML('afterbegin','<li class="list-group-item d-flex justify-content-between align-items-center py-2"><span>'+esc(p.name)+(p.sku?' <small class="text-muted">('+esc(p.sku)+')</small>':'')+'</span><span class="badge badge-light">Stock: '+esc(p.stock)+'</span></li>');
+        resetForNext();
+      }
+    }catch(err){
+      show(false,'Product could not be saved. Please check your connection and try again.');
+    }finally{
+      button.disabled=false; button.innerHTML=buttonHtml;
+      box.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+  });
+})();
 </script>
 
 <?php

@@ -2,6 +2,14 @@
 
 require_once __DIR__ . '/multi_branch_helper.php';
 
+// Exclude the reserved stock location from restaurant branch selectors and writes.
+function warehouse_branch_filter_sql()
+{
+    return ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'
+        ? " AND LOWER(TRIM(branch_name))<>'main warehouse'"
+        : '';
+}
+
 function ensure_branches_table($conn)
 {
     static $checked = false;

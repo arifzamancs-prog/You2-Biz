@@ -84,6 +84,9 @@ function sidebar_default_layout_items($project_package_labels = [], $company_typ
     $project = $project_package_labels['project'] ?? 'Project';
     $package_list = $project_package_labels['package_list'] ?? 'Package';
     $lead_management_visible = !in_array($company_type, ['Stock Product', 'Fashion house'], true);
+    // Fashion retailers and restaurants normally sell through invoices; keep customer
+    // management opt-in so an admin can enable it only when it is needed.
+    $customer_manage_visible = !in_array($company_type, ['Fashion house', 'Restaurant & Cafe'], true);
 
     return [
         sidebar_setting_item('dashboard', 'Dashboard', app_path('dashboard.php'), '', 10),
@@ -106,7 +109,7 @@ function sidebar_default_layout_items($project_package_labels = [], $company_typ
         sidebar_setting_item('parking_exit', 'Vehicle Exit', app_path('parking/exit.php'), 'parking_action', 42, 'OPERATIONS'),
         sidebar_setting_item('parking_lost_ticket', 'Lost Ticket', app_path('parking/lost_ticket.php'), 'parking_action', 43, 'OPERATIONS'),
         sidebar_setting_item('parking_shift', 'Shift', app_path('parking/shift.php'), 'parking_action', 44, 'OPERATIONS'),
-        sidebar_setting_item('parking_management', 'Parking Management', app_path('parking/setup.php'), '', 41, 'OPERATIONS'),
+        sidebar_setting_item('parking_management', 'Parking Setup', app_path('parking/setup.php'), '', 41, 'OPERATIONS'),
         sidebar_setting_item('sales', 'Sales / Invoice', '', '', 50),
         sidebar_setting_item('create_invoice', 'Create Invoice', app_path('create_invoice/index.php'), 'sales', 51),
         sidebar_setting_item('invoice_list', 'Invoice List', app_path('create_invoice/invoice_list.php'), 'sales', 52),
@@ -125,7 +128,7 @@ function sidebar_default_layout_items($project_package_labels = [], $company_typ
         sidebar_setting_item('project_package', $module, '', '', 80),
         sidebar_setting_item('project_package_projects', $project, app_path('project_package/projects.php'), 'project_package', 81),
         sidebar_setting_item('project_package_packages', $package_list, app_path('project_package/packages.php'), 'project_package', 82),
-        sidebar_setting_item('customer_manage', 'Customer Manage', '', '', 90),
+        sidebar_setting_item('customer_manage', 'Customer Manage', '', '', 90, '', $customer_manage_visible),
         sidebar_setting_item('create_customer', 'Create Customer', app_path('customers/index.php'), 'customer_manage', 91),
         sidebar_setting_item('customer_form_settings', 'Cus. form settings', app_path('customers/form_settings.php'), 'customer_manage', 92),
         sidebar_setting_item('customer_login_settings', 'Cus. Login Settings', app_path('user_management/customer_login_settings.php'), 'customer_manage', 93),
@@ -252,6 +255,14 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
                 $default_map[$lead_item_id]['visible'] = 1;
             }
         }
+    }
+    $customer_manage_hidden_marker = $company_type === 'Restaurant & Cafe'
+        ? '__restaurant_customer_manage_default_hidden_v1'
+        : '__fashion_customer_manage_default_hidden_v1';
+    $customer_manage_default_hidden_update = in_array($company_type, ['Fashion house', 'Restaurant & Cafe'], true)
+        && !in_array($customer_manage_hidden_marker, array_column($saved, 'id'), true);
+    if($customer_manage_default_hidden_update && isset($default_map['customer_manage'])){
+        $default_map['customer_manage']['visible'] = 0;
     }
 
     // These are structural children of the Admin menu. Older saved sidebar
@@ -386,7 +397,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         }
         unset($layout_item);
     }
-    if (($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order || $lead_management_default_hidden_update || $lead_management_submenus_visible_update) && $saved) {
+    if (($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order || $lead_management_default_hidden_update || $lead_management_submenus_visible_update || $customer_manage_default_hidden_update) && $saved) {
         sidebar_save_layout($conn, $user_id, $items);
     }
     usort($items, static function($a, $b){
@@ -542,12 +553,14 @@ function sidebar_save_layout($conn, $user_id, $items)
     }
     if ($company_type === 'Fashion house') {
         $clean[] = ['id' => '__fashion_house_operations_order_v3'];
+        $clean[] = ['id' => '__fashion_customer_manage_default_hidden_v1'];
     }
     if ($company_type === 'Car Parking') {
         $clean[] = ['id' => '__parking_operations_v1'];
     }
     if ($company_type === 'Restaurant & Cafe') {
         $clean[] = ['id' => '__restaurant_operations_v1'];
+        $clean[] = ['id' => '__restaurant_customer_manage_default_hidden_v1'];
     }
     $json = json_encode($clean);
     $stmt = mysqli_prepare(

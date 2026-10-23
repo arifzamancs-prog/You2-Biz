@@ -82,11 +82,13 @@ function purchase_find_or_create_supplier($conn, $user_id)
             throw new Exception($duplicate_message);
         }
 
+        $supplier_branch_column = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? 'branch_id,' : '';
+        $supplier_branch_value = $supplier_branch_column !== '' ? selected_branch_id($conn, true) . ',' : '';
         $stmt = mysqli_prepare(
             $conn,
             "INSERT INTO suppliers
              (
-                user_id,
+                {$supplier_branch_column}user_id,
                 supplier_name,
                 phone,
                 email,
@@ -95,7 +97,7 @@ function purchase_find_or_create_supplier($conn, $user_id)
              )
              VALUES
              (
-                ?,?,?,?,?, 'active'
+                {$supplier_branch_value}?,?,?,?,?, 'active'
              )"
         );
 
@@ -403,7 +405,7 @@ try{
         : stock_purchase_location_id($conn, (int)$user_id);
     // Purchasing stock may go to Main Warehouse, but its vendor payment is
     // always paid from the Head Office wallet.
-    $wallet_branch_id = ($_SESSION['company_type'] ?? '') === 'Housing'
+    $wallet_branch_id = in_array($_SESSION['company_type'] ?? '', ['Housing', 'Restaurant & Cafe'], true)
         ? $branch_id
         : stock_head_office_id($conn, (int)$user_id);
     if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $wallet_branch_id);

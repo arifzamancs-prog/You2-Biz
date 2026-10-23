@@ -54,19 +54,19 @@ $(function () {
 
     });
 
-    if($("#example1").length){
+    $("#example1, #example2").each(function(){
+        if ($.fn.DataTable.isDataTable(this)) return;
 
-        var example1Responsive = !$("#example1").is("[data-desktop-table]");
+        var tableResponsive = !$(this).is("[data-desktop-table]");
 
-        $("#example1").DataTable({
+        $(this).DataTable({
 
-            "responsive": example1Responsive,
+            "responsive": tableResponsive,
             "autoWidth": false,
             "order": []
 
         });
-
-    }
+    });
 
 });
 

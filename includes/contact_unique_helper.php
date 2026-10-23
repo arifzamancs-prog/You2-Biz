@@ -221,6 +221,7 @@ function contact_duplicate_message_in_table($conn, $table, $label, $field, $valu
 
     if($use_user_scope){
         $sql .= " AND user_id=?";
+        if ($table === 'suppliers' && function_exists('restaurant_catalog_scope_sql')) $sql .= restaurant_catalog_scope_sql($conn, '', true);
     }
 
     if((int)$exclude_id > 0){

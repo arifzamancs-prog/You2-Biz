@@ -12,8 +12,49 @@ $company_profile = printing_company_profile_data($conn);
 
 $from_date = trim($_GET['from_date'] ?? '');
 $to_date = trim($_GET['to_date'] ?? '');
+$txn_search = substr(trim((string)($_GET['txn_no'] ?? '')), 0, 100);
 
-$sql = "SELECT
+// Shared filters for the list, the count and the total.
+$where_sql = " WHERE t.user_id=? {$branch_scope}";
+$bind_types = "i";
+$bind_values = [$user_id];
+if($from_date !== '' && $to_date !== ''){
+    $where_sql .= " AND t.txn_date BETWEEN ? AND ?";
+    $bind_types .= "ss";
+    array_push($bind_values, $from_date, $to_date);
+}elseif($from_date !== ''){
+    $where_sql .= " AND t.txn_date >= ?";
+    $bind_types .= "s";
+    $bind_values[] = $from_date;
+}elseif($to_date !== ''){
+    $where_sql .= " AND t.txn_date <= ?";
+    $bind_types .= "s";
+    $bind_values[] = $to_date;
+}
+if($txn_search !== ''){
+    $where_sql .= " AND t.txn_no LIKE ?";
+    $bind_types .= "s";
+    $bind_values[] = '%' . addcslashes($txn_search, '%_\\') . '%';
+}
+
+$run_query = function($sql) use ($conn, $bind_types, $bind_values){
+    $stmt = mysqli_prepare($conn, $sql);
+    mysqli_stmt_bind_param($stmt, $bind_types, ...$bind_values);
+    mysqli_stmt_execute($stmt);
+    return mysqli_stmt_get_result($stmt);
+};
+
+// Load 100 transactions at a time; Previous/Next 100 moves between batches.
+$txn_batch_size = 100;
+$txn_page = max(1, (int)($_GET['page'] ?? 1));
+$summary = mysqli_fetch_assoc($run_query("SELECT COUNT(*) AS total_rows, COALESCE(SUM(t.amount),0) AS total_amount FROM transactions t{$where_sql}"));
+$txn_total = (int)($summary['total_rows'] ?? 0);
+$total_amount = (float)($summary['total_amount'] ?? 0);
+$txn_pages = max(1, (int)ceil($txn_total / $txn_batch_size));
+$txn_page = min($txn_page, $txn_pages);
+$txn_offset = ($txn_page - 1) * $txn_batch_size;
+
+$result = $run_query("SELECT
             t.*,
             w.wallet_name,
             fw.wallet_name AS from_wallet,
@@ -28,60 +69,18 @@ $sql = "SELECT
         ON fw.id = tr.from_wallet_id
         LEFT JOIN wallets tw
         ON tw.id = tr.to_wallet_id
-        WHERE t.user_id=? {$branch_scope}";
-
-if($from_date !== '' && $to_date !== ''){
-    $sql .= " AND t.txn_date BETWEEN ? AND ?";
-}elseif($from_date !== ''){
-    $sql .= " AND t.txn_date >= ?";
-}elseif($to_date !== ''){
-    $sql .= " AND t.txn_date <= ?";
-}
-
-$sql .= " ORDER BY t.id DESC";
-
-$stmt = mysqli_prepare($conn, $sql);
-
-if($from_date !== '' && $to_date !== ''){
-    mysqli_stmt_bind_param(
-        $stmt,
-        "iss",
-        $user_id,
-        $from_date,
-        $to_date
-    );
-}elseif($from_date !== ''){
-    mysqli_stmt_bind_param(
-        $stmt,
-        "is",
-        $user_id,
-        $from_date
-    );
-}elseif($to_date !== ''){
-    mysqli_stmt_bind_param(
-        $stmt,
-        "is",
-        $user_id,
-        $to_date
-    );
-}else{
-    mysqli_stmt_bind_param(
-        $stmt,
-        "i",
-        $user_id
-    );
-}
-
-mysqli_stmt_execute($stmt);
-
-$result = mysqli_stmt_get_result($stmt);
+        {$where_sql}
+        ORDER BY t.id DESC
+        LIMIT {$txn_batch_size} OFFSET {$txn_offset}");
 $transactions = [];
-$total_amount = 0;
-
 while($row = mysqli_fetch_assoc($result)){
     $transactions[] = $row;
-    $total_amount += (float)$row['amount'];
 }
+$txn_page_url = function($page) use ($from_date, $to_date, $txn_search){
+    $params = array_filter(['from_date' => $from_date, 'to_date' => $to_date, 'txn_no' => $txn_search], 'strlen');
+    $params['page'] = $page;
+    return 'index.php?' . http_build_query($params);
+};
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -101,7 +100,7 @@ require_once '../includes/sidebar.php';
 
                     <div class="row">
 
-                        <div class="col-md-3">
+                        <div class="col-md-2">
 
                             <label>From Date</label>
 
@@ -113,7 +112,7 @@ require_once '../includes/sidebar.php';
 
                         </div>
 
-                        <div class="col-md-3">
+                        <div class="col-md-2">
 
                             <label>To Date</label>
 
@@ -122,6 +121,20 @@ require_once '../includes/sidebar.php';
                                 name="to_date"
                                 class="form-control"
                                 value="<?= htmlspecialchars($to_date); ?>">
+
+                        </div>
+
+                        <div class="col-md-2">
+
+                            <label>Txn No</label>
+
+                            <input
+                                type="text"
+                                name="txn_no"
+                                class="form-control"
+                                maxlength="100"
+                                placeholder="Search txn no"
+                                value="<?= htmlspecialchars($txn_search); ?>">
 
                         </div>
 
@@ -368,6 +381,26 @@ require_once '../includes/sidebar.php';
                     </tfoot>
 
                 </table>
+
+                <?php if($txn_total > $txn_batch_size){ ?>
+                <div class="d-flex flex-wrap justify-content-between align-items-center border-top pt-3 mt-3 d-print-none">
+                    <div class="text-muted mb-2">
+                        Loaded transactions <?= number_format($txn_offset + 1) ?>–<?= number_format(min($txn_offset + $txn_batch_size, $txn_total)) ?> of <?= number_format($txn_total) ?>
+                    </div>
+                    <div class="mb-2">
+                        <?php if($txn_page > 1){ ?>
+                            <a href="<?= htmlspecialchars($txn_page_url($txn_page - 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-primary"><i class="fas fa-chevron-left mr-1"></i>Previous 100</a>
+                        <?php } else { ?>
+                            <button type="button" class="btn btn-outline-secondary" disabled><i class="fas fa-chevron-left mr-1"></i>Previous 100</button>
+                        <?php } ?>
+                        <?php if($txn_page < $txn_pages){ ?>
+                            <a href="<?= htmlspecialchars($txn_page_url($txn_page + 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-primary ml-1">Next 100<i class="fas fa-chevron-right ml-1"></i></a>
+                        <?php } else { ?>
+                            <button type="button" class="btn btn-outline-secondary ml-1" disabled>Next 100<i class="fas fa-chevron-right ml-1"></i></button>
+                        <?php } ?>
+                    </div>
+                </div>
+                <?php } ?>
 
             </div>
 

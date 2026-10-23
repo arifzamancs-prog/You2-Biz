@@ -474,7 +474,10 @@ if(is_pos_printing($conn)){
 
 <style>
 @page{
-    size:80mm auto;
+    /* `80mm auto` is not a valid Chrome page-size value. Chrome then falls
+       back to A4, leaving a large blank area below a POS receipt. The height
+       is replaced with the measured receipt height before each print. */
+    size:80mm 120mm;
     margin:4mm;
 }
 
@@ -608,15 +611,34 @@ window.addEventListener('load', function () {
 });
 </script>
 <?php } ?>
+<script>
+function preparePosPrintPage() {
+    const receipt = document.querySelector('.receipt');
+    if (!receipt) return;
+
+    // CSS pixels are 96 DPI in Chrome. Include the printed page margins and
+    // use a small safety buffer so the footer is never clipped.
+    const heightMm = Math.max(65, Math.ceil(receipt.scrollHeight * 25.4 / 96) + 12);
+    let pageStyle = document.getElementById('pos-print-page-size');
+    if (!pageStyle) {
+        pageStyle = document.createElement('style');
+        pageStyle.id = 'pos-print-page-size';
+        document.head.appendChild(pageStyle);
+    }
+    pageStyle.textContent = '@page { size: 80mm ' + heightMm + 'mm; margin: 4mm; }';
+}
+
+window.addEventListener('load', preparePosPrintPage);
+</script>
 <?php if($auto_print){ ?>
-<script>window.addEventListener('load', function(){ window.setTimeout(function(){ window.print(); }, 250); });</script>
+<script>window.addEventListener('load', function(){ window.setTimeout(function(){ preparePosPrintPage(); window.print(); }, 250); });</script>
 <?php } ?>
 </head>
 
 <body>
 
 <div class="toolbar">
-    <button class="btn" onclick="window.print()">Print Invoice</button>
+    <button class="btn" onclick="preparePosPrintPage(); window.print()">Print Invoice</button>
 </div>
 
 <main class="receipt">

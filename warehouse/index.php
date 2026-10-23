@@ -138,7 +138,8 @@ $setup_categories = mysqli_query($conn, "SELECT id,category_name,status FROM pro
 $product_deep_search = trim((string)($_GET['product_deep_search'] ?? ''));
 $product_load_all = ($_GET['product_load'] ?? '') === 'all';
 $product_search_sql = $product_deep_search !== '' ? ' AND (p.product_name LIKE ? OR p.sku LIKE ? OR c.category_name LIKE ? OR p.sub_category LIKE ?)' : '';
-$product_limit_sql = ($product_load_all || $product_deep_search !== '') ? '' : ' LIMIT 200';
+// The Product List section is hidden, so skip loading its rows.
+$product_limit_sql = ' LIMIT 0';
 $setup_product_total = (int)mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) AS total FROM products WHERE user_id={$company_id}"))['total'];
 $setup_product_stmt = mysqli_prepare($conn, "SELECT p.id,p.product_name,p.sku,p.photo_path,p.purchase_price,p.sale_price,p.status,c.category_name,
     (SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$warehouse_id}) AS warehouse_stock,
@@ -166,7 +167,7 @@ require_once '../includes/sidebar.php';
 <?php if ($central && $multi_branch && $is_fashion_house && $pending_damaged_return_count > 0) { ?>
 <div class="mb-3"><a class="btn btn-outline-danger position-relative" href="damaged_returns.php"><i class="fas fa-exclamation-triangle mr-1"></i>Damaged Product Returns<?php if($pending_damaged_return_count > 0){ ?> <span class="badge badge-danger ml-1"><?= $pending_damaged_return_count ?></span><?php } ?></a></div>
 <?php } ?>
-<?php if ($central && manager_can_modify()) { ?>
+<?php if (false) { // Product List / Product Setup section removed from this page ?>
 <div class="card card-outline card-primary">
     <div class="card-header"><h3 class="card-title"><i class="fas <?= $is_fashion_house ? 'fa-boxes' : 'fa-plus-circle mr-2 text-primary'; ?> mr-2"></i><?= $is_fashion_house ? 'Product List' : 'Product Setup'; ?></h3></div>
     <div class="card-body">

@@ -11,7 +11,7 @@ if (!is_admin_user() && !(is_manager_user() && manager_can_view_all_branches($co
 $company_id = (int)$_SESSION['user_id'];
 $branch_id = max(0, (int)($_POST['branch_id'] ?? 0));
 if ($branch_id > 0) {
-    $stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+    $stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE id=? AND user_id=? AND status='active'" . warehouse_branch_filter_sql() . " LIMIT 1");
     mysqli_stmt_bind_param($stmt, 'ii', $branch_id, $company_id);
     mysqli_stmt_execute($stmt);
     if (!mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))) $branch_id = 0;

@@ -5,6 +5,9 @@ require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
 
 $user_id = $_SESSION['user_id'];
+$catalog_branch_id = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : 0;
+$catalog_branch_column = $catalog_branch_id > 0 ? 'branch_id,' : '';
+$catalog_branch_value = $catalog_branch_id > 0 ? $catalog_branch_id . ',' : '';
 $is_restaurant_catalog = restaurant_catalog_enabled($conn, $user_id);
 $variants_enabled = product_variants_enabled($conn, $user_id);
 ensure_fifo_only_product_categories($conn, $user_id);
@@ -13,6 +16,14 @@ ensure_product_subcategory_schema($conn);
 
 $message = '';
 $message_type = '';
+$is_ajax_request = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+
+function category_create_json_response($success, $message)
+{
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => (bool)$success, 'message' => $message]);
+    exit;
+}
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
@@ -30,12 +41,19 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if($category_name === ''){
         $message = 'Category name is required.';
         $message_type = 'danger';
+        if($is_ajax_request){
+            category_create_json_response(false, $message);
+        }
     }elseif(product_category_name_exists($conn, $user_id, $category_name)){
         $message = 'This category name already exists.';
         $message_type = 'danger';
+        if($is_ajax_request){
+            category_create_json_response(false, $message);
+        }
     }else{
     $sql = "INSERT INTO product_categories
             (
+                {$catalog_branch_column}
                 user_id,
                 category_name,
                 sub_category,
@@ -45,7 +63,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             )
             VALUES
             (
-                ?,?, ?,
+                {$catalog_branch_value}?,?, ?,
                 ?,
                 ?,
                 ?
@@ -66,6 +84,10 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     if(mysqli_stmt_execute($stmt)){
 
+        if($is_ajax_request){
+            category_create_json_response(true, 'Category saved successfully.');
+        }
+
         header(
             "Location: index.php"
         );
@@ -76,6 +98,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
         $message = "Failed to save category";
         $message_type = "danger";
+        if($is_ajax_request){
+            category_create_json_response(false, $message);
+        }
 
     }
     }
@@ -103,6 +128,8 @@ require_once '../includes/sidebar.php';
 
     <div class="card-body">
 
+        <div id="category-feedback" class="alert d-none" role="alert"></div>
+
         <?php if($message){ ?>
 
             <div class="alert alert-<?= $message_type; ?>">
@@ -113,7 +140,7 @@ require_once '../includes/sidebar.php';
 
         <?php } ?>
 
-        <form method="post">
+        <form method="post" id="category-create-form">
             <div class="form-group">
 
                 <label for="category_name">
@@ -214,6 +241,7 @@ require_once '../includes/sidebar.php';
     function render(){ hidden.value=subCategories.join(', '); list.innerHTML=''; subCategories.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{subCategories.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
     function addSubCategory(){const name=source.value.trim();if(!name)return; if(!subCategories.some(item=>item.toLowerCase()===name.toLowerCase())){subCategories.push(name);render();} source.value='';source.focus();}
     add.addEventListener('click',addSubCategory);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addSubCategory();}});
+    document.addEventListener('category-form-reset',()=>{subCategories=[];render();source.value='';});
 })();
 <?php if ($variants_enabled) { ?>
 (function(){
@@ -222,10 +250,50 @@ require_once '../includes/sidebar.php';
     function render(){ hidden.value=variants.join(', '); list.innerHTML=''; variants.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{variants.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
     function addVariant(){const name=source.value.trim();if(!name)return; if(!variants.some(item=>item.toLowerCase()===name.toLowerCase())){variants.push(name);render();} source.value='';source.focus();}
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});
+    document.addEventListener('category-form-reset',()=>{variants=[];render();source.value='';});
 })();
 <?php } ?>
 </script>
 <?php } ?>
+
+<script>
+(function(){
+    const form = document.getElementById('category-create-form');
+    const feedback = document.getElementById('category-feedback');
+    if (!form || !feedback) return;
+
+    form.addEventListener('submit', async function(event){
+        event.preventDefault();
+        const submit = form.querySelector('[type="submit"]');
+        const original = submit.innerHTML;
+        submit.disabled = true;
+        submit.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        feedback.className = 'alert d-none';
+
+        try {
+            const response = await fetch(form.action || window.location.href, {
+                method: 'POST',
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+                body: new FormData(form)
+            });
+            const result = await response.json();
+            feedback.textContent = result.message || 'Unable to save category.';
+            feedback.className = 'alert alert-' + (result.success ? 'success' : 'danger');
+            if (result.success) {
+                form.reset();
+                document.dispatchEvent(new Event('category-form-reset'));
+                document.getElementById('category_name').focus();
+            }
+        } catch (error) {
+            feedback.textContent = 'Unable to save category. Please try again.';
+            feedback.className = 'alert alert-danger';
+        } finally {
+            submit.disabled = false;
+            submit.innerHTML = original;
+        }
+    });
+})();
+</script>
 
 <?php
 require_once '../includes/footer.php';

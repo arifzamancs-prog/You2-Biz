@@ -13,11 +13,26 @@ function parking_exit_wallet_branches($conn, $company_id, $branch_id)
     $company_id = (int)$company_id;
     $branch_id = (int)$branch_id;
     $result = mysqli_query($conn, "SELECT id FROM branches WHERE user_id={$company_id} AND is_head_office=1");
-    $head_office_ids = [0];
+    $head_office_ids = [];
     while ($row = mysqli_fetch_assoc($result)) {
         $head_office_ids[] = (int)$row['id'];
     }
-    return implode(',', in_array($branch_id, $head_office_ids, true) ? $head_office_ids : [$branch_id]);
+    // Old parking tickets may store Head Office as 0. Prefer the real Head
+    // Office branch wallet when it exists, instead of showing duplicate Cash
+    // wallets from both the legacy and current branch records.
+    if (in_array($branch_id, array_merge([0], $head_office_ids), true)) {
+        return implode(',', $head_office_ids ?: [0]);
+    }
+    return (string)$branch_id;
+}
+
+function parking_exit_payment_method_from_wallet($wallet_name)
+{
+    $wallet_name = strtolower(trim((string)$wallet_name));
+    foreach (['bkash', 'nagad', 'card', 'bank'] as $method) {
+        if (strpos($wallet_name, $method) !== false) return $method;
+    }
+    return strpos($wallet_name, 'cash') !== false ? 'cash' : 'wallet';
 }
 $company_id = (int)($_SESSION['user_id'] ?? 0);
 if (!parking_company_enabled($conn, $company_id)) {
@@ -35,6 +50,33 @@ function parking_exit_redirect($location, $message = '', $type = 'danger')
         $_SESSION['parking_exit_flash'] = ['message' => $message, 'type' => $type];
     }
     header('Location: ' . $location);
+    exit;
+}
+
+function parking_exit_recent_entries($conn, $company_id)
+{
+    $entries = [];
+    $stmt = mysqli_prepare($conn, "SELECT t.id, t.ticket_no, t.vehicle_number, t.entry_at, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.entry_gate_id WHERE t.company_id=? AND t.ticket_status IN ('active','payment_pending','paid') ORDER BY t.entry_at DESC, t.id DESC LIMIT 10");
+    mysqli_stmt_bind_param($stmt, 'i', $company_id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    while ($row = mysqli_fetch_assoc($result)) {
+        $entries[] = [
+            'id' => (int)$row['id'],
+            'ticket_no' => (string)$row['ticket_no'],
+            'vehicle_name' => (string)$row['vehicle_name'],
+            'vehicle_number' => (string)($row['vehicle_number'] ?: '—'),
+            'gate_name' => (string)($row['gate_name'] ?: '—'),
+            'entry_time' => date('d M Y, h:i A', strtotime((string)$row['entry_at'])),
+        ];
+    }
+    mysqli_stmt_close($stmt);
+    return $entries;
+}
+
+if (($_GET['ajax'] ?? '') === 'recent_entries') {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => true, 'entries' => parking_exit_recent_entries($conn, $company_id)]);
     exit;
 }
 
@@ -74,11 +116,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ticket_id = (int)($_POST['ticket_id'] ?? 0);
         $exit_gate_id = (int)($_POST['exit_gate_id'] ?? 0);
         $wallet_id = (int)($_POST['wallet_id'] ?? 0);
-        $payment_method = (string)($_POST['payment_method'] ?? 'cash');
-        $payment_reference = trim((string)($_POST['payment_reference'] ?? ''));
         $payment_note = trim((string)($_POST['payment_note'] ?? ''));
-        if ($ticket_id <= 0 || $exit_gate_id <= 0 || !in_array($payment_method, ['cash', 'card', 'bkash', 'nagad', 'bank', 'wallet', 'other'], true)) {
-            parking_exit_redirect('exit.php', 'Exit gate and a valid payment method are required.');
+        if ($ticket_id <= 0 || $exit_gate_id <= 0) {
+            parking_exit_redirect('exit.php', 'Select an exit gate.');
         }
 
         mysqli_begin_transaction($conn);
@@ -124,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $ticket_branch_id = (int)$ticket['branch_id'];
                 $wallet_branches = parking_exit_wallet_branches($conn, $company_id, $ticket_branch_id);
-                $wallet_stmt = mysqli_prepare($conn, "SELECT id FROM wallets WHERE id=? AND user_id=? AND COALESCE(branch_id,0) IN ({$wallet_branches}) AND status='active' LIMIT 1");
+                $wallet_stmt = mysqli_prepare($conn, "SELECT id, wallet_name FROM wallets WHERE id=? AND user_id=? AND COALESCE(branch_id,0) IN ({$wallet_branches}) AND status='active' LIMIT 1");
                 mysqli_stmt_bind_param($wallet_stmt, 'ii', $wallet_id, $company_id);
                 mysqli_stmt_execute($wallet_stmt);
                 $wallet = mysqli_fetch_assoc(mysqli_stmt_get_result($wallet_stmt));
@@ -132,6 +172,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$wallet) {
                     throw new Exception('Select an active wallet from this ticket branch.');
                 }
+                $payment_method = parking_exit_payment_method_from_wallet($wallet['wallet_name'] ?? '');
+                $payment_reference = '';
 
                 $payment_stmt = mysqli_prepare($conn, 'INSERT INTO parking_payments (company_id, branch_id, ticket_id, wallet_id, received_by, payment_method, amount, payment_reference, payment_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $ticket_branch_id = (int)$ticket['branch_id'];
@@ -209,6 +251,7 @@ $exit_gate_filter = parking_operator_gate_filter($conn, $company_id, 'exit', 'id
 $exit_gates = mysqli_query($conn, "SELECT id, gate_name, gate_code FROM parking_gates WHERE company_id={$company_id} AND status='active' AND gate_type IN ('exit','both'){$exit_gate_filter} ORDER BY gate_name ASC");
 $wallet_branches = parking_exit_wallet_branches($conn, $company_id, (int)($ticket['branch_id'] ?? 0));
 $wallets = mysqli_query($conn, "SELECT id, wallet_name, branch_id FROM wallets WHERE user_id={$company_id} AND COALESCE(branch_id,0) IN ({$wallet_branches}) AND status='active' ORDER BY is_system DESC, wallet_name ASC");
+$recent_entries = parking_exit_recent_entries($conn, $company_id);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -218,8 +261,61 @@ require_once '../includes/sidebar.php';
 <?php if ($flash) { ?><div class="alert alert-<?= htmlspecialchars($flash['type']) ?> alert-dismissible"><button type="button" class="close" data-dismiss="alert">&times;</button><?= htmlspecialchars($flash['message']) ?></div><?php } ?>
 <div class="card card-outline card-warning"><div class="card-header"><h3 class="card-title"><i class="fas fa-sign-out-alt mr-2"></i>Vehicle Exit</h3></div><div class="card-body"><form method="post" autocomplete="off"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="scan"><div class="row align-items-end"><div class="col-md-8 form-group mb-md-0"><label>Scan Barcode</label><input class="form-control form-control-lg" name="barcode_value" placeholder="Scan ticket barcode here" autofocus required></div><div class="col-md-4"><button class="btn btn-warning btn-lg btn-block"><i class="fas fa-search mr-1"></i>Find Ticket</button></div></div></form></div></div>
 
+<div class="card card-outline card-info">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Last 10 Active Entries</h3><div class="card-tools"><button type="button" class="btn btn-sm btn-outline-primary" id="refresh-recent-entries"><i class="fas fa-sync-alt mr-1"></i>Refresh</button></div></div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Entry Gate</th><th>Entry Time</th><th></th></tr></thead><tbody id="recent-entry-rows">
+        <?php if (!$recent_entries) { ?><tr><td colspan="6" class="text-center text-muted py-4">No active parking entry found.</td></tr><?php } else { foreach ($recent_entries as $recent_entry) { ?><tr><td><?= htmlspecialchars($recent_entry['ticket_no']) ?></td><td><?= htmlspecialchars($recent_entry['vehicle_name']) ?></td><td><?= htmlspecialchars($recent_entry['vehicle_number']) ?></td><td><?= htmlspecialchars($recent_entry['gate_name']) ?></td><td><?= htmlspecialchars($recent_entry['entry_time']) ?></td><td class="text-right"><a class="btn btn-sm btn-warning" href="exit.php?ticket=<?= (int)$recent_entry['id'] ?>">Select</a></td></tr><?php } } ?>
+    </tbody></table></div></div>
+</div>
+
 <?php if ($ticket && $calculation) { ?>
-<div class="card card-outline card-success"><div class="card-header"><h3 class="card-title">Ticket: <?= htmlspecialchars($ticket['ticket_no']) ?></h3></div><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="confirm_exit"><input type="hidden" name="ticket_id" value="<?= (int)$ticket['id'] ?>"><div class="card-body row"><div class="col-md-6"><table class="table table-sm table-bordered"><tr><th>Vehicle</th><td><?= htmlspecialchars($ticket['vehicle_name']) ?></td></tr><tr><th>Vehicle Number</th><td><?= htmlspecialchars($ticket['vehicle_number'] ?: 'N/A') ?></td></tr><tr><th>Entry</th><td><?= htmlspecialchars(date('d M Y, h:i A', strtotime($ticket['entry_at']))) ?></td></tr><tr><th>Duration</th><td><?= (int)$calculation['duration_minutes'] ?> minutes</td></tr><tr><th>Rate Plan</th><td><?= htmlspecialchars($ticket['plan_name'] ?: '-') ?></td></tr></table></div><div class="col-md-6"><div class="callout callout-success"><h4>Payable: BDT <?= number_format((float)$calculation['fee'], 2) ?></h4><p class="mb-0">Fee is calculated from the saved entry-time rate.</p></div><div class="form-group"><label>Exit Gate</label><select class="form-control" name="exit_gate_id" required><option value="">Select exit gate</option><?php while ($gate = mysqli_fetch_assoc($exit_gates)) { ?><option value="<?= (int)$gate['id'] ?>"><?= htmlspecialchars($gate['gate_name'] . ' (' . $gate['gate_code'] . ')') ?></option><?php } ?></select></div><div class="form-group"><label>Receive Wallet <?= (float)$calculation['fee'] <= 0 ? '(not required for free exit)' : '' ?></label><select class="form-control" name="wallet_id"><option value="">Select wallet</option><?php while ($wallet = mysqli_fetch_assoc($wallets)) { ?><option value="<?= (int)$wallet['id'] ?>" data-branch="<?= (int)$wallet['branch_id'] ?>"><?= htmlspecialchars($wallet['wallet_name']) ?></option><?php } ?></select></div><div class="form-row"><div class="form-group col-md-6"><label>Payment Method</label><select class="form-control" name="payment_method"><option value="cash">Cash</option><option value="card">Card</option><option value="bkash">bKash</option><option value="nagad">Nagad</option><option value="bank">Bank</option><option value="wallet">Wallet</option><option value="other">Other</option></select></div><div class="form-group col-md-6"><label>Reference</label><input class="form-control" name="payment_reference" maxlength="150" placeholder="Optional"></div></div><div class="form-group"><label>Note</label><input class="form-control" name="payment_note" maxlength="500" placeholder="Optional"></div></div></div><div class="card-footer text-right"><button class="btn btn-success btn-lg"><i class="fas fa-check-circle mr-1"></i>Confirm Exit</button></div></form></div>
+<div class="card card-outline card-success"><div class="card-header"><h3 class="card-title">Ticket: <?= htmlspecialchars($ticket['ticket_no']) ?></h3></div><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="confirm_exit"><input type="hidden" name="ticket_id" value="<?= (int)$ticket['id'] ?>"><div class="card-body row"><div class="col-md-6"><table class="table table-sm table-bordered"><tr><th>Vehicle</th><td><?= htmlspecialchars($ticket['vehicle_name']) ?></td></tr><tr><th>Vehicle Number</th><td><?= htmlspecialchars($ticket['vehicle_number'] ?: 'N/A') ?></td></tr><tr><th>Entry</th><td><?= htmlspecialchars(date('d M Y, h:i A', strtotime($ticket['entry_at']))) ?></td></tr><tr><th>Duration</th><td><?= (int)$calculation['duration_minutes'] ?> minutes</td></tr><tr><th>Rate Plan</th><td><?= htmlspecialchars($ticket['plan_name'] ?: '-') ?></td></tr></table></div><div class="col-md-6"><div class="callout callout-success"><h4>Payable: BDT <?= number_format((float)$calculation['fee'], 2) ?></h4><p class="mb-0">Fee is calculated from the saved entry-time rate.</p></div><div class="form-group"><label>Exit Gate</label><select class="form-control" name="exit_gate_id" required><option value="">Select exit gate</option><?php while ($gate = mysqli_fetch_assoc($exit_gates)) { ?><option value="<?= (int)$gate['id'] ?>"><?= htmlspecialchars($gate['gate_name'] . ' (' . $gate['gate_code'] . ')') ?></option><?php } ?></select></div><div class="form-group"><label>Receive Wallet <?= (float)$calculation['fee'] <= 0 ? '(not required for free exit)' : '' ?></label><select class="form-control" name="wallet_id"><option value="">Select wallet</option><?php while ($wallet = mysqli_fetch_assoc($wallets)) { ?><option value="<?= (int)$wallet['id'] ?>" data-branch="<?= (int)$wallet['branch_id'] ?>"><?= htmlspecialchars($wallet['wallet_name']) ?></option><?php } ?></select></div><div class="form-group"><label>Note</label><input class="form-control" name="payment_note" maxlength="500" placeholder="Optional"></div></div></div><div class="card-footer text-right"><button class="btn btn-success btn-lg"><i class="fas fa-check-circle mr-1"></i>Confirm Exit</button></div></form></div>
 <?php } ?>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const exitGate = document.querySelector('select[name="exit_gate_id"]');
+    const receiveWallet = document.querySelector('select[name="wallet_id"]');
+    const exitPreferenceKey = 'parking_exit_preferences_<?= (int)$company_id ?>';
+    function applySavedValue(select, value) {
+        if (!select || !value) return;
+        Array.from(select.options).some(function (option) {
+            if (option.value !== value) return false;
+            select.value = value;
+            return true;
+        });
+    }
+    function saveExitPreferences() {
+        try {
+            localStorage.setItem(exitPreferenceKey, JSON.stringify({
+                exit_gate: exitGate ? exitGate.value : '',
+                wallet: receiveWallet ? receiveWallet.value : ''
+            }));
+        } catch (error) {
+            // Payment and exit still work if browser storage is unavailable.
+        }
+    }
+    try {
+        const saved = JSON.parse(localStorage.getItem(exitPreferenceKey) || '{}');
+        applySavedValue(exitGate, saved.exit_gate);
+        applySavedValue(receiveWallet, saved.wallet);
+    } catch (error) {}
+    if (exitGate) exitGate.addEventListener('change', saveExitPreferences);
+    if (receiveWallet) receiveWallet.addEventListener('change', saveExitPreferences);
+
+    const rows = document.getElementById('recent-entry-rows');
+    const refresh = document.getElementById('refresh-recent-entries');
+    function cell(row, value) { const item = document.createElement('td'); item.textContent = value || '—'; row.appendChild(item); }
+    function render(entries) {
+        rows.replaceChildren();
+        if (!entries.length) { const row = document.createElement('tr'); const item = document.createElement('td'); item.colSpan = 6; item.className = 'text-center text-muted py-4'; item.textContent = 'No active parking entry found.'; row.appendChild(item); rows.appendChild(row); return; }
+        entries.forEach(function (entry) { const row = document.createElement('tr'); cell(row, entry.ticket_no); cell(row, entry.vehicle_name); cell(row, entry.vehicle_number); cell(row, entry.gate_name); cell(row, entry.entry_time); const action = document.createElement('td'); action.className = 'text-right'; const link = document.createElement('a'); link.className = 'btn btn-sm btn-warning'; link.href = 'exit.php?ticket=' + encodeURIComponent(entry.id); link.textContent = 'Select'; action.appendChild(link); row.appendChild(action); rows.appendChild(row); });
+    }
+    async function loadRecentEntries() { try { const response = await fetch('exit.php?ajax=recent_entries', {credentials: 'same-origin', cache: 'no-store'}); const data = await response.json(); if (response.ok && data.ok) render(data.entries || []); } catch (error) {} }
+    refresh.addEventListener('click', loadRecentEntries);
+    window.addEventListener('focus', loadRecentEntries);
+    window.setInterval(loadRecentEntries, 15000);
+});
+</script>
 
 <?php require_once '../includes/footer.php'; ?>

@@ -95,6 +95,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         parking_setup_redirect('Vehicle type added successfully.');
     }
 
+    if ($action === 'update_vehicle_type') {
+        $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
+        $vehicle_name = trim((string)($_POST['vehicle_name'] ?? ''));
+        $vehicle_code = strtolower(trim((string)($_POST['vehicle_code'] ?? '')));
+        $vehicle_code = trim((string)preg_replace('/[^a-z0-9_-]+/', '-', $vehicle_code), '-');
+        $capacity = max(0, (int)($_POST['default_capacity'] ?? 0));
+        if ($vehicle_id <= 0 || $vehicle_name === '' || $vehicle_code === '' || strlen($vehicle_name) > 100 || strlen($vehicle_code) > 40) {
+            parking_setup_redirect('Vehicle name and a valid short code are required.', 'danger');
+        }
+        $stmt = mysqli_prepare($conn, 'UPDATE parking_vehicle_types SET vehicle_name=?, vehicle_code=?, default_capacity=? WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'ssiii', $vehicle_name, $vehicle_code, $capacity, $vehicle_id, $company_id);
+        if (!mysqli_stmt_execute($stmt)) {
+            mysqli_stmt_close($stmt);
+            parking_setup_redirect('This vehicle code already exists. Please use a different code.', 'danger');
+        }
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect('Vehicle type updated successfully.');
+    }
+
     if ($action === 'toggle_vehicle_type') {
         $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
         $status = (string)($_POST['status'] ?? '');
@@ -169,6 +188,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         parking_setup_redirect('Rate plan added successfully.');
     }
 
+    if ($action === 'update_rate_plan') {
+        $rate_id = (int)($_POST['rate_id'] ?? 0);
+        $vehicle_type_id = (int)($_POST['vehicle_type_id'] ?? 0);
+        $plan_name = trim((string)($_POST['plan_name'] ?? ''));
+        $rate_mode = (string)($_POST['rate_mode'] ?? 'duration');
+        $fixed_fee = max(0, (float)($_POST['fixed_fee'] ?? 0));
+        $initial_minutes = max(0, (int)($_POST['initial_minutes'] ?? 0));
+        $initial_fee = max(0, (float)($_POST['initial_fee'] ?? 0));
+        $extra_minutes = max(1, (int)($_POST['extra_minutes'] ?? 60));
+        $extra_fee = max(0, (float)($_POST['extra_fee'] ?? 0));
+        $daily_max_fee = max(0, (float)($_POST['daily_max_fee'] ?? 0));
+        if ($rate_id <= 0 || $vehicle_type_id <= 0 || $plan_name === '' || strlen($plan_name) > 120 || !in_array($rate_mode, ['fixed', 'duration', 'free'], true)) {
+            parking_setup_redirect('Please provide valid rate plan details.', 'danger');
+        }
+        $vehicle_stmt = mysqli_prepare($conn, "SELECT id FROM parking_vehicle_types WHERE id=? AND company_id=? AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($vehicle_stmt, 'ii', $vehicle_type_id, $company_id);
+        mysqli_stmt_execute($vehicle_stmt);
+        $vehicle = mysqli_fetch_assoc(mysqli_stmt_get_result($vehicle_stmt));
+        mysqli_stmt_close($vehicle_stmt);
+        if (!$vehicle) parking_setup_redirect('Select an active vehicle type.', 'danger');
+        $stmt = mysqli_prepare($conn, 'UPDATE parking_rate_plans SET vehicle_type_id=?, plan_name=?, rate_mode=?, fixed_fee=?, initial_minutes=?, initial_fee=?, extra_minutes=?, extra_fee=?, daily_max_fee=? WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'issdididdii', $vehicle_type_id, $plan_name, $rate_mode, $fixed_fee, $initial_minutes, $initial_fee, $extra_minutes, $extra_fee, $daily_max_fee, $rate_id, $company_id);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect('Rate plan updated successfully.');
+    }
+
     if ($action === 'toggle_rate_plan') {
         $rate_id = (int)($_POST['rate_id'] ?? 0);
         $status = (string)($_POST['status'] ?? '');
@@ -180,6 +226,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_execute($stmt);
         mysqli_stmt_close($stmt);
         parking_setup_redirect('Rate plan status updated.');
+    }
+
+    if ($action === 'delete_rate_plan') {
+        $rate_id = (int)($_POST['rate_id'] ?? 0);
+        if ($rate_id <= 0) {
+            parking_setup_redirect('Invalid rate plan request.', 'danger');
+        }
+
+        $usage_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM parking_tickets WHERE company_id=? AND rate_plan_id=?');
+        mysqli_stmt_bind_param($usage_stmt, 'ii', $company_id, $rate_id);
+        mysqli_stmt_execute($usage_stmt);
+        $usage = mysqli_fetch_assoc(mysqli_stmt_get_result($usage_stmt));
+        mysqli_stmt_close($usage_stmt);
+        if ((int)($usage['total'] ?? 0) > 0) {
+            parking_setup_redirect('This rate plan has parking tickets and cannot be deleted. Deactivate it instead.', 'danger');
+        }
+
+        $stmt = mysqli_prepare($conn, 'DELETE FROM parking_rate_plans WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'ii', $rate_id, $company_id);
+        mysqli_stmt_execute($stmt);
+        $deleted = mysqli_stmt_affected_rows($stmt);
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect($deleted > 0 ? 'Rate plan deleted successfully.' : 'Rate plan was not found.', $deleted > 0 ? 'success' : 'danger');
     }
 
     if ($action === 'add_gate') {
@@ -204,6 +273,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         parking_setup_redirect('Parking gate added successfully.');
     }
 
+    if ($action === 'update_gate') {
+        $gate_id = (int)($_POST['gate_id'] ?? 0);
+        $gate_name = trim((string)($_POST['gate_name'] ?? ''));
+        $gate_code = strtoupper(trim((string)($_POST['gate_code'] ?? '')));
+        $gate_code = trim((string)preg_replace('/[^A-Z0-9_-]+/', '-', $gate_code), '-');
+        $gate_type = (string)($_POST['gate_type'] ?? 'both');
+        $terminal_name = trim((string)($_POST['terminal_name'] ?? ''));
+        $branch_id = $parking_multi_branch_enabled ? max(0, (int)($_POST['branch_id'] ?? 0)) : 0;
+        if ($gate_id <= 0 || $gate_name === '' || $gate_code === '' || strlen($gate_name) > 120 || strlen($gate_code) > 50 || !in_array($gate_type, ['entry', 'exit', 'both'], true)) {
+            parking_setup_redirect('Gate name, code and type are required.', 'danger');
+        }
+        $stmt = mysqli_prepare($conn, 'UPDATE parking_gates SET branch_id=?, gate_name=?, gate_code=?, gate_type=?, terminal_name=? WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'issssii', $branch_id, $gate_name, $gate_code, $gate_type, $terminal_name, $gate_id, $company_id);
+        if (!mysqli_stmt_execute($stmt)) {
+            mysqli_stmt_close($stmt);
+            parking_setup_redirect('This gate code already exists for the selected branch.', 'danger');
+        }
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect('Gate updated successfully.');
+    }
+
     if ($action === 'toggle_gate') {
         $gate_id = (int)($_POST['gate_id'] ?? 0);
         $status = (string)($_POST['status'] ?? '');
@@ -215,6 +305,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_execute($stmt);
         mysqli_stmt_close($stmt);
         parking_setup_redirect('Gate status updated.');
+    }
+
+    if ($action === 'delete_gate') {
+        $gate_id = (int)($_POST['gate_id'] ?? 0);
+        if ($gate_id <= 0) {
+            parking_setup_redirect('Invalid gate request.', 'danger');
+        }
+
+        $ticket_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM parking_tickets WHERE company_id=? AND (entry_gate_id=? OR exit_gate_id=?)');
+        mysqli_stmt_bind_param($ticket_stmt, 'iii', $company_id, $gate_id, $gate_id);
+        mysqli_stmt_execute($ticket_stmt);
+        $ticket_usage = mysqli_fetch_assoc(mysqli_stmt_get_result($ticket_stmt));
+        mysqli_stmt_close($ticket_stmt);
+        if ((int)($ticket_usage['total'] ?? 0) > 0) {
+            parking_setup_redirect('This gate has parking tickets and cannot be deleted. Deactivate it instead.', 'danger');
+        }
+
+        $assignment_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM parking_gate_staff_assignments WHERE company_id=? AND gate_id=?');
+        mysqli_stmt_bind_param($assignment_stmt, 'ii', $company_id, $gate_id);
+        mysqli_stmt_execute($assignment_stmt);
+        $assignment_usage = mysqli_fetch_assoc(mysqli_stmt_get_result($assignment_stmt));
+        mysqli_stmt_close($assignment_stmt);
+        if ((int)($assignment_usage['total'] ?? 0) > 0) {
+            parking_setup_redirect('This gate has staff assignments and cannot be deleted. Deactivate it instead.', 'danger');
+        }
+
+        $stmt = mysqli_prepare($conn, 'DELETE FROM parking_gates WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'ii', $gate_id, $company_id);
+        mysqli_stmt_execute($stmt);
+        $deleted = mysqli_stmt_affected_rows($stmt);
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect($deleted > 0 ? 'Gate deleted successfully.' : 'Gate was not found.', $deleted > 0 ? 'success' : 'danger');
     }
 
     if ($action === 'save_gate_assignment') {
@@ -251,6 +373,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_execute($stmt);
         mysqli_stmt_close($stmt);
         parking_setup_redirect('Gate terminal access updated.');
+    }
+
+    if ($action === 'update_gate_assignment') {
+        $assignment_id = (int)($_POST['assignment_id'] ?? 0);
+        $assigned_user_id = (int)($_POST['assigned_user_id'] ?? 0);
+        $assigned_gate_id = (int)($_POST['assigned_gate_id'] ?? 0);
+        $access_type = (string)($_POST['access_type'] ?? 'both');
+        if ($assignment_id <= 0 || $assigned_user_id <= 0 || $assigned_gate_id <= 0 || !in_array($access_type, ['entry', 'exit', 'both'], true)) {
+            parking_setup_redirect('Select a staff account, gate and access type.', 'danger');
+        }
+        $staff_stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE id=? AND owner_id=? AND role='manager' AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($staff_stmt, 'ii', $assigned_user_id, $company_id);
+        mysqli_stmt_execute($staff_stmt);
+        $staff = mysqli_fetch_assoc(mysqli_stmt_get_result($staff_stmt));
+        mysqli_stmt_close($staff_stmt);
+        $gate_stmt = mysqli_prepare($conn, "SELECT id FROM parking_gates WHERE id=? AND company_id=? AND status='active' LIMIT 1");
+        mysqli_stmt_bind_param($gate_stmt, 'ii', $assigned_gate_id, $company_id);
+        mysqli_stmt_execute($gate_stmt);
+        $assigned_gate = mysqli_fetch_assoc(mysqli_stmt_get_result($gate_stmt));
+        mysqli_stmt_close($gate_stmt);
+        if (!$staff || !$assigned_gate) parking_setup_redirect('Select an active company staff account and gate.', 'danger');
+        $stmt = mysqli_prepare($conn, 'UPDATE parking_gate_staff_assignments SET gate_id=?, user_id=?, access_type=? WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'iisii', $assigned_gate_id, $assigned_user_id, $access_type, $assignment_id, $company_id);
+        if (!mysqli_stmt_execute($stmt)) {
+            mysqli_stmt_close($stmt);
+            parking_setup_redirect('This staff login is already assigned to the selected gate.', 'danger');
+        }
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect('Gate terminal access updated successfully.');
+    }
+
+    if ($action === 'delete_gate_assignment') {
+        $assignment_id = (int)($_POST['assignment_id'] ?? 0);
+        if ($assignment_id <= 0) parking_setup_redirect('Invalid terminal assignment request.', 'danger');
+        $stmt = mysqli_prepare($conn, 'DELETE FROM parking_gate_staff_assignments WHERE id=? AND company_id=?');
+        mysqli_stmt_bind_param($stmt, 'ii', $assignment_id, $company_id);
+        mysqli_stmt_execute($stmt);
+        $deleted = mysqli_stmt_affected_rows($stmt);
+        mysqli_stmt_close($stmt);
+        parking_setup_redirect($deleted > 0 ? 'Gate terminal staff access deleted successfully.' : 'Gate terminal staff access was not found.', $deleted > 0 ? 'success' : 'danger');
     }
 
     parking_setup_redirect('Unknown parking setup request.', 'danger');
@@ -314,28 +476,86 @@ require_once '../includes/sidebar.php';
 <div class="row">
     <div class="col-lg-6">
         <div class="card card-outline card-info"><div class="card-header"><h3 class="card-title">Vehicle Types</h3></div><div class="card-body">
-            <form method="post" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="add_vehicle_type"><div class="col-md-5 form-group"><label>Name</label><input class="form-control" name="vehicle_name" placeholder="e.g. CNG" required></div><div class="col-md-4 form-group"><label>Code</label><input class="form-control" name="vehicle_code" placeholder="e.g. cng" required></div><div class="col-md-3 form-group"><label>Capacity</label><input class="form-control" type="number" min="0" name="default_capacity" value="0"></div><div class="col-12 text-right"><button class="btn btn-info btn-sm">Add Vehicle Type</button></div></form>
-            <div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Vehicle</th><th>Code</th><th>Capacity</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($vehicle = mysqli_fetch_assoc($vehicle_types)) { ?><tr><td><?= htmlspecialchars($vehicle['vehicle_name']) ?></td><td><?= htmlspecialchars($vehicle['vehicle_code']) ?></td><td><?= (int)$vehicle['default_capacity'] ?></td><td><span class="badge badge-<?= $vehicle['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($vehicle['status']) ?></span></td><td class="text-nowrap"><form method="post" class="d-inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_vehicle_type"><input type="hidden" name="vehicle_id" value="<?= (int)$vehicle['id'] ?>"><input type="hidden" name="status" value="<?= $vehicle['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $vehicle['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form> <form method="post" class="d-inline" onsubmit="return confirm('Delete this vehicle type?');"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="delete_vehicle_type"><input type="hidden" name="vehicle_id" value="<?= (int)$vehicle['id'] ?>"><button class="btn btn-xs btn-outline-danger">Delete</button></form></td></tr><?php } ?></tbody></table></div>
+            <form method="post" id="parking-vehicle-form" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" id="parking-vehicle-action" name="action" value="add_vehicle_type"><input type="hidden" id="parking-vehicle-id" name="vehicle_id" value="0"><div class="col-md-5 form-group"><label>Name</label><input id="parking-vehicle-name" class="form-control" name="vehicle_name" placeholder="e.g. CNG" required></div><div class="col-md-4 form-group"><label>Code</label><input id="parking-vehicle-code" class="form-control" name="vehicle_code" placeholder="e.g. cng" required></div><div class="col-md-3 form-group"><label>Capacity</label><input id="parking-vehicle-capacity" class="form-control" type="number" min="0" name="default_capacity" value="0"></div><div class="col-12 text-right"><button id="parking-vehicle-submit" class="btn btn-info btn-sm">Add Vehicle Type</button></div></form>
+            <div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Vehicle</th><th>Code</th><th>Capacity</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($vehicle = mysqli_fetch_assoc($vehicle_types)) { ?><tr><td><?= htmlspecialchars($vehicle['vehicle_name']) ?></td><td><?= htmlspecialchars($vehicle['vehicle_code']) ?></td><td><?= (int)$vehicle['default_capacity'] ?></td><td><span class="badge badge-<?= $vehicle['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($vehicle['status']) ?></span></td><td class="d-flex" style="gap:4px"><button type="button" class="btn btn-xs btn-outline-primary js-edit-vehicle" data-id="<?= (int)$vehicle['id'] ?>" data-name="<?= htmlspecialchars($vehicle['vehicle_name'], ENT_QUOTES) ?>" data-code="<?= htmlspecialchars($vehicle['vehicle_code'], ENT_QUOTES) ?>" data-capacity="<?= (int)$vehicle['default_capacity'] ?>">Edit</button><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_vehicle_type"><input type="hidden" name="vehicle_id" value="<?= (int)$vehicle['id'] ?>"><input type="hidden" name="status" value="<?= $vehicle['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $vehicle['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form><form method="post" onsubmit="return confirm('Delete this vehicle type?');"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="delete_vehicle_type"><input type="hidden" name="vehicle_id" value="<?= (int)$vehicle['id'] ?>"><button class="btn btn-xs btn-outline-danger">Delete</button></form></td></tr><?php } ?></tbody></table></div>
         </div></div>
     </div>
     <div class="col-lg-6">
         <div class="card card-outline card-warning"><div class="card-header"><h3 class="card-title">Rate Plans</h3></div><div class="card-body">
-            <form method="post" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="add_rate_plan"><div class="col-md-6 form-group"><label>Vehicle Type</label><select class="form-control" name="vehicle_type_id" required><option value="">Select</option><?php while ($type = mysqli_fetch_assoc($active_vehicle_types)) { ?><option value="<?= (int)$type['id'] ?>"><?= htmlspecialchars($type['vehicle_name']) ?></option><?php } ?></select></div><div class="col-md-6 form-group"><label>Plan Name</label><input class="form-control" name="plan_name" placeholder="e.g. Standard Car Rate" required></div><div class="col-md-4 form-group"><label>Rate Mode</label><select class="form-control" name="rate_mode"><option value="duration">Duration</option><option value="fixed">Fixed</option><option value="free">Free</option></select></div><div class="col-md-4 form-group"><label>Fixed Fee</label><input class="form-control" type="number" min="0" step="0.01" name="fixed_fee" value="0"></div><div class="col-md-4 form-group"><label>Initial Minutes / Fee</label><div class="input-group"><input class="form-control" type="number" min="0" name="initial_minutes" value="0"><input class="form-control" type="number" min="0" step="0.01" name="initial_fee" value="0"></div></div><div class="col-md-6 form-group"><label>Extra Minutes / Fee</label><div class="input-group"><input class="form-control" type="number" min="1" name="extra_minutes" value="60"><input class="form-control" type="number" min="0" step="0.01" name="extra_fee" value="0"></div></div><div class="col-md-6 form-group"><label>Daily Maximum Fee</label><input class="form-control" type="number" min="0" step="0.01" name="daily_max_fee" value="0"></div><div class="col-12 text-right"><button class="btn btn-warning btn-sm">Add Rate Plan</button></div></form>
-            <div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Plan</th><th>Vehicle</th><th>Mode</th><th>Rate</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($rate = mysqli_fetch_assoc($rate_plans)) { ?><tr><td><?= htmlspecialchars($rate['plan_name']) ?></td><td><?= htmlspecialchars($rate['vehicle_name']) ?></td><td><?= htmlspecialchars($rate['rate_mode']) ?></td><td><?= number_format((float)($rate['rate_mode'] === 'fixed' ? $rate['fixed_fee'] : $rate['initial_fee']), 2) ?></td><td><span class="badge badge-<?= $rate['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($rate['status']) ?></span></td><td><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_rate_plan"><input type="hidden" name="rate_id" value="<?= (int)$rate['id'] ?>"><input type="hidden" name="status" value="<?= $rate['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $rate['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form></td></tr><?php } ?></tbody></table></div>
+            <form method="post" id="parking-rate-form" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" id="parking-rate-action" name="action" value="add_rate_plan"><input type="hidden" id="parking-rate-id" name="rate_id" value="0"><div class="col-md-6 form-group"><label>Vehicle Type</label><select id="parking-rate-vehicle" class="form-control" name="vehicle_type_id" required><option value="">Select</option><?php while ($type = mysqli_fetch_assoc($active_vehicle_types)) { ?><option value="<?= (int)$type['id'] ?>"><?= htmlspecialchars($type['vehicle_name']) ?></option><?php } ?></select></div><div class="col-md-6 form-group"><label>Plan Name</label><input id="parking-rate-name" class="form-control" name="plan_name" placeholder="e.g. Standard Car Rate" required></div><div class="col-md-4 form-group"><label>Rate Mode</label><select id="parking-rate-mode" class="form-control" name="rate_mode"><option value="duration">Duration</option><option value="fixed">Fixed</option><option value="free">Free</option></select></div><div class="col-md-4 form-group"><label>Fixed Fee</label><input id="parking-rate-fixed-fee" class="form-control" type="number" min="0" step="0.01" name="fixed_fee" value="0"></div><div class="col-md-4 form-group"><label>Initial Minutes / Fee</label><div class="input-group"><input id="parking-rate-initial-minutes" class="form-control" type="number" min="0" name="initial_minutes" value="0"><input id="parking-rate-initial-fee" class="form-control" type="number" min="0" step="0.01" name="initial_fee" value="0"></div></div><div class="col-md-6 form-group"><label>Extra Minutes / Fee</label><div class="input-group"><input id="parking-rate-extra-minutes" class="form-control" type="number" min="1" name="extra_minutes" value="60"><input id="parking-rate-extra-fee" class="form-control" type="number" min="0" step="0.01" name="extra_fee" value="0"></div></div><div class="col-md-6 form-group"><label>Daily Maximum Fee</label><input id="parking-rate-daily-max" class="form-control" type="number" min="0" step="0.01" name="daily_max_fee" value="0"></div><div class="col-12 text-right"><button id="parking-rate-submit" class="btn btn-warning btn-sm">Add Rate Plan</button></div></form>
+            <div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Plan</th><th>Vehicle</th><th>Mode</th><th>Rate</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($rate = mysqli_fetch_assoc($rate_plans)) { ?><tr><td><?= htmlspecialchars($rate['plan_name']) ?></td><td><?= htmlspecialchars($rate['vehicle_name']) ?></td><td><?= htmlspecialchars($rate['rate_mode']) ?></td><td><?= number_format((float)($rate['rate_mode'] === 'fixed' ? $rate['fixed_fee'] : $rate['initial_fee']), 2) ?></td><td><span class="badge badge-<?= $rate['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($rate['status']) ?></span></td><td class="d-flex" style="gap:4px"><button type="button" class="btn btn-xs btn-outline-primary js-edit-rate" data-id="<?= (int)$rate['id'] ?>" data-vehicle="<?= (int)$rate['vehicle_type_id'] ?>" data-name="<?= htmlspecialchars($rate['plan_name'], ENT_QUOTES) ?>" data-mode="<?= htmlspecialchars($rate['rate_mode'], ENT_QUOTES) ?>" data-fixed-fee="<?= htmlspecialchars((string)$rate['fixed_fee'], ENT_QUOTES) ?>" data-initial-minutes="<?= (int)$rate['initial_minutes'] ?>" data-initial-fee="<?= htmlspecialchars((string)$rate['initial_fee'], ENT_QUOTES) ?>" data-extra-minutes="<?= (int)$rate['extra_minutes'] ?>" data-extra-fee="<?= htmlspecialchars((string)$rate['extra_fee'], ENT_QUOTES) ?>" data-daily-max="<?= htmlspecialchars((string)$rate['daily_max_fee'], ENT_QUOTES) ?>">Edit</button><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_rate_plan"><input type="hidden" name="rate_id" value="<?= (int)$rate['id'] ?>"><input type="hidden" name="status" value="<?= $rate['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $rate['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form><form method="post" onsubmit="return confirm('Delete this rate plan?');"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="delete_rate_plan"><input type="hidden" name="rate_id" value="<?= (int)$rate['id'] ?>"><button class="btn btn-xs btn-outline-danger">Delete</button></form></td></tr><?php } ?></tbody></table></div>
         </div></div>
     </div>
 </div>
 
 <div class="card card-outline card-success"><div class="card-header"><h3 class="card-title">Entry / Exit Gates</h3></div><div class="card-body">
-    <form method="post" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="add_gate"><div class="<?= $parking_multi_branch_enabled ? 'col-md-3' : 'col-md-4' ?> form-group"><label>Gate Name</label><input class="form-control" name="gate_name" placeholder="Main Entry" required></div><div class="<?= $parking_multi_branch_enabled ? 'col-md-2' : 'col-md-3' ?> form-group"><label>Gate Code</label><input class="form-control" name="gate_code" placeholder="ENTRY-1" required></div><div class="col-md-2 form-group"><label>Type</label><select class="form-control" name="gate_type"><option value="entry">Entry</option><option value="exit">Exit</option><option value="both">Both</option></select></div><?php if ($parking_multi_branch_enabled) { ?><div class="col-md-3 form-group"><label>Branch</label><select class="form-control" name="branch_id"><option value="0">Head Office</option><?php while ($branch = mysqli_fetch_assoc($branches)) { ?><option value="<?= (int)$branch['id'] ?>"><?= htmlspecialchars($branch['branch_name']) ?></option><?php } ?></select></div><?php } ?><div class="<?= $parking_multi_branch_enabled ? 'col-md-2' : 'col-md-3' ?> form-group"><label>Terminal Name</label><input class="form-control" name="terminal_name" placeholder="Counter PC 1"></div><div class="col-12 text-right"><button class="btn btn-success btn-sm">Add Gate</button></div></form>
-    <div class="table-responsive"><table class="table table-bordered table-sm mb-0"><thead><tr><th>Gate</th><th>Code</th><th>Type</th><?php if ($parking_multi_branch_enabled) { ?><th>Branch</th><?php } ?><th>Terminal</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($gate = mysqli_fetch_assoc($gates)) { ?><tr><td><?= htmlspecialchars($gate['gate_name']) ?></td><td><?= htmlspecialchars($gate['gate_code']) ?></td><td><?= htmlspecialchars(ucfirst($gate['gate_type'])) ?></td><?php if ($parking_multi_branch_enabled) { ?><td><?= htmlspecialchars($gate['branch_name']) ?></td><?php } ?><td><?= htmlspecialchars($gate['terminal_name'] ?: '-') ?></td><td><span class="badge badge-<?= $gate['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($gate['status']) ?></span></td><td><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_gate"><input type="hidden" name="gate_id" value="<?= (int)$gate['id'] ?>"><input type="hidden" name="status" value="<?= $gate['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $gate['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form></td></tr><?php } ?></tbody></table></div>
+    <form method="post" id="parking-gate-form" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" id="parking-gate-action" name="action" value="add_gate"><input type="hidden" id="parking-gate-id" name="gate_id" value="0"><div class="<?= $parking_multi_branch_enabled ? 'col-md-3' : 'col-md-4' ?> form-group"><label>Gate Name</label><input id="parking-gate-name" class="form-control" name="gate_name" placeholder="Main Entry" required></div><div class="<?= $parking_multi_branch_enabled ? 'col-md-2' : 'col-md-3' ?> form-group"><label>Gate Code</label><input id="parking-gate-code" class="form-control" name="gate_code" placeholder="ENTRY-1" required></div><div class="col-md-2 form-group"><label>Type</label><select id="parking-gate-type" class="form-control" name="gate_type"><option value="entry">Entry</option><option value="exit">Exit</option><option value="both">Both</option></select></div><?php if ($parking_multi_branch_enabled) { ?><div class="col-md-3 form-group"><label>Branch</label><select id="parking-gate-branch" class="form-control" name="branch_id"><option value="0">Head Office</option><?php while ($branch = mysqli_fetch_assoc($branches)) { ?><option value="<?= (int)$branch['id'] ?>"><?= htmlspecialchars($branch['branch_name']) ?></option><?php } ?></select></div><?php } ?><div class="<?= $parking_multi_branch_enabled ? 'col-md-2' : 'col-md-3' ?> form-group"><label>Terminal Name</label><input id="parking-gate-terminal" class="form-control" name="terminal_name" placeholder="Counter PC 1"></div><div class="col-12 text-right"><button id="parking-gate-submit" class="btn btn-success btn-sm">Add Gate</button></div></form>
+    <div class="table-responsive"><table class="table table-bordered table-sm mb-0"><thead><tr><th>Gate</th><th>Code</th><th>Type</th><?php if ($parking_multi_branch_enabled) { ?><th>Branch</th><?php } ?><th>Terminal</th><th>Status</th><th>Action</th></tr></thead><tbody><?php while ($gate = mysqli_fetch_assoc($gates)) { ?><tr><td><?= htmlspecialchars($gate['gate_name']) ?></td><td><?= htmlspecialchars($gate['gate_code']) ?></td><td><?= htmlspecialchars(ucfirst($gate['gate_type'])) ?></td><?php if ($parking_multi_branch_enabled) { ?><td><?= htmlspecialchars($gate['branch_name']) ?></td><?php } ?><td><?= htmlspecialchars($gate['terminal_name'] ?: '-') ?></td><td><span class="badge badge-<?= $gate['status'] === 'active' ? 'success' : 'secondary' ?>"><?= htmlspecialchars($gate['status']) ?></span></td><td class="d-flex" style="gap:4px"><button type="button" class="btn btn-xs btn-outline-primary js-edit-gate" data-id="<?= (int)$gate['id'] ?>" data-name="<?= htmlspecialchars($gate['gate_name'], ENT_QUOTES) ?>" data-code="<?= htmlspecialchars($gate['gate_code'], ENT_QUOTES) ?>" data-type="<?= htmlspecialchars($gate['gate_type'], ENT_QUOTES) ?>" data-terminal="<?= htmlspecialchars($gate['terminal_name'], ENT_QUOTES) ?>" data-branch="<?= (int)$gate['branch_id'] ?>">Edit</button><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_gate"><input type="hidden" name="gate_id" value="<?= (int)$gate['id'] ?>"><input type="hidden" name="status" value="<?= $gate['status'] === 'active' ? 'inactive' : 'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $gate['status'] === 'active' ? 'Deactivate' : 'Activate' ?></button></form><form method="post" onsubmit="return confirm('Delete this gate?');"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="delete_gate"><input type="hidden" name="gate_id" value="<?= (int)$gate['id'] ?>"><button class="btn btn-xs btn-outline-danger">Delete</button></form></td></tr><?php } ?></tbody></table></div>
 </div></div>
 
-<div class="card card-outline card-dark"><div class="card-header"><h3 class="card-title">Gate Terminal Staff Access</h3></div><div class="card-body"><p class="text-muted">Assign a staff login to a specific gate. The staff must also have the matching Parking Entry or Parking Exit permission.</p><form method="post" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="save_gate_assignment"><div class="col-md-4 form-group"><label>Staff Login</label><select class="form-control" name="assigned_user_id" required><option value="">Select staff</option><?php while($staff=mysqli_fetch_assoc($parking_staff)){ ?><option value="<?= (int)$staff['id'] ?>"><?= htmlspecialchars(($staff['name'] ?: $staff['username']) . ' (' . $staff['username'] . ')') ?></option><?php } ?></select></div><div class="col-md-4 form-group"><label>Gate Terminal</label><select class="form-control" name="assigned_gate_id" required><option value="">Select gate</option><?php while($gate=mysqli_fetch_assoc($assignment_gates)){ ?><option value="<?= (int)$gate['id'] ?>"><?= htmlspecialchars($gate['gate_name'].' ('.$gate['gate_code'].' · '.ucfirst($gate['gate_type']).')') ?></option><?php } ?></select></div><div class="col-md-2 form-group"><label>Access</label><select class="form-control" name="access_type"><option value="entry">Entry Only</option><option value="exit">Exit Only</option><option value="both">Both</option></select></div><div class="col-md-2 form-group d-flex align-items-end"><button class="btn btn-dark btn-block">Save Assignment</button></div></form><div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Staff</th><th>Gate</th><th>Terminal Access</th><th>Status</th><th></th></tr></thead><tbody><?php if(mysqli_num_rows($gate_assignments)===0){ ?><tr><td colspan="5" class="text-center text-muted py-3">No gate terminal assignment yet.</td></tr><?php } ?><?php while($assignment=mysqli_fetch_assoc($gate_assignments)){ ?><tr><td><?= htmlspecialchars(($assignment['staff_name'] ?: $assignment['username']) . ' (' . $assignment['username'] . ')') ?></td><td><?= htmlspecialchars($assignment['gate_name'].' ('.$assignment['gate_code'].')') ?></td><td><?= htmlspecialchars(ucfirst($assignment['access_type'])) ?></td><td><span class="badge badge-<?= $assignment['status']==='active'?'success':'secondary' ?>"><?= htmlspecialchars($assignment['status']) ?></span></td><td><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_gate_assignment"><input type="hidden" name="assignment_id" value="<?= (int)$assignment['id'] ?>"><input type="hidden" name="status" value="<?= $assignment['status']==='active'?'inactive':'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $assignment['status']==='active'?'Deactivate':'Activate' ?></button></form></td></tr><?php } ?></tbody></table></div></div></div>
+<div class="card card-outline card-dark"><div class="card-header"><h3 class="card-title">Gate Terminal Staff Access</h3></div><div class="card-body"><p class="text-muted">Assign a staff login to a specific gate. The staff must also have the matching Parking Entry or Parking Exit permission.</p><form method="post" id="parking-assignment-form" class="row mb-4"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" id="parking-assignment-action" name="action" value="save_gate_assignment"><input type="hidden" id="parking-assignment-id" name="assignment_id" value="0"><div class="col-md-4 form-group"><label>Staff Login</label><select id="parking-assignment-staff" class="form-control" name="assigned_user_id" required><option value="">Select staff</option><?php while($staff=mysqli_fetch_assoc($parking_staff)){ ?><option value="<?= (int)$staff['id'] ?>"><?= htmlspecialchars(($staff['name'] ?: $staff['username']) . ' (' . $staff['username'] . ')') ?></option><?php } ?></select></div><div class="col-md-4 form-group"><label>Gate Terminal</label><select id="parking-assignment-gate" class="form-control" name="assigned_gate_id" required><option value="">Select gate</option><?php while($gate=mysqli_fetch_assoc($assignment_gates)){ ?><option value="<?= (int)$gate['id'] ?>"><?= htmlspecialchars($gate['gate_name'].' ('.$gate['gate_code'].' · '.ucfirst($gate['gate_type']).')') ?></option><?php } ?></select></div><div class="col-md-2 form-group"><label>Access</label><select id="parking-assignment-access" class="form-control" name="access_type"><option value="entry">Entry Only</option><option value="exit">Exit Only</option><option value="both">Both</option></select></div><div class="col-md-2 form-group d-flex align-items-end"><button id="parking-assignment-submit" class="btn btn-dark btn-block">Save Assignment</button></div></form><div class="table-responsive"><table class="table table-sm table-bordered mb-0"><thead><tr><th>Staff</th><th>Gate</th><th>Terminal Access</th><th>Status</th><th>Action</th></tr></thead><tbody><?php if(mysqli_num_rows($gate_assignments)===0){ ?><tr><td colspan="5" class="text-center text-muted py-3">No gate terminal assignment yet.</td></tr><?php } ?><?php while($assignment=mysqli_fetch_assoc($gate_assignments)){ ?><tr><td><?= htmlspecialchars(($assignment['staff_name'] ?: $assignment['username']) . ' (' . $assignment['username'] . ')') ?></td><td><?= htmlspecialchars($assignment['gate_name'].' ('.$assignment['gate_code'].')') ?></td><td><?= htmlspecialchars(ucfirst($assignment['access_type'])) ?></td><td><span class="badge badge-<?= $assignment['status']==='active'?'success':'secondary' ?>"><?= htmlspecialchars($assignment['status']) ?></span></td><td class="d-flex" style="gap:4px"><button type="button" class="btn btn-xs btn-outline-primary js-edit-assignment" data-id="<?= (int)$assignment['id'] ?>" data-staff="<?= (int)$assignment['user_id'] ?>" data-gate="<?= (int)$assignment['gate_id'] ?>" data-access="<?= htmlspecialchars($assignment['access_type'], ENT_QUOTES) ?>">Edit</button><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="toggle_gate_assignment"><input type="hidden" name="assignment_id" value="<?= (int)$assignment['id'] ?>"><input type="hidden" name="status" value="<?= $assignment['status']==='active'?'inactive':'active' ?>"><button class="btn btn-xs btn-outline-secondary"><?= $assignment['status']==='active'?'Deactivate':'Activate' ?></button></form><form method="post" onsubmit="return confirm('Delete this staff access?');"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_setup_csrf']) ?>"><input type="hidden" name="action" value="delete_gate_assignment"><input type="hidden" name="assignment_id" value="<?= (int)$assignment['id'] ?>"><button class="btn btn-xs btn-outline-danger">Delete</button></form></td></tr><?php } ?></tbody></table></div></div></div>
 
 </div>
 <script>
 (function () {
+    document.addEventListener('click', function (event) {
+        var vehicleButton = event.target.closest('.js-edit-vehicle');
+        if (vehicleButton) {
+            document.getElementById('parking-vehicle-action').value = 'update_vehicle_type';
+            document.getElementById('parking-vehicle-id').value = vehicleButton.dataset.id;
+            document.getElementById('parking-vehicle-name').value = vehicleButton.dataset.name;
+            document.getElementById('parking-vehicle-code').value = vehicleButton.dataset.code;
+            document.getElementById('parking-vehicle-capacity').value = vehicleButton.dataset.capacity;
+            document.getElementById('parking-vehicle-submit').textContent = 'Update Vehicle Type';
+            document.getElementById('parking-vehicle-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        var rateButton = event.target.closest('.js-edit-rate');
+        if (rateButton) {
+            document.getElementById('parking-rate-action').value = 'update_rate_plan';
+            document.getElementById('parking-rate-id').value = rateButton.dataset.id;
+            document.getElementById('parking-rate-vehicle').value = rateButton.dataset.vehicle;
+            document.getElementById('parking-rate-name').value = rateButton.dataset.name;
+            document.getElementById('parking-rate-mode').value = rateButton.dataset.mode;
+            document.getElementById('parking-rate-fixed-fee').value = rateButton.dataset.fixedFee;
+            document.getElementById('parking-rate-initial-minutes').value = rateButton.dataset.initialMinutes;
+            document.getElementById('parking-rate-initial-fee').value = rateButton.dataset.initialFee;
+            document.getElementById('parking-rate-extra-minutes').value = rateButton.dataset.extraMinutes;
+            document.getElementById('parking-rate-extra-fee').value = rateButton.dataset.extraFee;
+            document.getElementById('parking-rate-daily-max').value = rateButton.dataset.dailyMax;
+            document.getElementById('parking-rate-submit').textContent = 'Update Rate Plan';
+            document.getElementById('parking-rate-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        var gateButton = event.target.closest('.js-edit-gate');
+        if (gateButton) {
+            document.getElementById('parking-gate-action').value = 'update_gate';
+            document.getElementById('parking-gate-id').value = gateButton.dataset.id;
+            document.getElementById('parking-gate-name').value = gateButton.dataset.name;
+            document.getElementById('parking-gate-code').value = gateButton.dataset.code;
+            document.getElementById('parking-gate-type').value = gateButton.dataset.type;
+            document.getElementById('parking-gate-terminal').value = gateButton.dataset.terminal;
+            var branch = document.getElementById('parking-gate-branch');
+            if (branch) branch.value = gateButton.dataset.branch || '0';
+            document.getElementById('parking-gate-submit').textContent = 'Update Gate';
+            document.getElementById('parking-gate-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        var assignmentButton = event.target.closest('.js-edit-assignment');
+        if (assignmentButton) {
+            document.getElementById('parking-assignment-action').value = 'update_gate_assignment';
+            document.getElementById('parking-assignment-id').value = assignmentButton.dataset.id;
+            document.getElementById('parking-assignment-staff').value = assignmentButton.dataset.staff;
+            document.getElementById('parking-assignment-gate').value = assignmentButton.dataset.gate;
+            document.getElementById('parking-assignment-access').value = assignmentButton.dataset.access;
+            document.getElementById('parking-assignment-submit').textContent = 'Update Assignment';
+            document.getElementById('parking-assignment-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    });
+
     function showParkingSetupMessage(message, type) {
         var content = document.getElementById('parking-setup-content');
         if (!content) return;

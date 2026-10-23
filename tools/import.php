@@ -54,6 +54,7 @@ function import_restore_reference_maps()
         'destination_batch_id' => 'stock_batches',
         'distribution_id' => 'stock_distributions',
         'damage_return_id' => 'stock_damage_returns',
+        'adjustment_id' => 'branch_stock_adjustments',
         'completed_invoice_id' => 'invoices',
         'restaurant_table_id' => 'restaurant_tables',
         'vehicle_type_id' => 'parking_vehicle_types',
@@ -107,7 +108,9 @@ function import_restore_priority($table)
         'products' => 55,
         'packages' => 60,
         'purchases' => 70,
+        'branch_stock_adjustments' => 75,
         'purchase_items' => 80,
+        'branch_stock_adjustment_items' => 81,
         'stock_distributions' => 81,
         'stock_batches' => 82,
         'stock_distribution_items' => 91,
@@ -241,7 +244,7 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
     // Stock batches use a polymorphic source reference, so map it explicitly.
     if($table === 'stock_batches' && isset($row['source_id'], $row['source_type'])){
         $source_type = strtolower(trim((string)$row['source_type']));
-        $source_table = ['purchase'=>'purchases', 'invoice'=>'invoices', 'sales_return'=>'invoice_items', 'product_opening'=>'products', 'opening'=>'products', 'distribution'=>'stock_distributions'][$source_type] ?? null;
+        $source_table = ['purchase'=>'purchases', 'invoice'=>'invoices', 'sales_return'=>'invoice_items', 'product_opening'=>'products', 'opening'=>'products', 'distribution'=>'stock_distributions', 'branch_adjustment'=>'branch_stock_adjustment_items'][$source_type] ?? null;
 
         if($source_table && isset($id_maps[$source_table][(int)$row['source_id']])){
             $row['source_id'] = $id_maps[$source_table][(int)$row['source_id']];

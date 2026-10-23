@@ -21,7 +21,7 @@ function restaurant_module_menu($label, $items)
             ['suppliers/index.php', 'Suppliers'],
             ['purchases/index.php', 'Purchases'],
             ['suppliers/supplier_payment.php', 'Supplier Due Payment'],
-            ['suppliers/supplier_payment_history.php', 'Payment History'],
+            ['suppliers/supplier_payment_history.php', 'Due Payment History'],
         ],
         'Sales' => [
             ['sales/create_invoice.php', 'Create Invoice'],

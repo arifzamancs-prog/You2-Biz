@@ -280,6 +280,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
     $branch_id = (int)($_POST['branch_id'] ?? 0);
     $name = '';
     $access_permissions = normalize_manager_permissions($_POST['access_permissions'] ?? []);
+    if ($company_type === 'Restaurant & Cafe') {
+        $access_permissions = array_values(array_diff($access_permissions, ['warehouse']));
+    }
     if ($company_type !== 'Fashion house') {
         $access_permissions = array_values(array_diff($access_permissions, ['stock_live_report']));
     }
@@ -323,6 +326,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
     if($company_type === 'Car Parking'){
         $parking_permissions = ['main_dashboard', 'parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'];
         $access_permissions = array_values(array_intersect($access_permissions, $parking_permissions));
+    } else {
+        // Parking modules are only available to Car Parking companies.
+        $access_permissions = array_values(array_diff(
+            $access_permissions,
+            ['parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings']
+        ));
     }
 
     // Stock companies use the dedicated Sales and Products modules;
@@ -391,7 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
 
     $selected_branch = null;
     if($branch_id > 0){
-        $branch_stmt = mysqli_prepare($conn, "SELECT id,is_head_office FROM branches WHERE id=? AND user_id=? AND status='active' LIMIT 1");
+        $branch_stmt = mysqli_prepare($conn, "SELECT id,is_head_office FROM branches WHERE id=? AND user_id=? AND status='active'" . warehouse_branch_filter_sql() . " LIMIT 1");
         mysqli_stmt_bind_param($branch_stmt, 'ii', $branch_id, $user_id);
         mysqli_stmt_execute($branch_stmt);
         $selected_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($branch_stmt));
@@ -773,7 +782,7 @@ mysqli_stmt_bind_param($staff_options_stmt, 'iiii', $user_id, $selected_staff_id
 mysqli_stmt_execute($staff_options_stmt);
 $staff_options = mysqli_stmt_get_result($staff_options_stmt);
 
-$branch_options_stmt = mysqli_prepare($conn, "SELECT id,branch_name,is_head_office FROM branches WHERE user_id=? AND status='active' ORDER BY is_head_office DESC,branch_name ASC");
+$branch_options_stmt = mysqli_prepare($conn, "SELECT id,branch_name,is_head_office FROM branches WHERE user_id=? AND status='active'" . warehouse_branch_filter_sql() . " ORDER BY is_head_office DESC,branch_name ASC");
 mysqli_stmt_bind_param($branch_options_stmt, 'i', $user_id);
 mysqli_stmt_execute($branch_options_stmt);
 $branch_options = mysqli_stmt_get_result($branch_options_stmt);
@@ -877,8 +886,9 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Service type' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Car Parking' && !in_array($permission_key, ['main_dashboard', 'parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; if(in_array($company_type, ['Stock Product', 'Fashion house'], true) && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($company_type === 'Restaurant & Cafe' && $permission_key === 'warehouse') continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Service type' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Car Parking' && !in_array($permission_key, ['main_dashboard', 'parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; if(in_array($company_type, ['Stock Product', 'Fashion house'], true) && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
                                 <?php if ($permission_key === 'stock_live_report' && $company_type !== 'Fashion house') continue; ?>
+                                <?php if ($company_type !== 'Car Parking' && in_array($permission_key, ['parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; ?>
                                 <div class="col-md-6 mb-2">
                                     <div class="custom-control custom-checkbox">
                                         <input type="checkbox" class="custom-control-input" id="permission_<?= htmlspecialchars($permission_key); ?>" name="access_permissions[]" value="<?= htmlspecialchars($permission_key); ?>" <?= in_array($permission_key, $selected_access_permissions, true) ? 'checked' : ''; ?>>

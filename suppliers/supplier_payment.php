@@ -36,7 +36,7 @@ $sql = "SELECT
         LEFT JOIN suppliers s
             ON s.id = p.supplier_id
             AND s.user_id = p.user_id
-        WHERE p.user_id=?
+        WHERE p.user_id=?" . restaurant_catalog_scope_sql($conn, 'p') . "
         AND p.due_amount > 0
         ORDER BY p.purchase_date DESC, p.id DESC";
 
@@ -104,8 +104,9 @@ while($row = mysqli_fetch_assoc($result)){
 
         <style>
             #example1 .vendor-column{min-width:160px;width:18%}
-            #example1 .date-column{min-width:120px;width:11%;white-space:nowrap}
+            #example1 .date-column{min-width:100px;width:8%;white-space:nowrap}
             #example1 .amount-column{min-width:125px;width:12%;white-space:nowrap}
+            #example1 .due-column{min-width:95px;width:8%;white-space:nowrap}
             #example1 .action-column{min-width:125px;width:125px;white-space:nowrap}
             #example1.purchase-payment-compact .action-column{min-width:0;width:1%;white-space:nowrap}
         </style>
@@ -123,7 +124,7 @@ while($row = mysqli_fetch_assoc($result)){
                 <th class="vendor-column"><?= supplier_display_text('Supplier'); ?></th>
                 <th class="amount-column">Total</th>
                 <th class="amount-column">Paid</th>
-                <th class="amount-column">Due</th>
+                <th class="due-column">Due</th>
                 <th>Status</th>
                 <th class="action-column">Action</th>
 

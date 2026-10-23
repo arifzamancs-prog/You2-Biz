@@ -94,6 +94,14 @@ require_once '../includes/sidebar.php';
     </div>
 </div>
 
+<style>
+#category_id option { background-color: #fff; color: #343a40; }
+#category_id option[data-product-type="stock_product"],
+#category_id.restaurant-stock-selected {
+    color: #003f88;
+}
+</style>
+
 <script>
 (function () {
     const category = document.getElementById('category_id');
@@ -105,6 +113,7 @@ require_once '../includes/sidebar.php';
     function syncProductType() {
         const option = category.options[category.selectedIndex];
         const isStock = option && option.dataset.productType === 'stock_product';
+        category.classList.toggle('restaurant-stock-selected', Boolean(isStock));
         stockFields.forEach(field => field.classList.toggle('d-none', !isStock));
         if (!isStock) {
             purchase.value = 0;

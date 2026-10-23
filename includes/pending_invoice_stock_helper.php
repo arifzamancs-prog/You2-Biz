@@ -62,7 +62,7 @@ function product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $exclu
             FROM products p
             LEFT JOIN product_categories c ON c.id=p.category_id
             WHERE p.id=?
-            AND p.user_id=?
+            AND p.user_id=?" . restaurant_catalog_scope_sql($conn, 'p', true) . "
             LIMIT 1 FOR UPDATE";
 
     $stmt = mysqli_prepare($conn, $sql);

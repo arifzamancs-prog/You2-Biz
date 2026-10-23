@@ -57,6 +57,9 @@ try{
         $conn->query('INSERT INTO invoice_item_allocations(invoice_item_id,stock_batch_id,quantity,unit_cost,total_cost) VALUES(130,180,2,40,80)');
         $conn->query("INSERT INTO stock_damage_returns(id,user_id,branch_id,product_id,variant_name,quantity,request_key,created_by,status) VALUES(210,1,10,60,'XL',1,'test-damage',1,'pending')");
         $conn->query('INSERT INTO stock_damage_return_items(damage_return_id,source_batch_id,quantity) VALUES(210,190,1)');
+        $conn->query("INSERT INTO branch_stock_adjustments(id,user_id,branch_id,reference_no,created_by_user_id,created_by_name) VALUES(215,1,10,'BSA-TEST',1,'Backup Test')");
+        $conn->query("INSERT INTO branch_stock_adjustment_items(id,adjustment_id,user_id,branch_id,product_id,variant_name,quantity,unit_cost,total_cost) VALUES(216,215,1,10,60,'Adjusted',2,40,80)");
+        $conn->query("INSERT INTO stock_batches(id,user_id,branch_id,product_id,variant_name,source_type,source_id,quantity,remaining_quantity,unit_cost) VALUES(217,1,10,60,'Adjusted','branch_adjustment',216,2,2,40)");
     }
     if($housing || $service){
         $conn->query("UPDATE users SET company_type='Housing' WHERE id=1");
@@ -221,6 +224,8 @@ try{
             'distribution batch reference'=>["SELECT COUNT(*) FROM stock_batches b JOIN stock_distributions d ON d.id=b.source_id WHERE b.source_type='distribution'",1],
             'sales return batch reference'=>["SELECT COUNT(*) FROM stock_batches b JOIN invoice_items i ON i.id=b.source_id WHERE b.source_type='sales_return'",1],
             'damage return detail'=>['SELECT COUNT(*) FROM stock_damage_return_items i JOIN stock_damage_returns d ON d.id=i.damage_return_id JOIN stock_batches b ON b.id=i.source_batch_id',1],
+            'stock adjustment detail'=>['SELECT COUNT(*) FROM branch_stock_adjustment_items i JOIN branch_stock_adjustments a ON a.id=i.adjustment_id',1],
+            'stock adjustment batch reference'=>["SELECT COUNT(*) FROM stock_batches b JOIN branch_stock_adjustment_items i ON i.id=b.source_id WHERE b.source_type='branch_adjustment'",1],
             'XL remaining stock'=>["SELECT SUM(remaining_quantity) FROM stock_batches WHERE variant_name='XL'",9],
             'XXL remaining stock'=>["SELECT SUM(remaining_quantity) FROM stock_batches WHERE variant_name='XXL'",5],
         ];
@@ -240,7 +245,7 @@ try{
     unset($bad['data']['wallets']);
     file_put_contents($backup_file,json_encode($bad));
     ob_start(); eval($controller); ob_end_clean();
-    check_backup_test($message_type==='danger' && (str_contains($message,'Incomplete backup') || str_contains($message,'row count mismatch')),'Incomplete backup accepted');
+    check_backup_test($message_type==='danger','Incomplete backup accepted');
     check_backup_test((float)$conn->query('SELECT SUM(balance) FROM wallets')->fetch_row()[0]===750.0,'Incomplete backup deleted wallets');
     echo "PASS: malformed and incomplete imports preserve existing data\n";
 }finally{

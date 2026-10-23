@@ -49,7 +49,7 @@ if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
     $navbar_can_switch_branches = is_admin_user()
         || (is_manager_user() && manager_can_view_all_branches($conn, $navbar_company_id));
     if($navbar_can_switch_branches && company_multi_branch_enabled($conn, $navbar_company_id)){
-        $branch_stmt = mysqli_prepare($conn, "SELECT id,branch_name,branch_code FROM branches WHERE user_id=? AND status='active' ORDER BY CASE WHEN is_head_office=1 THEN 0 WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 1 ELSE 2 END, branch_name ASC");
+        $branch_stmt = mysqli_prepare($conn, "SELECT id,branch_name,branch_code FROM branches WHERE user_id=? AND status='active'" . warehouse_branch_filter_sql() . " ORDER BY CASE WHEN is_head_office=1 THEN 0 WHEN LOWER(TRIM(branch_name))='main warehouse' THEN 1 ELSE 2 END, branch_name ASC");
         mysqli_stmt_bind_param($branch_stmt, 'i', $navbar_company_id);
         mysqli_stmt_execute($branch_stmt);
         $branch_result = mysqli_stmt_get_result($branch_stmt);

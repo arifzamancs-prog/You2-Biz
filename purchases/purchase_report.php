@@ -26,7 +26,7 @@ $sql = "SELECT
         LEFT JOIN suppliers s
         ON s.id = p.supplier_id
 
-        WHERE p.user_id=?
+        WHERE p.user_id=?" . restaurant_catalog_scope_sql($conn, 'p') . "
         AND p.purchase_date
         BETWEEN ? AND ?
 

@@ -3,16 +3,23 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/supplier_helper.php';
+require_once '../includes/project_package_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
+$is_fashion_retail = project_package_company_type($conn, $user_id) === 'Fashion house';
+$is_restaurant_catalog = project_package_company_type($conn, $user_id) === 'Restaurant & Cafe';
+$show_supplier_code = $is_fashion_retail || $is_restaurant_catalog;
+if ($show_supplier_code) {
+    ensure_supplier_code_column($conn);
+}
 $supplier_can_add = is_admin_user() || (is_manager_user() && manager_has_permission('suppliers'));
 
 $sql = "SELECT *
         FROM suppliers
-        WHERE user_id=?
+        WHERE user_id=?" . restaurant_catalog_scope_sql($conn) . "
         ORDER BY id DESC";
 
 $stmt = mysqli_prepare(
@@ -80,11 +87,12 @@ class="table table-bordered table-striped">
 
 <tr>
 
+<?php if ($show_supplier_code) { ?><th style="width:110px"><?= $is_fashion_retail ? 'Vendor ID' : 'Supplier ID'; ?></th><?php } ?>
 <th>Name</th>
-<th>Phone</th>
+<th style="width:145px">Phone</th>
 <th>Address</th>
 <th>Email</th>
-<th>Status</th>
+<th style="width:95px">Status</th>
 <?php if(manager_can_modify()){ ?>
 <th width="120">Action</th>
 <?php } ?>
@@ -104,6 +112,10 @@ mysqli_fetch_assoc($result)
 ?>
 
 <tr>
+
+<?php if ($show_supplier_code) { ?>
+<td><?= htmlspecialchars($row['supplier_code'] ?: '-'); ?></td>
+<?php } ?>
 
 <td>
 

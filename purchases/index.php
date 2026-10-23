@@ -8,12 +8,13 @@ require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
-$hide_purchase_category_column = in_array(
-    normalize_company_type($_SESSION['company_type'] ?? ''),
-    ['Stock Product', 'Fashion house'],
-    true
-);
-$show_purchase_note_in_number = $hide_purchase_category_column;
+$purchase_company_type = normalize_company_type($_SESSION['company_type'] ?? '');
+$is_stock_purchase_company = in_array($purchase_company_type, ['Stock Product', 'Fashion house'], true);
+// Stock, Housing, and Restaurant companies do not need the Category column in the purchase list.
+$hide_purchase_category_column = $is_stock_purchase_company || in_array($purchase_company_type, ['Housing', 'Restaurant & Cafe'], true);
+$show_purchase_note_in_number = $is_stock_purchase_company;
+$purchase_total_col = $hide_purchase_category_column ? 6 : 7;
+$purchase_paid_col = $purchase_total_col + 1;
 
 $sql = "SELECT
 
@@ -49,7 +50,7 @@ $sql = "SELECT
         ON pc.id = pr.category_id
         AND pc.user_id = p.user_id
 
-        WHERE p.user_id=?
+        WHERE p.user_id=?" . restaurant_catalog_scope_sql($conn, 'p') . "
 
         GROUP BY p.id, s.supplier_name
 
@@ -152,7 +153,10 @@ Create Purchase
 #example1 th:nth-child(1),#example1 td:nth-child(1),
 #example1 th:nth-child(2),#example1 td:nth-child(2),
 #example1 th:nth-child(n+<?= $hide_purchase_category_column ? '5' : '6' ?>),#example1 td:nth-child(n+<?= $hide_purchase_category_column ? '5' : '6' ?>){width:1%;white-space:nowrap}
-#example1 td:nth-child(4){min-width:230px}
+#example1 td:nth-child(3){min-width:170px}
+#example1 td:nth-child(4){min-width:170px}
+#example1 th:nth-child(<?= $purchase_total_col ?>),#example1 td:nth-child(<?= $purchase_total_col ?>),
+#example1 th:nth-child(<?= $purchase_paid_col ?>),#example1 td:nth-child(<?= $purchase_paid_col ?>){min-width:110px}
 #example1 td:nth-child(3),#example1 td:nth-child(4)<?= $hide_purchase_category_column ? '' : ',#example1 td:nth-child(5)' ?>{overflow-wrap:anywhere}
 #example1 td:last-child .btn{margin-bottom:2px}
 </style>

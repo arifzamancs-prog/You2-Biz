@@ -15,7 +15,8 @@ $sql = "SELECT
             w.wallet_name,
             c.category_name,
             s.name AS staff_name,
-            s.staff_code
+            s.staff_code,
+            supplier.supplier_name
         FROM expenses e
         LEFT JOIN wallets w
         ON w.id = e.wallet_id
@@ -26,6 +27,17 @@ $sql = "SELECT
         LEFT JOIN staff s
         ON s.id = e.staff_id
         AND s.user_id = e.user_id
+        LEFT JOIN supplier_payments sp
+        ON sp.id = e.source_id
+        AND sp.user_id = e.user_id
+        AND e.source_type = 'supplier_payment'
+        LEFT JOIN purchases purchase
+        ON purchase.id = e.source_id
+        AND purchase.user_id = e.user_id
+        AND e.source_type = 'purchase_payment'
+        LEFT JOIN suppliers supplier
+        ON supplier.id = COALESCE(sp.supplier_id, purchase.supplier_id)
+        AND supplier.user_id = e.user_id
         WHERE e.user_id=? {$branch_scope}
         ORDER BY e.id DESC";
 
@@ -114,7 +126,9 @@ require_once '../includes/sidebar.php';
                     <?=
                         !empty($row['staff_name'])
                             ? htmlspecialchars($row['staff_name']) . (!empty($row['staff_code']) ? ' (' . htmlspecialchars($row['staff_code']) . ')' : '')
-                            : (in_array(($row['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true) ? 'N/A' : '-');
+                            : (!empty($row['supplier_name'])
+                                ? htmlspecialchars($row['supplier_name'])
+                                : (in_array(($row['source_type'] ?? ''), ['purchase_payment', 'supplier_payment'], true) ? 'N/A' : '-'));
                     ?>
                 </td>
 

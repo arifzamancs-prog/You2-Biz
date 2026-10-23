@@ -59,7 +59,7 @@ if($variant_opening_stmt){
 
 $sql = "SELECT *
         FROM product_categories
-        WHERE user_id=?
+        WHERE user_id=?" . restaurant_catalog_scope_sql($conn, '', true) . "
         ORDER BY category_name ASC";
 
 $stmt = mysqli_prepare($conn,$sql);
@@ -195,11 +195,11 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             foreach($variant_opening as $variant => $variant_qty){
                 mysqli_stmt_bind_param($variant_stmt, 'iis', $user_id, $id, $variant);
                 $stock_saved = mysqli_stmt_execute($variant_stmt) && $stock_saved;
-                $stock_saved = fifo_inventory_create_batch($conn, $user_id, $id, $variant_qty, $purchase_price, 'product_opening', $id, 'OPEN-' . $id, date('Y-m-d'), null, $variant) && $stock_saved;
+                $stock_saved = fifo_inventory_create_batch($conn, $user_id, $id, $variant_qty, $purchase_price, 'product_opening', $id, 'OPEN-' . $id, date('Y-m-d'), ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : null, $variant) && $stock_saved;
             }
             mysqli_stmt_close($variant_stmt);
         }elseif($stock_saved){
-            $stock_saved = fifo_inventory_create_batch($conn, $user_id, $id, $opening_stock, $purchase_price, 'product_opening', $id, 'OPEN-' . $id, date('Y-m-d'));
+            $stock_saved = fifo_inventory_create_batch($conn, $user_id, $id, $opening_stock, $purchase_price, 'product_opening', $id, 'OPEN-' . $id, date('Y-m-d'), ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : null);
         }
     }
 

@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/branch_context_helper.php';
+require_once __DIR__ . '/restaurant_catalog_branch_helper.php';
 
 function stock_head_office_id($conn, $company_id)
 {
@@ -16,6 +17,7 @@ function stock_warehouse_id($conn, $company_id)
 {
     $company_id = (int)$company_id;
     ensure_head_office_branch($conn, $company_id);
+    if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') return stock_head_office_id($conn, $company_id);
     $stmt = mysqli_prepare($conn, "SELECT id FROM branches WHERE user_id=? AND is_head_office=0 AND branch_name='Main Warehouse' LIMIT 1");
     mysqli_stmt_bind_param($stmt, 'i', $company_id);
     mysqli_stmt_execute($stmt);
@@ -37,6 +39,7 @@ function stock_warehouse_id($conn, $company_id)
  */
 function stock_purchase_location_id($conn, $company_id)
 {
+    if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') return selected_branch_id($conn, true);
     return company_multi_branch_enabled($conn, (int)$company_id)
         ? stock_warehouse_id($conn, (int)$company_id)
         : stock_head_office_id($conn, (int)$company_id);
@@ -50,7 +53,7 @@ function stock_migrate_head_office_inventory_to_warehouse($conn, $company_id)
     $done[$company_id] = true;
     // A separate warehouse exists only for companies using Multi Branch.
     // Single-branch stock stays at Head Office so it is immediately sellable.
-    if (!company_multi_branch_enabled($conn, $company_id)) return;
+    if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' || !company_multi_branch_enabled($conn, $company_id)) return;
     $head_id = stock_head_office_id($conn, $company_id);
     $warehouse_id = stock_warehouse_id($conn, $company_id);
     mysqli_query($conn, 'CREATE TABLE IF NOT EXISTS stock_warehouse_migrations (user_id BIGINT UNSIGNED PRIMARY KEY, completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
@@ -170,11 +173,16 @@ function stock_module_bootstrap($conn)
     if ($_SESSION['stock_product_enabled']) {
         require_once __DIR__ . '/fifo_inventory_helper.php';
         ensure_fifo_inventory_tables($conn);
+        restaurant_catalog_branch_schema($conn, $company_id);
         stock_migrate_head_office_inventory_to_warehouse($conn, $company_id);
     }
 
     $path = (string)parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
     if (!preg_match('#/(sales|products|product_categories|purchases|suppliers|warehouse|inventory)/#', $path, $match)) return;
+    if ($_SESSION['company_type'] === 'Restaurant & Cafe' && in_array($match[1], ['warehouse', 'inventory'], true)) {
+        header('Location: ' . app_path('dashboard.php?error=Main%20Warehouse%20is%20inactive%20for%20Restaurant%20%26%20Cafe%20companies'));
+        exit;
+    }
     // Housing uses the ordinary supplier/purchase pages without enabling FIFO.
     // Check staff permission here before bypassing the stock-only bootstrap.
     if ($_SESSION['company_type'] === 'Housing' && in_array($match[1], ['suppliers', 'purchases'], true)) {
@@ -191,6 +199,7 @@ function stock_module_bootstrap($conn)
     require_once __DIR__ . '/fifo_inventory_helper.php';
     ensure_fifo_inventory_tables($conn);
     ensure_branch_accounting_columns($conn, $company_id);
+    restaurant_supplier_branch_schema($conn, $company_id);
     require_once __DIR__ . '/customer_opening_due_helper.php';
     ensure_customer_opening_due_tables($conn);
     $opening_branch = mysqli_query($conn, "SHOW COLUMNS FROM customer_opening_dues LIKE 'branch_id'");
@@ -218,7 +227,8 @@ function stock_module_bootstrap($conn)
     // Supplier purchasing and opening balances feed the central warehouse.
     $central = in_array($module, ['purchases', 'suppliers', 'product_categories'], true)
         || ($module === 'products' && !in_array($file, ['index.php', 'expired.php'], true));
-    if ($central && !stock_can_manage_warehouse($conn)) {
+    $branch_catalog = $_SESSION['company_type'] === 'Restaurant & Cafe' && in_array($module, ['products', 'product_categories', 'suppliers', 'purchases'], true);
+    if ($central && !$branch_catalog && !stock_can_manage_warehouse($conn)) {
         header('Location: ' . app_path('dashboard.php?error=Central stock management requires Head Office access'));
         exit;
     }
@@ -230,7 +240,8 @@ function stock_module_bootstrap($conn)
         // Vendor payments are always made from Head Office finance. This is
         // intentionally separate from the stock location: under Multi Branch
         // purchased stock lands in Main Warehouse, not in a branch wallet.
-        $GLOBALS['stock_wallet_branch_id'] = stock_head_office_id($conn, $company_id);
+        $GLOBALS['stock_wallet_branch_id'] = $_SESSION['company_type'] === 'Restaurant & Cafe'
+            ? selected_branch_id($conn, true) : stock_head_office_id($conn, $company_id);
     }
     if ($module === 'sales' && in_array($file, ['edit_invoice.php', 'update_invoice.php', 'post_invoice.php', 'delete_invoice.php', 'payment_entry.php', 'payment_save.php', 'view_invoice.php', 'print_invoice.php'], true)) {
         $id = (int)($_POST['invoice_id'] ?? $_GET['id'] ?? 0);
@@ -239,5 +250,7 @@ function stock_module_bootstrap($conn)
             catch (RuntimeException $e) { http_response_code(403); exit(htmlspecialchars($e->getMessage())); }
         }
     }
+    restaurant_supplier_guard_request($conn, $module, $file);
+    restaurant_catalog_guard_request($conn, $module, $file);
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && $file !== 'get_product.php') stock_verify_csrf();
 }
