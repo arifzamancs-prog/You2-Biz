@@ -92,6 +92,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         'site-favicon',
         true
     );
+    [$bill_qr_ok, $bill_receive_qr_file, $bill_qr_changed, $bill_qr_error] = branding_upload_file(
+        $conn,
+        'bill_receive_qr_file',
+        'bill_receive_qr_file',
+        'bill-receive-qr'
+    );
     $smtp_password = trim($_POST['smtp_password'] ?? '');
 
     if(!$logo_ok){
@@ -99,6 +105,9 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $message_type = 'danger';
     }elseif(!$favicon_ok){
         $message = $favicon_error;
+        $message_type = 'danger';
+    }elseif(!$bill_qr_ok){
+        $message = $bill_qr_error;
         $message_type = 'danger';
     }else{
     if($smtp_password === ''){
@@ -129,6 +138,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         'sms_success_status' => trim($_POST['sms_success_status'] ?? 'SENT'),
         'site_logo_file' => $site_logo_file,
         'site_favicon_file' => $site_favicon_file,
+        'bill_receive_qr_file' => $bill_receive_qr_file,
     ];
 
 $previous_default_avatar = basename(trim((string)system_setting($conn, 'company_default_avatar_file', 'you2biz.png')));
@@ -224,6 +234,30 @@ require_once '../includes/sidebar.php';
                                         src="<?= htmlspecialchars(branding_favicon_url($conn)); ?>"
                                         alt="Favicon preview"
                                         style="background:#f8fafc;border:1px solid #dbe4f0;border-radius:10px;height:40px;object-fit:contain;padding:6px;width:40px;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">Bill Receive QR Code</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group mb-0">
+                                <label>Upload QR Code</label>
+                                <input type="file" name="bill_receive_qr_file" id="bill_receive_qr_file" class="form-control-file" accept=".png,.jpg,.jpeg,.webp">
+                                <small class="form-text text-muted">Upload the QR code customers will use to pay a bill. PNG, JPG, JPEG or WEBP; maximum 2MB.</small>
+                                <div class="mt-3">
+                                    <?php $bill_receive_qr_url = branding_file_url($settings['bill_receive_qr_file'] ?? '', ''); ?>
+                                    <img
+                                        id="bill_receive_qr_preview"
+                                        src="<?= htmlspecialchars($bill_receive_qr_url); ?>"
+                                        alt="Bill receive QR code preview"
+                                        style="<?= $bill_receive_qr_url !== '' ? '' : 'display:none;'; ?>background:#fff;border:1px solid #dbe4f0;border-radius:10px;height:260px;width:260px;max-width:100%;object-fit:contain;padding:10px;">
+                                    <div id="bill_receive_qr_empty" class="text-muted border rounded p-3 text-center" style="<?= $bill_receive_qr_url !== '' ? 'display:none;' : ''; ?>max-width:260px;">
+                                        No bill receive QR code uploaded.
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -528,9 +562,10 @@ require_once '../includes/sidebar.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    function bindImagePreview(inputId, previewId) {
+    function bindImagePreview(inputId, previewId, emptyId) {
         const input = document.getElementById(inputId);
         const preview = document.getElementById(previewId);
+        const empty = emptyId ? document.getElementById(emptyId) : null;
 
         if (!input || !preview) {
             return;
@@ -552,6 +587,10 @@ document.addEventListener('DOMContentLoaded', function () {
             reader.onload = function (event) {
                 if (event.target && event.target.result) {
                     preview.src = event.target.result;
+                    preview.style.display = 'block';
+                    if (empty) {
+                        empty.style.display = 'none';
+                    }
                 }
             };
 
@@ -561,6 +600,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     bindImagePreview('site_logo_file', 'site_logo_preview');
     bindImagePreview('site_favicon_file', 'site_favicon_preview');
+    bindImagePreview('bill_receive_qr_file', 'bill_receive_qr_preview', 'bill_receive_qr_empty');
 });
 </script>
 

@@ -21,8 +21,10 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/multi_branch_helper.php';
 require_once '../includes/stock_module_helper.php';
 require_once '../includes/lead_management_helper.php';
+require_once '../includes/bill_reminder_helper.php';
 
 require_super_admin_user();
+bill_reminder_ensure_columns($conn);
 require_once '../includes/eshop_helper.php';
 ensure_eshop_table($conn);
 if(empty($_SESSION['eshop_csrf'])) $_SESSION['eshop_csrf'] = bin2hex(random_bytes(32));
@@ -577,6 +579,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Unable to update Multi Branch.', 'danger');
         }
         super_admin_flash_and_redirect('Multi Branch is now ' . ($enabled ? 'Active.' : 'Inactive.'));
+    }
+
+    if ($form_action === 'update_bill_reminder') {
+        $bill_reminder_enabled = isset($_POST['bill_reminder_enabled']) ? 1 : 0;
+        $bill_reminder_day = (int)($_POST['bill_reminder_day'] ?? 0);
+        $service_charge_amount = max(0, (float)($_POST['service_charge_amount'] ?? 0));
+
+        if ($company_id <= 0) {
+            super_admin_flash_and_redirect('Invalid company selected.', 'danger');
+        }
+
+        if ($bill_reminder_enabled && ($bill_reminder_day < 1 || $bill_reminder_day > 31)) {
+            super_admin_flash_and_redirect('Please select a monthly bill day between 1 and 31.', 'danger');
+        }
+
+        $stmt = mysqli_prepare(
+            $conn,
+            "UPDATE users
+             SET bill_reminder_enabled=?,
+                 bill_reminder_day=?,
+                 service_charge_amount=?
+             WHERE id=?
+             AND role='admin'
+             LIMIT 1"
+        );
+        mysqli_stmt_bind_param($stmt, 'iidi', $bill_reminder_enabled, $bill_reminder_day, $service_charge_amount, $company_id);
+
+        if (!mysqli_stmt_execute($stmt)) {
+            super_admin_flash_and_redirect('Bill reminder settings could not be updated.', 'danger');
+        }
+
+        super_admin_flash_and_redirect('Bill reminder settings updated successfully.');
     }
 
     if($form_action === 'update_company_type'){
@@ -1244,6 +1278,9 @@ $sql = "SELECT
             u.email,
             u.phone,
             u.email_verified,
+            u.bill_reminder_enabled,
+            u.bill_reminder_day,
+            u.service_charge_amount,
             u.status,
             u.subscription_plan,
             u.subscription_status,
@@ -1280,6 +1317,9 @@ $sql = "SELECT
             u.email,
             u.phone,
             u.email_verified,
+            u.bill_reminder_enabled,
+            u.bill_reminder_day,
+            u.service_charge_amount,
             u.status,
             u.subscription_plan,
             u.subscription_status,
@@ -1416,10 +1456,48 @@ require_once '../includes/sidebar.php';
     </div>
 <?php } ?>
 
+<style>
+.sa-company-table td { vertical-align: top !important; }
+.sa-company-table thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: #6c757d; background: #f8f9fa; }
+.sa-company-table label { font-size: .72rem; font-weight: 600; color: #6c757d; margin-bottom: .2rem; text-transform: uppercase; letter-spacing: .03em; }
+.sa-company-table .form-group { margin-bottom: .6rem; }
+.sa-company { display: flex; align-items: flex-start; gap: .65rem; }
+.sa-company-cell { min-width: 210px; }
+.sa-avatar { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 50%; background: #e7f1ff; color: #0d6efd; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.sa-company-name { font-weight: 700; font-size: 1rem; line-height: 1.25; margin-bottom: .3rem; }
+.sa-meta { font-size: .78rem; color: #6c757d; line-height: 1.6; white-space: nowrap; }
+.sa-meta i { width: 14px; text-align: center; margin-right: .3rem; opacity: .75; }
+.sa-contact { min-width: 270px; }
+.sa-contact-line { font-size: .88rem; word-break: break-all; margin-bottom: .15rem; }
+.sa-contact-line i { width: 16px; color: #6c757d; margin-right: .35rem; }
+.sa-panel { border: 1px solid #e3e7ec; border-radius: .4rem; background: #fbfcfd; padding: .65rem .75rem; margin-top: .6rem; }
+.sa-panel-title { font-size: .72rem; font-weight: 700; color: #495057; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .5rem; }
+.sa-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .6rem; }
+.sa-actions .btn { margin: 0 !important; }
+.sa-status .badge { font-size: .78rem; padding: .35em .65em; }
+.sa-status-label { display: block; font-size: .7rem; color: #6c757d; text-transform: uppercase; letter-spacing: .03em; margin: .55rem 0 .2rem; }
+.sa-usage { min-width: 150px; }
+.sa-usage-row { margin-bottom: .55rem; }
+.sa-usage-head { display: flex; justify-content: space-between; font-size: .8rem; margin-bottom: .2rem; }
+.sa-usage-head span:first-child { color: #6c757d; }
+.sa-usage-head span:last-child { font-weight: 600; }
+.sa-usage .progress { height: 5px; border-radius: 3px; }
+.sa-plan-name { font-weight: 700; font-size: .95rem; margin: .55rem 0 .35rem; }
+.sa-chip { display: inline-block; font-size: .72rem; background: #f1f3f5; border-radius: 1rem; padding: .15rem .55rem; margin: .15rem .15rem 0 0; color: #495057; }
+.sa-control { min-width: 340px; }
+.sa-section { border-top: 1px dashed #dee2e6; padding-top: .55rem; margin-top: .2rem; }
+.sa-section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.sa-section-title { font-size: .72rem; font-weight: 700; color: #0d6efd; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .4rem; }
+.sa-control-actions { display: flex; gap: .4rem; border-top: 1px solid #e9ecef; padding-top: .6rem; margin-top: .2rem; }
+.sa-control-actions .btn { min-width: 90px; margin: 0 !important; }
+.sa-tools { display: flex; flex-wrap: wrap; gap: .35rem; }
+.sa-tools .btn { margin: 0 !important; }
+</style>
+
 <div class="card">
     <div class="card-header">
         <h3 class="card-title">
-            Super Admin
+            <i class="fas fa-building mr-1"></i> Companies
         </h3>
         <div class="card-tools">
             <?php if($single_user_license_status === 'active'){ ?>
@@ -1440,7 +1518,7 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
-        <table id="example1" class="table table-bordered table-striped">
+        <table id="example1" class="table table-bordered table-hover sa-company-table">
             <thead>
                 <tr>
                     <th>Company</th>
@@ -1458,66 +1536,85 @@ require_once '../includes/sidebar.php';
                     if($single_user_license_status === 'active' && !$is_single_user_license_company){
                         continue;
                     }
+
+                    $company_initial = strtoupper(function_exists('mb_substr') ? mb_substr(trim((string)$row['name']), 0, 1) : substr(trim((string)$row['name']), 0, 1));
+                    $is_unlimited_plan = strtolower($row['subscription_status'] ?? '') === 'active';
+                    $usage_items = [
+                        ['Managers', (int)$row['manager_count'], (int)$row['max_managers'], $is_unlimited_plan],
+                        ['Products', (int)$row['product_count'], (int)$row['max_products'], $is_unlimited_plan],
+                        ['Invoices', (int)$row['invoice_count'], (int)$row['max_invoices_monthly'], $is_unlimited_plan],
+                        ['SMS', (int)$row['sms_quota_used'], (int)$row['sms_quota_total'], false],
+                    ];
                 ?>
                     <tr>
-                        <td>
-                            <strong>
-                                <?= htmlspecialchars($row['name']); ?>
-                                <?php if($is_single_user_license_company){ ?>
-                                    <span class="text-warning ml-1" title="Single User Licence Activated">
-                                        <i class="fas fa-crown"></i>
-                                    </span>
-                                    <span class="text-info ml-1" title="Licensed Company">
-                                        <i class="fas fa-gem"></i>
-                                    </span>
-                                <?php } ?>
-                            </strong><br>
-                            <small class="text-muted">
-                                Registered: <?= htmlspecialchars(app_datetime($row['created_at'])); ?>
-                            </small><br>
-                            <small class="text-muted">
-                                Last login: <?= htmlspecialchars(app_datetime($row['last_login'] ?? null)); ?>
-                            </small>
-                            <form method="post" class="mt-2">
-                                <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
-                                <input type="hidden" name="form_action" value="update_company_type">
-                                <label class="small text-muted mb-1">Company Type</label>
-                                <div class="input-group input-group-sm">
-                                    <?php $company_type = normalize_company_type($row['company_type'] ?? 'Housing'); ?>
-                                    <select name="company_type" class="form-control">
-                                        <?php foreach (company_type_options() as $type_key => $type_label) { ?>
-                                        <option value="<?= htmlspecialchars($type_key) ?>" <?= $company_type === $type_key ? 'selected' : '' ?>><?= htmlspecialchars($type_label) ?></option>
+                        <td class="sa-company-cell">
+                            <div class="sa-company">
+                                <div class="sa-avatar"><?= htmlspecialchars($company_initial !== '' ? $company_initial : '?'); ?></div>
+                                <div>
+                                    <div class="sa-company-name">
+                                        <?= htmlspecialchars($row['name']); ?>
+                                        <?php if($is_single_user_license_company){ ?>
+                                            <span class="text-warning ml-1" title="Single User Licence Activated">
+                                                <i class="fas fa-crown"></i>
+                                            </span>
+                                            <span class="text-info ml-1" title="Licensed Company">
+                                                <i class="fas fa-gem"></i>
+                                            </span>
                                         <?php } ?>
-                                    </select>
-                                    <div class="input-group-append">
-                                        <button type="submit" class="btn btn-primary">Update</button>
+                                    </div>
+                                    <div class="sa-meta" title="Registered">
+                                        <i class="far fa-calendar-plus"></i><?= htmlspecialchars(app_datetime($row['created_at'])); ?>
+                                    </div>
+                                    <div class="sa-meta" title="Last login">
+                                        <i class="fas fa-sign-in-alt"></i><?= htmlspecialchars(app_datetime($row['last_login'] ?? null)); ?>
                                     </div>
                                 </div>
-                            </form>
-                            <form method="post" class="mt-2">
-                                <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
-                                <input type="hidden" name="form_action" value="update_multi_branch">
-                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['multi_branch_csrf']) ?>">
-                                <label class="small mb-1 d-block">Multi Branch</label>
-                                <div class="input-group">
-                                    <select name="multi_branch_enabled" class="form-control">
-                                        <option value="1" <?= !empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Active</option>
-                                        <option value="0" <?= empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Inactive</option>
-                                    </select>
-                                    <div class="input-group-append">
-                                        <button type="submit" class="btn btn-primary">Update</button>
+                            </div>
+                            <div class="sa-panel">
+                                <div class="sa-panel-title"><i class="fas fa-sliders-h mr-1"></i> Company Settings</div>
+                                <form method="post" class="form-group">
+                                    <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
+                                    <input type="hidden" name="form_action" value="update_company_type">
+                                    <label>Company Type</label>
+                                    <div class="input-group input-group-sm">
+                                        <?php $company_type = normalize_company_type($row['company_type'] ?? 'Housing'); ?>
+                                        <select name="company_type" class="form-control">
+                                            <?php foreach (company_type_options() as $type_key => $type_label) { ?>
+                                            <option value="<?= htmlspecialchars($type_key) ?>" <?= $company_type === $type_key ? 'selected' : '' ?>><?= htmlspecialchars($type_label) ?></option>
+                                            <?php } ?>
+                                        </select>
+                                        <div class="input-group-append">
+                                            <button type="submit" class="btn btn-outline-primary" title="Update company type"><i class="fas fa-check"></i></button>
+                                        </div>
                                     </div>
-                                </div>
-                            </form>
+                                </form>
+                                <form method="post" class="form-group mb-0">
+                                    <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
+                                    <input type="hidden" name="form_action" value="update_multi_branch">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['multi_branch_csrf']) ?>">
+                                    <label>Multi Branch</label>
+                                    <div class="input-group input-group-sm">
+                                        <select name="multi_branch_enabled" class="form-control">
+                                            <option value="1" <?= !empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Active</option>
+                                            <option value="0" <?= empty($row['multi_branch_enabled']) ? 'selected' : '' ?>>Inactive</option>
+                                        </select>
+                                        <div class="input-group-append">
+                                            <button type="submit" class="btn btn-outline-primary" title="Update multi branch"><i class="fas fa-check"></i></button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
                         </td>
-                        <td>
-                            <form method="post" class="contact-edit-form mb-2">
+                        <td class="sa-contact">
+                            <form method="post" class="contact-edit-form">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
                                 <input type="hidden" name="form_action" value="update_contact">
-                                <div class="company-email-readonly">
-                                    <?= htmlspecialchars($row['email']); ?>
+                                <div class="company-email-readonly sa-contact-line">
+                                    <i class="far fa-envelope"></i><?= htmlspecialchars($row['email']); ?>
                                 </div>
-                                <small class="company-phone-readonly"><?= htmlspecialchars($row['phone']); ?></small>
+                                <div class="company-phone-readonly sa-contact-line">
+                                    <i class="fas fa-phone-alt"></i><?= htmlspecialchars($row['phone']); ?>
+                                </div>
                                 <div class="company-profile-editor mt-2" style="display:none;">
                                     <input
                                         type="text"
@@ -1556,10 +1653,10 @@ require_once '../includes/sidebar.php';
                                         autocomplete="new-password"
                                         minlength="6">
                                 </div>
-                                <div class="mt-2">
+                                <div class="sa-actions">
                                     <button
                                         type="button"
-                                        class="btn btn-info btn-sm email-edit-toggle"
+                                        class="btn btn-outline-info btn-sm email-edit-toggle"
                                         onclick="return toggleCompanyProfileEdit(this);">
                                         Edit Profile
                                     </button>
@@ -1567,47 +1664,113 @@ require_once '../includes/sidebar.php';
                                         type="submit"
                                         name="form_action"
                                         value="send_verify_link"
-                                        class="btn btn-warning btn-sm ml-1">
-                                        Send Verify Link
+                                        class="btn btn-outline-warning btn-sm">
+                                        <i class="fas fa-paper-plane mr-1"></i> Verify Link
                                     </button>
                                     <button
                                         type="submit"
                                         name="form_action"
                                         value="force_verify_company"
-                                        class="btn btn-success btn-sm ml-1"
+                                        class="btn btn-outline-success btn-sm"
                                         onclick="return confirm('Force verify this company without email confirmation?');">
-                                        Force Verify
+                                        <i class="fas fa-check mr-1"></i> Force Verify
                                     </button>
-                                    <div class="mt-2">
-                                        <a href="<?= htmlspecialchars(app_path('super_admin/index.php?download_leads=' . (int)$row['id'])); ?>" class="btn btn-outline-success btn-sm">
-                                            <i class="fas fa-file-excel"></i> Lead Download
-                                        </a>
-                                    </div>
+                                    <a href="<?= htmlspecialchars(app_path('super_admin/index.php?download_leads=' . (int)$row['id'])); ?>" class="btn btn-outline-secondary btn-sm">
+                                        <i class="fas fa-file-excel mr-1"></i> Lead Download
+                                    </a>
                                 </div>
                             </form>
+                            <form method="post" class="sa-panel">
+                                <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
+                                <input type="hidden" name="form_action" value="update_bill_reminder">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="sa-panel-title mb-0"><i class="far fa-bell mr-1"></i> Bill Reminder</span>
+                                    <div class="custom-control custom-switch">
+                                        <input
+                                            type="checkbox"
+                                            class="custom-control-input"
+                                            id="bill_reminder_<?= (int)$row['id']; ?>"
+                                            name="bill_reminder_enabled"
+                                            value="1"
+                                            <?= !empty($row['bill_reminder_enabled']) ? 'checked' : ''; ?>>
+                                        <label class="custom-control-label" for="bill_reminder_<?= (int)$row['id']; ?>">
+                                            <span class="sr-only">Enable bill reminder</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-6">
+                                        <label>Bill Day</label>
+                                        <select name="bill_reminder_day" class="form-control form-control-sm">
+                                            <option value="">Select day</option>
+                                            <?php for($bill_day = 1; $bill_day <= 31; $bill_day++): ?>
+                                                <option value="<?= $bill_day; ?>" <?= (int)($row['bill_reminder_day'] ?? 0) === $bill_day ? 'selected' : ''; ?>><?= $bill_day; ?></option>
+                                            <?php endfor; ?>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-6">
+                                        <label>Service Charge</label>
+                                        <input
+                                            type="number"
+                                            name="service_charge_amount"
+                                            class="form-control form-control-sm"
+                                            min="0"
+                                            step="0.01"
+                                            value="<?= htmlspecialchars(number_format((float)($row['service_charge_amount'] ?? 0), 2, '.', '')); ?>">
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-outline-primary btn-sm btn-block">
+                                    <i class="fas fa-save mr-1"></i> Save Reminder
+                                </button>
+                            </form>
                             <?php $company_shop = eshop_company_settings($conn, (int)$row['id']); ?>
-                            <form method="post" action="eshop.php" class="mt-3 border-top pt-2">
+                            <form method="post" action="eshop.php" class="sa-panel">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['eshop_csrf']) ?>">
-                                <label class="small mb-1" for="eshop-status-<?= (int)$row['id'] ?>">E-shop</label>
-                                <select id="eshop-status-<?= (int)$row['id'] ?>" name="enabled" class="form-control form-control-sm mb-2">
-                                    <option value="0">Inactive</option>
-                                    <option value="1" <?= !empty($company_shop['enabled']) ? 'selected' : '' ?>>Active</option>
-                                </select>
-                                <label class="small mb-1" for="eshop-slug-<?= (int)$row['id'] ?>">Shop URL</label>
-                                <input id="eshop-slug-<?= (int)$row['id'] ?>" name="slug" class="form-control form-control-sm" required minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9-]{1,62}[a-z0-9]" value="<?= htmlspecialchars($company_shop['slug'] ?? '') ?>" placeholder="company-name">
-                                <small class="text-muted d-block text-break mt-1">Reserved URL: <?= htmlspecialchars(eshop_reserved_url($company_shop['slug'] ?? 'company-name')) ?></small>
-                                <button type="submit" class="btn btn-primary btn-sm mt-2">Save E-shop</button>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="sa-panel-title mb-0"><i class="fas fa-store mr-1"></i> E-shop</span>
+                                    <?php if(!empty($company_shop['enabled'])){ ?>
+                                        <span class="badge badge-success">Active</span>
+                                    <?php } else { ?>
+                                        <span class="badge badge-secondary">Inactive</span>
+                                    <?php } ?>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-5">
+                                        <label for="eshop-status-<?= (int)$row['id'] ?>">Status</label>
+                                        <select id="eshop-status-<?= (int)$row['id'] ?>" name="enabled" class="form-control form-control-sm">
+                                            <option value="0">Inactive</option>
+                                            <option value="1" <?= !empty($company_shop['enabled']) ? 'selected' : '' ?>>Active</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-7">
+                                        <label for="eshop-slug-<?= (int)$row['id'] ?>">Shop URL</label>
+                                        <input id="eshop-slug-<?= (int)$row['id'] ?>" name="slug" class="form-control form-control-sm" required minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9-]{1,62}[a-z0-9]" value="<?= htmlspecialchars($company_shop['slug'] ?? '') ?>" placeholder="company-name">
+                                    </div>
+                                </div>
+                                <small class="text-muted d-block text-break mb-2"><i class="fas fa-link mr-1"></i><?= htmlspecialchars(eshop_reserved_url($company_shop['slug'] ?? 'company-name')) ?></small>
+                                <button type="submit" class="btn btn-outline-primary btn-sm btn-block"><i class="fas fa-save mr-1"></i> Save E-shop</button>
                             </form>
                         </td>
-                        <td>
-                            <?php $is_unlimited_plan = strtolower($row['subscription_status'] ?? '') === 'active'; ?>
-                            Managers: <?= (int)$row['manager_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_managers']; ?><br>
-                            Products: <?= (int)$row['product_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_products']; ?><br>
-                            Invoices: <?= (int)$row['invoice_count']; ?> / <?= $is_unlimited_plan ? 'Unlimited' : (int)$row['max_invoices_monthly']; ?><br>
-                            SMS: <?= (int)$row['sms_quota_used']; ?> / <?= (int)$row['sms_quota_total']; ?>
+                        <td class="sa-usage">
+                            <?php foreach($usage_items as $usage_item){ ?>
+                                <?php
+                                [$usage_label, $usage_used, $usage_limit, $usage_unlimited] = $usage_item;
+                                $usage_percent = !$usage_unlimited && $usage_limit > 0 ? min(100, round($usage_used / $usage_limit * 100)) : 0;
+                                $usage_color = $usage_percent >= 90 ? 'danger' : ($usage_percent >= 70 ? 'warning' : 'success');
+                                ?>
+                                <div class="sa-usage-row">
+                                    <div class="sa-usage-head">
+                                        <span><?= htmlspecialchars($usage_label); ?></span>
+                                        <span><?= $usage_used; ?> / <?= $usage_unlimited ? '&infin;' : $usage_limit; ?></span>
+                                    </div>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-<?= $usage_unlimited ? 'info' : $usage_color; ?>" style="width: <?= $usage_unlimited ? 100 : $usage_percent; ?>%;<?= $usage_unlimited ? ' opacity:.35;' : ''; ?>"></div>
+                                    </div>
+                                </div>
+                            <?php } ?>
                         </td>
-                        <td>
+                        <td class="sa-status">
                             <?php
                             $subscription_badge = [
                                 'trial' => 'info',
@@ -1617,183 +1780,192 @@ require_once '../includes/sidebar.php';
                             ];
                             $subscription_key = strtolower($row['subscription_status'] ?? 'trial');
                             ?>
+                            <span class="sa-status-label mt-0">Account</span>
                             <span class="badge badge-<?= htmlspecialchars($subscription_badge[$subscription_key] ?? 'secondary'); ?>">
                                 <?= htmlspecialchars(ucfirst($subscription_key)); ?>
                             </span>
-                            <span class="badge badge-<?= (int)($row['email_verified'] ?? 0) === 1 ? 'success' : 'warning'; ?> ml-1">
-                                Email <?= (int)($row['email_verified'] ?? 0) === 1 ? 'Verified' : 'Not Verified'; ?>
+                            <span class="sa-status-label">Email</span>
+                            <span class="badge badge-<?= (int)($row['email_verified'] ?? 0) === 1 ? 'success' : 'warning'; ?>">
+                                <?= (int)($row['email_verified'] ?? 0) === 1 ? 'Verified' : 'Not Verified'; ?>
                             </span>
-                            <br>
-                            <?= htmlspecialchars(strtolower($row['subscription_plan']) === 'trial' ? 'Trial' : $row['subscription_plan']); ?><br>
-                            <small class="text-muted">
-                                Expires: <?= htmlspecialchars(!empty($row['subscription_expires_at']) ? app_date($row['subscription_expires_at']) : '-'); ?>
-                            </small><br>
-                            <small class="text-muted">
-                                <?= htmlspecialchars($row['currency_code'] ?? 'BDT'); ?>
-                                | <?= htmlspecialchars($row['timezone_name'] ?? 'Asia/Dhaka'); ?>
-                            </small>
+                            <div class="sa-plan-name">
+                                <?= htmlspecialchars(strtolower($row['subscription_plan']) === 'trial' ? 'Trial' : $row['subscription_plan']); ?>
+                            </div>
+                            <div class="sa-meta">
+                                <i class="far fa-clock"></i>Expires: <?= htmlspecialchars(!empty($row['subscription_expires_at']) ? app_date($row['subscription_expires_at']) : '-'); ?>
+                            </div>
+                            <span class="sa-chip"><?= htmlspecialchars($row['currency_code'] ?? 'BDT'); ?></span>
+                            <span class="sa-chip"><?= htmlspecialchars($row['timezone_name'] ?? 'Asia/Dhaka'); ?></span>
                         </td>
                         <td>
-                            <form method="post">
+                            <form method="post" class="sa-control">
                                 <input type="hidden" name="company_id" value="<?= (int)$row['id']; ?>">
 
-                                <div class="form-group mb-2">
-                                    <label>Pricing Plan (Help sidebar)</label>
-                                    <div class="input-group input-group-sm">
-                                        <select name="pricing_plan_visible" class="form-control">
-                                            <option value="1" <?= (int)($row['show_pricing_plan'] ?? 1) === 1 ? 'selected' : ''; ?>>Show</option>
-                                            <option value="0" <?= (int)($row['show_pricing_plan'] ?? 1) === 0 ? 'selected' : ''; ?>>Hide</option>
-                                        </select>
-                                        <div class="input-group-append">
-                                            <button type="submit" name="form_action" value="update_pricing_plan_visibility" class="btn btn-info">Update</button>
+                                <div class="sa-section">
+                                    <div class="sa-section-title">Help Sidebar</div>
+                                    <div class="form-group">
+                                        <label>Pricing Plan</label>
+                                        <div class="input-group input-group-sm">
+                                            <select name="pricing_plan_visible" class="form-control">
+                                                <option value="1" <?= (int)($row['show_pricing_plan'] ?? 1) === 1 ? 'selected' : ''; ?>>Show</option>
+                                                <option value="0" <?= (int)($row['show_pricing_plan'] ?? 1) === 0 ? 'selected' : ''; ?>>Hide</option>
+                                            </select>
+                                            <div class="input-group-append">
+                                                <button type="submit" name="form_action" value="update_pricing_plan_visibility" class="btn btn-outline-info" title="Update pricing plan visibility"><i class="fas fa-check"></i></button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div class="form-row">
-                                    <div class="form-group col-md-12">
-                                        <label>Subscription</label>
-                                        <?php $trial_expiry_value = date('Y-m-d', strtotime($row['created_at'] . ' +30 days')); ?>
-                                        <select
-                                            name="subscription_status"
-                                            class="form-control form-control-sm"
-                                            data-trial-expiry="<?= htmlspecialchars($trial_expiry_value); ?>"
-                                            data-current-date="<?= htmlspecialchars(date('Y-m-d')); ?>">
-                                            <?php foreach(['trial','active','expired','blocked'] as $status_option){ ?>
-                                                <option
-                                                    value="<?= $status_option; ?>"
-                                                    <?= $row['subscription_status'] === $status_option ? 'selected' : ''; ?>>
-                                                    <?= ucfirst($status_option); ?>
-                                                </option>
-                                            <?php } ?>
-                                        </select>
+                                <div class="sa-section">
+                                    <div class="sa-section-title">Plan</div>
+                                    <div class="form-row">
+                                        <div class="form-group col-md-12">
+                                            <label>Subscription</label>
+                                            <?php $trial_expiry_value = date('Y-m-d', strtotime($row['created_at'] . ' +30 days')); ?>
+                                            <select
+                                                name="subscription_status"
+                                                class="form-control form-control-sm"
+                                                data-trial-expiry="<?= htmlspecialchars($trial_expiry_value); ?>"
+                                                data-current-date="<?= htmlspecialchars(date('Y-m-d')); ?>">
+                                                <?php foreach(['trial','active','expired','blocked'] as $status_option){ ?>
+                                                    <option
+                                                        value="<?= $status_option; ?>"
+                                                        <?= $row['subscription_status'] === $status_option ? 'selected' : ''; ?>>
+                                                        <?= ucfirst($status_option); ?>
+                                                    </option>
+                                                <?php } ?>
+                                            </select>
+                                        </div>
+                                        <div class="form-group col-6">
+                                            <label>Plan</label>
+                                            <input
+                                                type="text"
+                                                class="form-control form-control-sm subscription-plan-display"
+                                                value="<?= htmlspecialchars($row['subscription_plan'] ?? ucfirst($row['subscription_status'] ?? 'trial')); ?>"
+                                                readonly>
+                                        </div>
+                                        <div class="form-group col-6">
+                                            <label>Expires</label>
+                                            <input
+                                                type="date"
+                                                name="subscription_expires_at"
+                                                class="form-control form-control-sm subscription-expires-input"
+                                                value="<?= htmlspecialchars($row['subscription_expires_at'] ?? ''); ?>">
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="form-row">
-                                    <div class="form-group col-md-6">
-                                        <label>Plan</label>
-                                        <input
-                                            type="text"
-                                            class="form-control form-control-sm subscription-plan-display"
-                                            value="<?= htmlspecialchars($row['subscription_plan'] ?? ucfirst($row['subscription_status'] ?? 'trial')); ?>"
-                                            readonly>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label>Expires</label>
-                                        <input
-                                            type="date"
-                                            name="subscription_expires_at"
-                                            class="form-control form-control-sm subscription-expires-input"
-                                            value="<?= htmlspecialchars($row['subscription_expires_at'] ?? ''); ?>">
-                                    </div>
-                                </div>
-
-                                <div class="form-row">
-                                    <div class="form-group col-md-4">
-                                        <label>Managers</label>
-                                        <input
-                                            type="text"
-                                            name="max_managers"
-                                            class="form-control form-control-sm subscription-limit-input"
-                                            data-trial-value="<?= (int)$trial_manager_limit; ?>"
-                                            data-current-value="<?= (int)$row['max_managers']; ?>"
-                                            data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
-                                            value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_managers']; ?>">
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label>Products</label>
-                                        <input
-                                            type="text"
-                                            name="max_products"
-                                            class="form-control form-control-sm subscription-limit-input"
-                                            data-trial-value="<?= (int)$trial_product_limit; ?>"
-                                            data-current-value="<?= (int)$row['max_products']; ?>"
-                                            data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
-                                            value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_products']; ?>">
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label>Invoices</label>
-                                        <input
-                                            type="text"
-                                            name="max_invoices_monthly"
-                                            class="form-control form-control-sm subscription-limit-input"
-                                            data-trial-value="<?= (int)$trial_invoice_limit; ?>"
-                                            data-current-value="<?= (int)$row['max_invoices_monthly']; ?>"
-                                            data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
-                                            value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_invoices_monthly']; ?>">
+                                <div class="sa-section">
+                                    <div class="sa-section-title">Limits</div>
+                                    <div class="form-row">
+                                        <div class="form-group col-4">
+                                            <label>Managers</label>
+                                            <input
+                                                type="text"
+                                                name="max_managers"
+                                                class="form-control form-control-sm subscription-limit-input"
+                                                data-trial-value="<?= (int)$trial_manager_limit; ?>"
+                                                data-current-value="<?= (int)$row['max_managers']; ?>"
+                                                data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
+                                                value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_managers']; ?>">
+                                        </div>
+                                        <div class="form-group col-4">
+                                            <label>Products</label>
+                                            <input
+                                                type="text"
+                                                name="max_products"
+                                                class="form-control form-control-sm subscription-limit-input"
+                                                data-trial-value="<?= (int)$trial_product_limit; ?>"
+                                                data-current-value="<?= (int)$row['max_products']; ?>"
+                                                data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
+                                                value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_products']; ?>">
+                                        </div>
+                                        <div class="form-group col-4">
+                                            <label>Invoices</label>
+                                            <input
+                                                type="text"
+                                                name="max_invoices_monthly"
+                                                class="form-control form-control-sm subscription-limit-input"
+                                                data-trial-value="<?= (int)$trial_invoice_limit; ?>"
+                                                data-current-value="<?= (int)$row['max_invoices_monthly']; ?>"
+                                                data-unlimited-value="<?= (int)$unlimited_limit_value; ?>"
+                                                value="<?= strtolower($row['subscription_status'] ?? '') === 'active' ? 'Unlimited' : (int)$row['max_invoices_monthly']; ?>">
+                                        </div>
+                                        <div class="form-group col-12">
+                                            <label>SMS Quota</label>
+                                            <input
+                                                type="number"
+                                                name="sms_quota_total"
+                                                class="form-control form-control-sm"
+                                                min="<?= (int)$row['sms_quota_used']; ?>"
+                                                value="<?= (int)$row['sms_quota_total']; ?>">
+                                            <small class="text-muted">
+                                                Used: <?= (int)$row['sms_quota_used']; ?>,
+                                                Remaining: <?= max(0, (int)$row['sms_quota_total'] - (int)$row['sms_quota_used']); ?>
+                                            </small>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="form-row">
-                                    <div class="form-group col-md-4">
-                                        <label>Currency</label>
-                                        <input
-                                            type="text"
-                                            name="currency_code"
-                                            class="form-control form-control-sm"
-                                            maxlength="10"
-                                            value="<?= htmlspecialchars($row['currency_code'] ?? 'BDT'); ?>">
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label>Timezone</label>
-                                        <select name="timezone_name" class="form-control form-control-sm">
-                                            <?php foreach($timezone_options as $timezone_value => $timezone_label){ ?>
-                                                <option
-                                                    value="<?= htmlspecialchars($timezone_value); ?>"
-                                                    <?= ($row['timezone_name'] ?? 'Asia/Dhaka') === $timezone_value ? 'selected' : ''; ?>>
-                                                    <?= htmlspecialchars($timezone_label); ?>
-                                                </option>
-                                            <?php } ?>
-                                        </select>
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label>Date Format</label>
-                                        <select name="date_format" class="form-control form-control-sm">
-                                            <?php foreach($date_format_options as $format_value => $format_label){ ?>
-                                                <option
-                                                    value="<?= htmlspecialchars($format_value); ?>"
-                                                    <?= ($row['date_format'] ?? $trial_date_format) === $format_value ? 'selected' : ''; ?>>
-                                                    <?= htmlspecialchars($format_label); ?>
-                                                </option>
-                                            <?php } ?>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div class="form-row">
-                                    <div class="form-group col-md-12">
-                                        <label>SMS Quota</label>
-                                        <input
-                                            type="number"
-                                            name="sms_quota_total"
-                                            class="form-control form-control-sm"
-                                            min="<?= (int)$row['sms_quota_used']; ?>"
-                                            value="<?= (int)$row['sms_quota_total']; ?>">
-                                        <small class="text-muted">
-                                            Used: <?= (int)$row['sms_quota_used']; ?>,
-                                            Remaining: <?= max(0, (int)$row['sms_quota_total'] - (int)$row['sms_quota_used']); ?>
-                                        </small>
+                                <div class="sa-section">
+                                    <div class="sa-section-title">Regional</div>
+                                    <div class="form-row">
+                                        <div class="form-group col-4">
+                                            <label>Currency</label>
+                                            <input
+                                                type="text"
+                                                name="currency_code"
+                                                class="form-control form-control-sm"
+                                                maxlength="10"
+                                                value="<?= htmlspecialchars($row['currency_code'] ?? 'BDT'); ?>">
+                                        </div>
+                                        <div class="form-group col-4">
+                                            <label>Timezone</label>
+                                            <select name="timezone_name" class="form-control form-control-sm">
+                                                <?php foreach($timezone_options as $timezone_value => $timezone_label){ ?>
+                                                    <option
+                                                        value="<?= htmlspecialchars($timezone_value); ?>"
+                                                        <?= ($row['timezone_name'] ?? 'Asia/Dhaka') === $timezone_value ? 'selected' : ''; ?>>
+                                                        <?= htmlspecialchars($timezone_label); ?>
+                                                    </option>
+                                                <?php } ?>
+                                            </select>
+                                        </div>
+                                        <div class="form-group col-4">
+                                            <label>Date Format</label>
+                                            <select name="date_format" class="form-control form-control-sm">
+                                                <?php foreach($date_format_options as $format_value => $format_label){ ?>
+                                                    <option
+                                                        value="<?= htmlspecialchars($format_value); ?>"
+                                                        <?= ($row['date_format'] ?? $trial_date_format) === $format_value ? 'selected' : ''; ?>>
+                                                        <?= htmlspecialchars($format_label); ?>
+                                                    </option>
+                                                <?php } ?>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <button
-                                    type="submit"
-                                    name="form_action"
-                                    value="update_company"
-                                    class="btn btn-primary btn-sm">
-                                    Update
-                                </button>
-                                <button
-                                    type="button"
-                                    class="btn btn-danger btn-sm ml-2"
-                                    onclick="showDeleteConfirm(this);">
-                                    Delete
-                                </button>
+                                <div class="sa-control-actions">
+                                    <button
+                                        type="submit"
+                                        name="form_action"
+                                        value="update_company"
+                                        class="btn btn-primary btn-sm">
+                                        <i class="fas fa-save mr-1"></i> Update
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="btn btn-outline-danger btn-sm"
+                                        onclick="showDeleteConfirm(this);">
+                                        <i class="fas fa-trash-alt mr-1"></i> Delete
+                                    </button>
+                                </div>
 
-                                <div class="delete-confirm-box mt-2" style="display:none;">
+                                <div class="delete-confirm-box alert alert-danger mt-2 mb-0 p-2" style="display:none;">
                                     <div class="form-group mb-2">
-                                        <label>Super Admin Password</label>
+                                        <label class="text-danger">Super Admin Password</label>
                                         <input
                                             type="password"
                                             name="super_admin_password"
@@ -1818,25 +1990,25 @@ require_once '../includes/sidebar.php';
                                 </div>
                             </form>
 
-                            <div class="border-top mt-3 pt-3">
-                                <strong class="d-block mb-2">
-                                    <i class="fas fa-tools"></i> Tools
-                                </strong>
-                                <a
-                                    href="<?= htmlspecialchars(app_path('tools/export.php?company_id=' . (int)$row['id'])); ?>"
-                                    class="btn btn-outline-success btn-sm mb-1">
-                                    <i class="fas fa-file-export"></i> Export
-                                </a>
-                                <a
-                                    href="<?= htmlspecialchars(app_path('tools/import.php?company_id=' . (int)$row['id'])); ?>"
-                                    class="btn btn-outline-primary btn-sm mb-1">
-                                    <i class="fas fa-file-import"></i> Import
-                                </a>
-                                <a
-                                    href="<?= htmlspecialchars(app_path('tools/delete_data.php?company_id=' . (int)$row['id'])); ?>"
-                                    class="btn btn-outline-danger btn-sm mb-1">
-                                    <i class="fas fa-trash"></i> Delete All Data
-                                </a>
+                            <div class="sa-panel">
+                                <div class="sa-panel-title"><i class="fas fa-tools mr-1"></i> Tools</div>
+                                <div class="sa-tools">
+                                    <a
+                                        href="<?= htmlspecialchars(app_path('tools/export.php?company_id=' . (int)$row['id'])); ?>"
+                                        class="btn btn-outline-success btn-sm">
+                                        <i class="fas fa-file-export"></i> Export
+                                    </a>
+                                    <a
+                                        href="<?= htmlspecialchars(app_path('tools/import.php?company_id=' . (int)$row['id'])); ?>"
+                                        class="btn btn-outline-primary btn-sm">
+                                        <i class="fas fa-file-import"></i> Import
+                                    </a>
+                                    <a
+                                        href="<?= htmlspecialchars(app_path('tools/delete_data.php?company_id=' . (int)$row['id'])); ?>"
+                                        class="btn btn-outline-danger btn-sm">
+                                        <i class="fas fa-trash"></i> Delete All Data
+                                    </a>
+                                </div>
                             </div>
                         </td>
                     </tr>

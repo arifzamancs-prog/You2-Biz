@@ -222,5 +222,74 @@ document.addEventListener('DOMContentLoaded', function () {
 })();
 </script>
 <?php } ?>
+<?php
+require_once __DIR__ . '/bill_reminder_helper.php';
+
+$bill_reminder = null;
+$bill_reminder_flash = $_SESSION['bill_reminder_flash'] ?? null;
+unset($_SESSION['bill_reminder_flash']);
+
+if(isset($_SESSION['bill_reminder_notice_pending']) && $_SESSION['bill_reminder_notice_pending'] && isset($conn) && $conn instanceof mysqli){
+    try {
+        $bill_reminder = bill_reminder_current_for_session($conn);
+        unset($_SESSION['bill_reminder_notice_pending']);
+    } catch(Throwable $error) {
+        // A notice must never prevent normal application pages from loading.
+        error_log('Bill reminder popup: ' . $error->getMessage());
+    }
+}
+
+if($bill_reminder):
+    $bill_qr_url = bill_reminder_qr_url($conn);
+    $return_to = $_SERVER['REQUEST_URI'] ?? app_path('dashboard.php');
+?>
+<div class="modal fade" id="billReminderModal" tabindex="-1" role="dialog" aria-labelledby="billReminderModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-primary">
+                <h5 class="modal-title" id="billReminderModalLabel"><i class="fas fa-receipt mr-1"></i> Bill Payment Reminder</h5>
+                <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body text-center">
+                <?php if(is_array($bill_reminder_flash)): ?>
+                    <div class="alert alert-<?= htmlspecialchars($bill_reminder_flash['type'] ?? 'info'); ?> text-left">
+                        <?= htmlspecialchars($bill_reminder_flash['message'] ?? ''); ?>
+                    </div>
+                <?php endif; ?>
+                <p class="mb-1">Your company bill is due.</p>
+                <div class="h3 font-weight-bold text-primary mb-1">BDT <?= number_format((float)$bill_reminder['service_charge_amount'], 2); ?></div>
+                <p class="text-muted mb-3">Current bill date: <?= htmlspecialchars(date('d-m-Y', strtotime($bill_reminder['bill_cycle_date']))); ?></p>
+
+                <?php if($bill_qr_url !== ''): ?>
+                    <p class="font-weight-bold mb-2">Scan to pay (Bangla QR)</p>
+                    <img src="<?= htmlspecialchars($bill_qr_url); ?>" class="img-fluid border rounded p-2 mb-3" alt="Bill receive QR code" style="max-width:230px; max-height:230px;">
+                <?php else: ?>
+                    <div class="alert alert-warning text-left">Payment QR code has not been configured yet. Please contact support.</div>
+                <?php endif; ?>
+
+                <?php $bill_is_pending = ($bill_reminder['reference_status'] === 'pending'); ?>
+                <?php $bill_is_rejected = ($bill_reminder['reference_status'] === 'rejected'); ?>
+                <form method="post" action="<?= htmlspecialchars(app_path('billing/save_bill_payment_reference.php')); ?>" class="text-left">
+                    <input type="hidden" name="return_to" value="<?= htmlspecialchars($return_to); ?>">
+                    <label for="bill_payment_reference" class="font-weight-bold">Payment Reference No.</label>
+                    <input type="text" class="form-control" id="bill_payment_reference" name="reference_no" maxlength="150" <?= $bill_is_pending ? 'readonly' : 'required'; ?> value="<?= $bill_is_rejected ? '' : htmlspecialchars($bill_reminder['reference_no']); ?>" placeholder="Enter payment reference number">
+                    <small class="form-text text-danger">Use the correct reference to avoid an access ban.</small>
+                    <?php if($bill_is_pending): ?>
+                        <small class="form-text text-warning font-weight-bold"><?= htmlspecialchars($bill_reminder['reference_no']); ?> || Waiting for Approval</small>
+                    <?php elseif($bill_is_rejected): ?>
+                        <small class="form-text text-danger"><?= htmlspecialchars($bill_reminder['reference_no']); ?> || Rejected. Please submit the correct reference.</small>
+                    <?php endif; ?>
+                    <?php if(!$bill_is_pending): ?>
+                        <button type="submit" class="btn btn-success btn-block mt-3"><i class="fas fa-paper-plane mr-1"></i> Submit Reference No.</button>
+                    <?php endif; ?>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+$(function () { $('#billReminderModal').modal('show'); });
+</script>
+<?php endif; ?>
 </body>
 </html>

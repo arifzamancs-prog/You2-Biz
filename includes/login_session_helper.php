@@ -30,6 +30,9 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
         && $user['access_permissions'] !== null;
 
     $_SESSION['user_id'] = (int)$owner_id;
+    // A dismissed bill notice stays dismissed only for this login. A new login
+    // deliberately receives a fresh reminder when a bill is due.
+    $_SESSION['bill_reminder_notice_pending'] = true;
     $_SESSION['company_type'] = normalize_company_type($account['company_type'] ?? 'Housing');
     $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type']);
     $_SESSION['user_name'] = $account['name'];

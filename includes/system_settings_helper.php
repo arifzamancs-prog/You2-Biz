@@ -49,6 +49,7 @@ function system_settings_defaults()
         'sms_success_status' => 'SENT',
         'site_logo_file' => '',
         'site_favicon_file' => '',
+        'bill_receive_qr_file' => '',
         'single_user_license_status' => 'inactive',
         'single_user_license_company_id' => '0',
         'single_user_license_logo_file' => '',

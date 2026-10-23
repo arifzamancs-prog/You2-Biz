@@ -1,5 +1,6 @@
 <?php
 // The receiver is enabled ONLY on the original you2biz.com hosting.
+// Managed from Super Admin > Installed Websites.
 return [
     'endpoint' => 'https://you2biz.com/installation_report.php',
     'receiver_enabled' => false,

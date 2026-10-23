@@ -388,6 +388,48 @@ function sidebar_has_active_manager()
     return $count > 0;
 }
 
+// The company Service Charge report is shown only after the company has
+// submitted at least one bill payment.
+function sidebar_company_has_bill_payment()
+{
+    global $conn;
+
+    if(!isset($conn) || !($conn instanceof mysqli)){
+        return false;
+    }
+
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+
+    if($company_id <= 0){
+        return false;
+    }
+
+    try {
+        $stmt = mysqli_prepare(
+            $conn,
+            "SELECT 1 FROM company_bill_payment_references WHERE company_id = ? LIMIT 1"
+        );
+
+        if(!$stmt){
+            return false;
+        }
+
+        mysqli_stmt_bind_param($stmt, 'i', $company_id);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        $has_payment = $result && mysqli_num_rows($result) > 0;
+        mysqli_stmt_close($stmt);
+
+        return $has_payment;
+    } catch(Throwable $error) {
+        return false;
+    }
+}
+
+$sidebar_show_company_service_charge = is_admin_user()
+    && !is_super_admin_user()
+    && sidebar_company_has_bill_payment();
+
 $sidebar_product_items = [
     [
         'href' => app_path('product_categories/index.php'),
@@ -515,6 +557,11 @@ if(
                             [
                                 'href' => app_path('super_admin/index.php'),
                                 'label' => 'Subscription',
+                            ],
+                            [
+                                'href' => app_path('reports/service_charge.php'),
+                                'label' => 'Service Charge',
+                                'icon' => 'fas fa-file-invoice-dollar',
                             ],
                             [
                                 'href' => app_path('super_admin/installed_websites.php'),
@@ -953,6 +1000,9 @@ if(
                     ['href' => app_path('reports/category_expense.php'), 'label' => 'Expense Report', 'icon' => 'fas fa-receipt'],
                     ['href' => app_path('reports/profit_report.php'), 'label' => 'Profit Report', 'icon' => 'fas fa-coins'],
                 ];
+                if($sidebar_show_company_service_charge){
+                    $sidebar_report_items[] = ['href' => app_path('reports/service_charge.php'), 'label' => 'Service Charge', 'icon' => 'fas fa-file-invoice-dollar'];
+                }
                 sidebar_tree('Reports', 'fas fa-chart-bar', $sidebar_report_items);
                 }
                 ?>

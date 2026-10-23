@@ -5,6 +5,30 @@ function installation_reporting_config()
     return require __DIR__ . '/installation_reporting_config.php';
 }
 
+function installation_reporting_set_receiver($enabled)
+{
+    $path = __DIR__ . '/installation_reporting_config.php';
+    $config = installation_reporting_config();
+    $config['receiver_enabled'] = (bool)$enabled;
+    $content = "<?php\n"
+        . "// The receiver is enabled ONLY on the original you2biz.com hosting.\n"
+        . "// Managed from Super Admin > Installed Websites.\n"
+        . "return [\n"
+        . "    'endpoint' => " . var_export((string)$config['endpoint'], true) . ",\n"
+        . "    'receiver_enabled' => " . ($config['receiver_enabled'] ? 'true' : 'false') . ",\n"
+        . "    // Set the same random 64-character key on the receiver and distributed copies.\n"
+        . "    'shared_key' => " . var_export((string)$config['shared_key'], true) . ",\n"
+        . "];\n";
+    // Write to a temp file first so a failed write never leaves a broken config.
+    $tmp = $path . '.tmp';
+    if (@file_put_contents($tmp, $content, LOCK_EX) === false || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        return false;
+    }
+    if (function_exists('opcache_invalidate')) opcache_invalidate($path, true);
+    return true;
+}
+
 function installation_reporting_tables($conn)
 {
     mysqli_query($conn, "CREATE TABLE IF NOT EXISTS installation_checkins (
@@ -76,6 +100,8 @@ function installation_reporting_send($conn, $force = false)
     $ch = curl_init($config['endpoint']);
     curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_POSTFIELDS=>$payload,
         CURLOPT_HTTPHEADER=>['Content-Type: application/json', 'X-Report-Time: '.$timestamp, 'X-Report-Signature: '.$signature],
+        // Hosting firewalls (ModSecurity) answer 406 to requests without a User-Agent.
+        CURLOPT_USERAGENT=>'You2Biz-InstallationReporter/1.0',
         CURLOPT_RETURNTRANSFER=>true, CURLOPT_CONNECTTIMEOUT=>2, CURLOPT_TIMEOUT=>4,
         CURLOPT_FOLLOWLOCATION=>false, CURLOPT_SSL_VERIFYPEER=>true, CURLOPT_SSL_VERIFYHOST=>2,
         CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS]);

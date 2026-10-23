@@ -9,7 +9,15 @@ if (empty($_SESSION['installation_csrf'])) $_SESSION['installation_csrf'] = bin2
 $message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!hash_equals($_SESSION['installation_csrf'], (string)($_POST['csrf'] ?? ''))) { http_response_code(403); exit('Invalid request.'); }
-    if (($_POST['action'] ?? '') === 'test') {
+    if (($_POST['action'] ?? '') === 'receiver') {
+        $enable = ($_POST['enabled'] ?? '') === '1';
+        if (installation_reporting_set_receiver($enable)) {
+            $config = installation_reporting_config();
+            $message = $enable ? 'Receiver enabled.' : 'Receiver disabled.';
+        } else {
+            $message = 'Could not save setting. Make sure includes/installation_reporting_config.php is writable by the web server.';
+        }
+    } elseif (($_POST['action'] ?? '') === 'test') {
         try { $message = installation_reporting_send($conn, true); }
         catch (Throwable $e) { $message = 'Connection test failed. Check hosting configuration.'; }
     } elseif ($config['receiver_enabled'] && ($_POST['action'] ?? '') === 'review') {
@@ -35,7 +43,12 @@ require_once '../includes/sidebar.php';
 <p>Installation reporting sends only the site URL and a random installation ID to you2biz.com. The server records first/last check-in times. No customer, invoice, password or sales data is sent.</p>
 <p class="text-muted">For information only. Reporting does not block or restrict the software. Automatic check-in is attempted once per 24 hours while the app is in use. Times below are UTC.</p>
 <?php if (!$config['receiver_enabled']) { ?><div class="alert alert-warning">Receiver is disabled here. The central installation list is available on the original you2biz.com hosting after setup. See docs/installation-reporting.md.</div><?php } ?>
-<form method="post" class="mb-3"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['installation_csrf']) ?>"><input type="hidden" name="action" value="test"><button class="btn btn-primary">Test Connection</button></form>
+<div class="d-flex flex-wrap mb-3">
+<form method="post" class="mr-2 mb-2" onsubmit="return confirm(<?= htmlspecialchars(json_encode($config['receiver_enabled'] ? 'Disable the receiver? This site will stop accepting installation reports.' : 'Enable the receiver? Do this ONLY on the original you2biz.com hosting.'), ENT_QUOTES) ?>);"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['installation_csrf']) ?>"><input type="hidden" name="action" value="receiver"><input type="hidden" name="enabled" value="<?= $config['receiver_enabled'] ? '0' : '1' ?>">
+<?php if ($config['receiver_enabled']) { ?><button class="btn btn-danger">Disable Receiver</button><?php } else { ?><button class="btn btn-success">Enable Receiver</button><?php } ?></form>
+<form method="post" class="mb-2"><input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['installation_csrf']) ?>"><input type="hidden" name="action" value="test"><button class="btn btn-primary">Test Connection</button></form>
+</div>
+<p class="mb-3">Receiver status: <?= $config['receiver_enabled'] ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-secondary">Disabled</span>' ?></p>
 <?php if ($rows) { ?>
 <div class="table-responsive"><table class="table table-bordered"><thead><tr><th>Website</th><th>Installation ID</th><th>First Seen (UTC)</th><th>Last Active (UTC)</th><th>Status</th><th>Action</th></tr></thead><tbody>
 <?php $count=0; while ($row=mysqli_fetch_assoc($rows)) { if (++$count > 50) break; ?>
