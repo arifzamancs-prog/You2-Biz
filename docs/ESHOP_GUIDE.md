@@ -17,6 +17,15 @@ Only the enabled company can manage its own shop, products, orders, and checkout
 
 Non-stock products cannot be published to the E-shop.
 
+### Storefront details
+
+- **E-shop → Shop Products → Details, Gallery & SEO** sets the regular price (shown struck through with a "Save" badge), brand (brand filter), key features (one per line), specification (`Label: Value` per line; a line without a colon is a group heading), Featured Products on the home page, SEO title/description and up to 8 gallery images.
+- **E-shop → Delivery Areas** lists areas such as *Inside Dhaka* and *Outside Dhaka*. With at least one active area, the customer must choose one at checkout and its charge replaces the Shop Settings delivery charge. A paid area also needs the delivery invoice charge type in Checkout Settings.
+- **E-shop → Home Banners** rotates up to 8 banners (about 1400 × 580 px) at the top of the home page.
+- **Shop Settings** also sets the WhatsApp chat number, Facebook/YouTube links and the brand/header colors.
+
+Shop pages use clean URLs through `shop/.htaccess`, for example `/shop/your-shop/p/12-product-name` and `/shop/your-shop/c/3-category-name`. Apache needs `mod_rewrite` with `AllowOverride` for this folder. Older `?shop=...&view=cart` links keep working. Each shop serves `/sitemap.xml` and `/robots.txt` under its own URL.
+
 ## 3. Variants and stock
 
 For a product with variants, create the variants in the Products module and receive/distribute stock against each variant. The storefront shows the variant selector and only allows available variants to be ordered.

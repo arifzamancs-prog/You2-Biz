@@ -5,6 +5,9 @@ eshop_order_schema($conn);
 $message='';
 $profileStmt=mysqli_prepare($conn,'SELECT delivery_charge FROM eshop_profiles WHERE company_id=?'); mysqli_stmt_bind_param($profileStmt,'i',$company_id); mysqli_stmt_execute($profileStmt);
 $deliveryCharge=(float)(mysqli_fetch_assoc(mysqli_stmt_get_result($profileStmt))['delivery_charge']??0);
+// Delivery areas replace the flat charge, so any paid area also needs the invoice charge type.
+$zoneStmt=mysqli_prepare($conn,'SELECT COALESCE(MAX(charge),0) amount FROM eshop_delivery_zones WHERE company_id=? AND active=1'); mysqli_stmt_bind_param($zoneStmt,'i',$company_id); mysqli_stmt_execute($zoneStmt);
+$deliveryCharge=max($deliveryCharge,(float)(mysqli_fetch_assoc(mysqli_stmt_get_result($zoneStmt))['amount']??0));
 try{ $centralBranch=eshop_central_branch_id($conn,$company_id); }catch(RuntimeException $e){ $centralBranch=0; $message='Central Head Office could not be prepared.'; }
 if($_SERVER['REQUEST_METHOD']==='POST'){
     eshop_check_csrf(); $branch=$centralBranch; $charge=(int)($_POST['charge_type_id']??0); $verification=(string)($_POST['customer_verification_method']??'sms');
@@ -24,7 +27,7 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
 <div class="card"><div class="card-header">Checkout Settings</div><div class="card-body">
 <?php if($message){ ?><div class="alert <?= $message==='Checkout settings saved.'?'alert-success':'alert-danger' ?>" role="status"><?= eshop_escape($message) ?></div><?php } ?>
 <p>E-shop orders are centrally controlled. Orders create Pending Sales Invoices and reserve central Head Office stock. They are not routed through the Multi Branch feature. Payment is cash on delivery.</p>
-<div class="alert <?= $deliveryCharge>0?'alert-info':'alert-light' ?>">Storefront delivery charge: <strong>BDT <?= number_format($deliveryCharge,2) ?></strong><?php if($deliveryCharge>0){ ?>. Select its matching fixed add-charge below so Sales invoices match the checkout total.<?php } ?></div>
+<div class="alert <?= $deliveryCharge>0?'alert-info':'alert-light' ?>">Highest storefront delivery charge: <strong>BDT <?= number_format($deliveryCharge,2) ?></strong> (Shop Settings or <a href="delivery_zones.php">Delivery Areas</a>)<?php if($deliveryCharge>0){ ?>. Select its matching fixed add-charge below so Sales invoices match the checkout total.<?php } ?></div>
 <form method="post"><input type="hidden" name="csrf" value="<?= eshop_escape($_SESSION['eshop_editor_csrf']) ?>">
 <div class="alert alert-light border"><strong>Order source:</strong> Central Head Office stock. This is fixed for E-shop and does not depend on Multi Branch.</div>
 <label for="charge">Delivery invoice charge type</label><select id="charge" name="charge_type_id" class="form-control mb-3" <?= $deliveryCharge>0?'required':'' ?>><option value="0">No delivery charge</option><?php while($c=mysqli_fetch_assoc($charges)){ ?><option value="<?= $c['id'] ?>" <?= ($config['charge_type_id']??0)==$c['id']?'selected':'' ?>><?= eshop_escape($c['charge_name']) ?></option><?php } ?></select><p class="text-muted">If delivery charge in Shop Settings is greater than zero, select its matching invoice charge type here.</p>

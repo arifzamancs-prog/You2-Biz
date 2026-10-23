@@ -1,2 +1,5 @@
 RewriteEngine On
-RewriteRule ^([a-z0-9][a-z0-9-]{1,62}[a-z0-9])/?$ index.php?shop=$1 [L,QSA]
+# Real files (CSS, JS, images) are served directly.
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+RewriteRule ^([a-z0-9][a-z0-9-]{1,62}[a-z0-9])(?:/(.*))?$ index.php?shop=$1&route=$2 [L,QSA]

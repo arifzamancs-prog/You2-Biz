@@ -30,6 +30,8 @@ mysqli_query($conn, "CREATE TABLE IF NOT EXISTS eshop_products (
     description TEXT NOT NULL,
     PRIMARY KEY(company_id,product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+require_once __DIR__.'/../includes/eshop_storefront_helper.php';
+eshop_storefront_schema($conn);
 if(empty($_SESSION['eshop_editor_csrf'])) $_SESSION['eshop_editor_csrf'] = bin2hex(random_bytes(32));
 function eshop_escape($value){ return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); }
 function eshop_check_csrf(){

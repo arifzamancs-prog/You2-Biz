@@ -61,7 +61,15 @@ function eshop_place_order($conn,$cid,$cart,$input,$key){
         mysqli_stmt_bind_param($s,'i',$cid); mysqli_stmt_execute($s); $config=mysqli_fetch_assoc(mysqli_stmt_get_result($s));
         if(!$config) throw new RuntimeException('Checkout is not available. Please contact the shop.');
         $branch=eshop_central_branch_id($conn,$cid); $GLOBALS['stock_wallet_branch_id']=$branch;
-        $delivery=(float)$config['delivery_charge']; $charge=(int)$config['charge_type_id'];
+        $delivery=(float)$config['delivery_charge']; $charge=(int)$config['charge_type_id']; $zoneName='';
+        // Storefronts with delivery zones always send a zone; its charge replaces the flat charge.
+        if(array_key_exists('delivery_zone_id',$input)){
+            $zoneId=(int)$input['delivery_zone_id'];
+            $s=mysqli_prepare($conn,'SELECT zone_name,charge FROM eshop_delivery_zones WHERE id=? AND company_id=? AND active=1'); mysqli_stmt_bind_param($s,'ii',$zoneId,$cid); mysqli_stmt_execute($s);
+            $zone=mysqli_fetch_assoc(mysqli_stmt_get_result($s));
+            if(!$zone) throw new RuntimeException('Choose a delivery area.');
+            $delivery=(float)$zone['charge']; $zoneName=(string)$zone['zone_name'];
+        }
         if($delivery>0){
             $s=mysqli_prepare($conn,"SELECT id FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active' AND charge_type='add' AND charge_value_type='fixed'"); mysqli_stmt_bind_param($s,'ii',$charge,$cid); mysqli_stmt_execute($s);
             if(!mysqli_fetch_assoc(mysqli_stmt_get_result($s))) throw new RuntimeException('Delivery is not configured. Please contact the shop.');
@@ -88,7 +96,7 @@ function eshop_place_order($conn,$cid,$cart,$input,$key){
             $s=mysqli_prepare($conn,"INSERT INTO customers(user_id,customer_name,phone,email,address,status) VALUES(?,?,?,?,?,'active')"); mysqli_stmt_bind_param($s,'issss',$cid,$name,$phone,$email,$address); mysqli_stmt_execute($s); $customer=mysqli_insert_id($conn);
         }
         $no='ESH-'.date('ymdHis').'-'.bin2hex(random_bytes(4));
-        $notes='E-shop order '.$no."\nCash on delivery\n".$name."\n".$phone."\n".$email."\n".$address;
+        $notes='E-shop order '.$no."\nCash on delivery\n".($zoneName!==''?'Delivery area: '.$zoneName."\n":'').$name."\n".$phone."\n".$email."\n".$address;
         $s=mysqli_prepare($conn,"INSERT INTO invoices(user_id,branch_id,invoice_no,customer_id,customer_name,invoice_date,total_amount,notes,paid_amount,due_amount,payment_status,accounting_status,created_by_name,created_by_type) VALUES(?,?,?,?,?,CURDATE(),?,?,0,?,'due','pending','E-shop','eshop')");
         mysqli_stmt_bind_param($s,'iisisdsd',$cid,$branch,$no,$customer,$name,$total,$notes,$total); mysqli_stmt_execute($s); $invoice=mysqli_insert_id($conn);
         foreach($lines as [$pid,$variant,$qty,$price,$line]){

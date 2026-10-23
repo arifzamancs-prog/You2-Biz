@@ -5,7 +5,8 @@ $stmt = mysqli_prepare($conn, 'SELECT * FROM eshop_profiles WHERE company_id=?')
 mysqli_stmt_bind_param($stmt, 'i', $company_id); mysqli_stmt_execute($stmt);
 $profile = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)) ?: [
     'shop_name'=>$_SESSION['user_name'] ?? '', 'logo_path'=>'', 'phone'=>'', 'email'=>'', 'address'=>'',
-    'description'=>'', 'delivery_charge'=>'0.00', 'return_policy'=>''
+    'description'=>'', 'delivery_charge'=>'0.00', 'return_policy'=>'',
+    'whatsapp'=>'', 'facebook_url'=>'', 'youtube_url'=>'', 'theme_color'=>'#e4002b', 'header_color'=>'#081621'
 ];
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     eshop_check_csrf();
@@ -25,10 +26,19 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $error = 'Enter a non-negative delivery charge with up to two decimal places.';
     }elseif(max(strlen($profile['address']), strlen($profile['description']), strlen($profile['return_policy'])) > 10000){
         $error = 'Keep each text field within 10,000 bytes.';
+    }elseif($profile['whatsapp'] !== '' && !preg_match('/\A\+?[0-9 -]{7,25}\z/', $profile['whatsapp'])){
+        $error = 'Enter a valid WhatsApp number, for example 01712345678.';
+    }elseif(($profile['facebook_url'] !== '' && !preg_match('#\Ahttps?://\S{3,250}\z#i', $profile['facebook_url'])) || ($profile['youtube_url'] !== '' && !preg_match('#\Ahttps?://\S{3,250}\z#i', $profile['youtube_url']))){
+        $error = 'Facebook and YouTube links must start with https://.';
+    }elseif(!preg_match('/\A#[0-9a-fA-F]{6}\z/', $profile['theme_color']) || !preg_match('/\A#[0-9a-fA-F]{6}\z/', $profile['header_color'])){
+        $error = 'Choose valid theme colors.';
     }else{
         $save = mysqli_prepare($conn, 'INSERT INTO eshop_profiles (company_id,shop_name,logo_path,phone,email,address,description,delivery_charge,return_policy) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE shop_name=VALUES(shop_name),logo_path=VALUES(logo_path),phone=VALUES(phone),email=VALUES(email),address=VALUES(address),description=VALUES(description),delivery_charge=VALUES(delivery_charge),return_policy=VALUES(return_policy)');
         mysqli_stmt_bind_param($save,'issssssss',$company_id,$profile['shop_name'],$profile['logo_path'],$profile['phone'],$profile['email'],$profile['address'],$profile['description'],$profile['delivery_charge'],$profile['return_policy']);
         mysqli_stmt_execute($save);
+        $storefront = mysqli_prepare($conn, 'UPDATE eshop_profiles SET whatsapp=?,facebook_url=?,youtube_url=?,theme_color=?,header_color=? WHERE company_id=?');
+        mysqli_stmt_bind_param($storefront,'sssssi',$profile['whatsapp'],$profile['facebook_url'],$profile['youtube_url'],$profile['theme_color'],$profile['header_color'],$company_id);
+        mysqli_stmt_execute($storefront);
         if(($profile['logo_path']??'')!==$oldLogo && $oldLogo!=='' && is_file(__DIR__.'/../uploads/eshop_logos/'.$oldLogo)) @unlink(__DIR__.'/../uploads/eshop_logos/'.$oldLogo);
         $_SESSION['eshop_saved'] = 'Shop settings saved.';
         header('Location: settings.php'); exit;
@@ -47,5 +57,12 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
 <?php } ?>
 <?php foreach(['address'=>'Shop address','description'=>'About your shop','return_policy'=>'Return policy'] as $key=>$label){ ?>
 <div class="col-12 form-group"><label for="<?= $key ?>"><?= $label ?></label><textarea class="form-control" id="<?= $key ?>" name="<?= $key ?>" rows="3" maxlength="10000"><?= eshop_escape($profile[$key]) ?></textarea></div>
-<?php } ?></div><button class="btn btn-primary">Save Settings</button></form></div></div>
+<?php } ?>
+<div class="col-12"><hr><h5>Storefront look &amp; social links</h5></div>
+<div class="col-12 col-md-4 form-group"><label for="whatsapp">WhatsApp number</label><input id="whatsapp" name="whatsapp" class="form-control" maxlength="25" placeholder="01712345678" value="<?= eshop_escape($profile['whatsapp']) ?>"><small class="form-text text-muted">Shows a WhatsApp chat button on every shop page.</small></div>
+<div class="col-12 col-md-4 form-group"><label for="facebook_url">Facebook page link</label><input id="facebook_url" name="facebook_url" class="form-control" type="url" maxlength="255" placeholder="https://facebook.com/..." value="<?= eshop_escape($profile['facebook_url']) ?>"></div>
+<div class="col-12 col-md-4 form-group"><label for="youtube_url">YouTube channel link</label><input id="youtube_url" name="youtube_url" class="form-control" type="url" maxlength="255" placeholder="https://youtube.com/@..." value="<?= eshop_escape($profile['youtube_url']) ?>"></div>
+<div class="col-6 col-md-3 form-group"><label for="theme_color">Brand color</label><input id="theme_color" name="theme_color" class="form-control" type="color" value="<?= eshop_escape($profile['theme_color']) ?>"><small class="form-text text-muted">Buttons, prices and badges.</small></div>
+<div class="col-6 col-md-3 form-group"><label for="header_color">Header color</label><input id="header_color" name="header_color" class="form-control" type="color" value="<?= eshop_escape($profile['header_color']) ?>"><small class="form-text text-muted">Top bar and footer.</small></div>
+</div><button class="btn btn-primary">Save Settings</button></form></div></div>
 <?php require_once '../includes/footer.php'; ?>
