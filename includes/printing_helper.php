@@ -1035,5 +1035,63 @@ function save_printing_option(
 // Shown at the very bottom of every printed document, POS and general layouts alike.
 function printing_powered_by_html()
 {
-    return '<div class="powered-by" style="clear:both;text-align:center;font-size:10px;color:#555;margin-top:10px;">Powered by You2technologies.com</div>';
+    return '<div class="powered-by" style="clear:both;text-align:center;font-size:10px;color:#555;margin-top:4px;break-inside:avoid;page-break-inside:avoid;">Powered by You2technologies.com</div>';
+}
+
+// Printable area (mm) of general/custom paper. Non-custom paper uses the shorter of
+// A4 and Letter, so a phone that defaults to Letter paper still fits on one page.
+function printing_fit_area_mm($conn, $page_margins = true)
+{
+    if(is_custom_printing($conn)){
+        $size = current_printing_custom_size($conn);
+        $width = (float)$size['width'] * 25.4;
+        $height = (float)$size['height'] * 25.4;
+        $top = (float)current_printing_custom_top_margin($conn) * 25.4;
+    }else{
+        $width = 210;
+        $height = 279.4;
+        $top = should_use_general_top_margin($conn) ? (float)current_printing_general_top_margin($conn) * 25.4 : 12;
+    }
+
+    $side = $page_margins ? 12 : 0;
+    $top = $page_margins ? $top : 0;
+
+    return [
+        'width' => max(10, $width - 2 * $side),
+        'height' => max(10, $height - $top - $side),
+    ];
+}
+
+// When a print is only slightly longer than one page, shrink it (down to $min_scale)
+// so it prints on one page. Longer documents are left alone and flow onto more pages.
+function printing_fit_one_page_html($selector, $area, $use_area_width = true, $min_scale = 0.85)
+{
+    $config = json_encode([
+        'selector' => (string)$selector,
+        'width' => (float)$area['width'],
+        'height' => (float)$area['height'],
+        'useAreaWidth' => (bool)$use_area_width,
+        'minScale' => (float)$min_scale,
+    ]);
+
+    return '<style>@media print{' . $selector . '{zoom:var(--print-fit-scale,1);}}</style>'
+        . '<script>(function(){'
+        . 'var c=' . $config . ';'
+        . 'function fit(){'
+        . 'var page=document.querySelector(c.selector);if(!page){return;}'
+        . 'var root=document.documentElement;root.style.removeProperty("--print-fit-scale");'
+        . 'var probe=document.createElement("div");probe.style.cssText="position:absolute;visibility:hidden;width:100mm;height:1px;";'
+        . 'document.body.appendChild(probe);var pxPerMm=probe.getBoundingClientRect().width/100;probe.parentNode.removeChild(probe);'
+        . 'var saved=page.getAttribute("style");'
+        . 'page.style.minHeight="0";page.style.margin="0";page.style.boxShadow="none";'
+        . 'if(c.useAreaWidth){page.style.width=c.width+"mm";page.style.maxWidth="none";page.style.padding="0";}'
+        . 'var width=page.getBoundingClientRect().width,height=page.scrollHeight;'
+        . 'if(saved===null){page.removeAttribute("style");}else{page.setAttribute("style",saved);}'
+        . 'if(!width||!height){return;}'
+        . 'var normal=Math.min(1,(c.width*pxPerMm)/width);'
+        . 'var needed=(c.height*pxPerMm)/height;'
+        . 'if(needed<normal&&needed>=normal*c.minScale){root.style.setProperty("--print-fit-scale",(Math.floor(needed*100)/100-0.01).toFixed(2));}'
+        . '}'
+        . 'window.addEventListener("load",fit);window.addEventListener("beforeprint",fit);'
+        . '})();</script>';
 }

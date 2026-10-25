@@ -314,6 +314,7 @@ th{
     }
 }
 </style>
+<?php if(!$pos_printing){ echo printing_fit_one_page_html('.page', printing_fit_area_mm($conn)); } ?>
 </head>
 
 <body>

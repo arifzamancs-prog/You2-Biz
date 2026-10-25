@@ -143,13 +143,14 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
         .note { margin-top: 28px; padding: 15px 18px; border-left: 4px solid #1479e8; background: #f4f8fd; color: #45546a; }
         .approval-row { position:relative; display:block; margin-top:44px; min-height:96px; } .seal-block { position:absolute; text-align:center; min-width:130px; } .seal-block img { display:block; margin:0 auto; max-width:115px; max-height:76px; object-fit:contain; } .company-seal-block { right:0; bottom:0; }
         .created-by { margin-top:18px; color:#65748a; font-size:12px; }
-        .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #e5eaf1; color: #7b8799; font-size: 12px; text-align: center; }
+        .print-end { break-inside: avoid; page-break-inside: avoid; } .footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5eaf1; color: #7b8799; font-size: 12px; text-align: center; }
         .print-button { border: 0; border-radius: 4px; padding: 10px 16px; background: #1479e8; color: #fff; cursor: pointer; font-weight: 700; }
         <?php if($printing_option === 'pos'){ ?>
         body { font-size:11px; } .invoice-content { padding:18px 14px; padding-top:calc(18px + <?= number_format((float)$print_top_margin, 2, '.', '') ?>in); } .header { gap:8px; padding-bottom:14px; } .company-head { max-width:52%; } .brand-row { gap:7px; } .company-logo { width:34px; height:34px; } .brand { font-size:14px; } .company-contact { margin-top:6px; font-size:8px; } .title { font-size:17px; } .meta { font-size:9px; } .customer-grid { grid-template-columns:1fr; gap:12px; margin:16px 0; } th,td { padding:7px 6px; font-size:9px; } .total-row { min-height:56px; margin-top:14px; } .summary { width:100%; } .paid-total-seal img { max-width:78px; max-height:48px; } .approval-row { margin-top:22px; min-height:72px; } .seal-block { min-width:90px; } .seal-block img { max-width:78px; max-height:48px; } .footer { margin-top:20px; font-size:9px; }
         <?php } ?>
         @media print { body { padding: 0; background: #fff; } .invoice-box { box-shadow: none; max-width: none; } .no-print { display:none; } }
     </style>
+<?php if($printing_option !== 'pos'){ echo printing_fit_one_page_html('.invoice-box', printing_fit_area_mm($conn, false), false); } ?>
 </head>
 <body>
     <div class="invoice-box"><div class="top-bar"></div><div class="invoice-content">
@@ -194,7 +195,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <?php if($company_seal_url !== ''){ ?><div class="seal-block company-seal-block"><img src="<?= htmlspecialchars($company_seal_url); ?>" alt="Company seal"></div><?php } ?>
         </div><?php } ?>
         <?php if($show_created_by){ ?><div class="created-by">Created by: <strong><?= htmlspecialchars($created_by_name); ?></strong></div><?php } ?>
-        <div class="footer">This is a system-generated invoice. Thank you for your business.</div><?= printing_powered_by_html(); ?>
+        <div class="print-end"><div class="footer">This is a system-generated invoice. Thank you for your business.</div><?= printing_powered_by_html(); ?></div>
     </div></div>
 </body>
 </html>

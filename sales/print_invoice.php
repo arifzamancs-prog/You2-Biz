@@ -1000,7 +1000,7 @@ td{
     display:grid;
     grid-template-columns:1fr 1fr;
     gap:64px;
-    margin-top:70px;
+    margin-top:40px;
 }
 
 .signature-line{
@@ -1009,10 +1009,16 @@ td{
     text-align:center;
 }
 
+/* Signatures, thank-you note and powered-by always stay on the same page. */
+.print-end{
+    break-inside:avoid;
+    page-break-inside:avoid;
+}
+
 .footer-note{
     color:#6b7280;
     font-size:12px;
-    margin-top:28px;
+    margin-top:12px;
     text-align:center;
 }
 
@@ -1046,6 +1052,7 @@ window.addEventListener('load', function () {
 <?php if($auto_print){ ?>
 <script>window.addEventListener('load', function(){ window.setTimeout(function(){ window.print(); }, 250); });</script>
 <?php } ?>
+<?= printing_fit_one_page_html('.page', printing_fit_area_mm($conn)); ?>
 </head>
 
 <body>
@@ -1238,6 +1245,7 @@ window.addEventListener('load', function () {
     </section>
     <?php } ?>
 
+    <div class="print-end">
     <section class="signatures">
         <div class="signature-line">Customer Signature</div>
         <div class="signature-line">Authorized Signature</div>
@@ -1248,6 +1256,7 @@ window.addEventListener('load', function () {
     </div>
 
 <?= printing_powered_by_html(); ?>
+    </div>
 </main>
 
 </body>
