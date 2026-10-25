@@ -21,9 +21,9 @@ $invoice_reference_enabled = restaurant_invoice_reference_enabled($conn, $user_i
 $reference_staff = mysqli_query($conn, "SELECT id, staff_code, name FROM staff WHERE user_id={$user_id} AND status='active' ORDER BY name");
 $reference_tables = mysqli_query($conn, "SELECT id, staff_id, table_name FROM restaurant_tables WHERE user_id={$user_id} AND status='active' ORDER BY table_name");
 
-$products_stmt = mysqli_prepare($conn, "SELECT p.id,p.product_name,p.sku,p.sale_price,p.photo_path,c.category_name,c.category_type
-    FROM products p INNER JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id
-    WHERE p.user_id=? AND p.status='active' AND c.status='active'" . restaurant_catalog_scope_sql($conn, 'p', true) . " ORDER BY c.category_name,p.product_name");
+$products_stmt = mysqli_prepare($conn, "SELECT p.id,p.product_name,p.sku,p.sale_price,p.photo_path,COALESCE(c.category_name,'Unassigned') AS category_name,c.category_type
+    FROM products p LEFT JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id
+    WHERE p.user_id=? AND p.status='active' AND (c.id IS NULL OR c.status='active')" . restaurant_catalog_scope_sql($conn, 'p', true) . " ORDER BY category_name,p.product_name");
 mysqli_stmt_bind_param($products_stmt, 'i', $user_id);
 mysqli_stmt_execute($products_stmt);
 $products = mysqli_stmt_get_result($products_stmt);

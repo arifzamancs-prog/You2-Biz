@@ -12,8 +12,8 @@ if (!in_array(project_package_company_type($conn, $company_id), ['Stock Product'
     || (is_manager_user() && !manager_has_permission('stock_live_report'))) {
     http_response_code(403); exit('Live report access is required.');
 }
-$scope = stock_can_manage_warehouse($conn) ? 0 : (int)selected_branch_id($conn, true);
-if (!stock_can_manage_warehouse($conn) && $scope <= 0) { http_response_code(403); exit('Branch is not configured.'); }
+// Anyone allowed onto this page sees every branch and the warehouse.
+$scope = 0;
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
