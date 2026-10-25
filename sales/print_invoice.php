@@ -747,6 +747,7 @@ window.addEventListener('load', preparePosPrintPage);
     <div class="footer">
         Thank you for your cooperation.
     </div>
+<?= printing_powered_by_html(); ?>
 </main>
 
 </body>
@@ -1246,6 +1247,7 @@ window.addEventListener('load', function () {
         Thank you for your cooperation.
     </div>
 
+<?= printing_powered_by_html(); ?>
 </main>
 
 </body>

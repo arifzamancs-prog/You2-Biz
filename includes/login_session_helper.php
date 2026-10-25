@@ -33,6 +33,7 @@ function complete_user_login($conn, $user, $account, $owner_id, $role)
     // A dismissed bill notice stays dismissed only for this login. A new login
     // deliberately receives a fresh reminder when a bill is due.
     $_SESSION['bill_reminder_notice_pending'] = true;
+    unset($_SESSION['bill_reminder_countdown_until']);
     $_SESSION['company_type'] = normalize_company_type($account['company_type'] ?? 'Housing');
     $_SESSION['stock_product_enabled'] = company_type_uses_stock_products($_SESSION['company_type']);
     $_SESSION['user_name'] = $account['name'];

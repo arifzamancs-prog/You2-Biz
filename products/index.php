@@ -128,17 +128,15 @@ require_once '../includes/sidebar.php';
         <?php } ?>
 
         <style>
-            #product-list .product-sl-column{min-width:58px!important;width:58px!important;text-align:center}
-            #product-list .sale-price-column{min-width:130px!important;width:130px!important}
+            #product-list .product-name-column{min-width:240px}
+            #product-list .product-category-column{min-width:180px}
+            #product-list .sale-price-column{min-width:100px!important;width:100px!important;white-space:nowrap}
             #product-list .all-branch-stock-column{min-width:130px!important;width:130px!important}
-            #product-list .product-action-column{width:88px!important;min-width:88px!important;white-space:nowrap}
+            #product-list .product-action-column{width:76px!important;min-width:76px!important;white-space:nowrap}
             #product-list.inventory-sales-product-list{table-layout:auto}
             #product-list.inventory-sales-product-list .inventory-product-column{min-width:230px}
             #product-list.inventory-sales-product-list .inventory-category-column{min-width:260px;overflow-wrap:anywhere}
-            #product-list.inventory-sales-product-list .inventory-code-column{width:90px;min-width:90px;white-space:nowrap}
             #product-list.inventory-sales-product-list .purchase-price-column{width:125px;min-width:125px;word-break:normal;overflow-wrap:normal}
-            #product-list.inventory-sales-product-list .sale-price-column{width:105px!important;min-width:105px!important;white-space:nowrap}
-            #product-list.inventory-sales-product-list .product-action-column{width:78px!important;min-width:78px!important}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
             .product-photo-preview:hover img{transform:scale(1.08)}
@@ -151,10 +149,9 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <th class="product-sl-column">SL</th><?php if($product_photos_enabled){ ?><th>Photo</th><?php } ?>
-                <th<?= !$product_photos_enabled ? ' class="inventory-product-column"' : '' ?>>Product</th>
-                <th<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>Category</th>
-                <th<?= !$product_photos_enabled ? ' class="inventory-code-column"' : '' ?>>Code</th>
+                <?php if($product_photos_enabled){ ?><th>Photo</th><?php } ?>
+                <th class="product-name-column<?= !$product_photos_enabled ? ' inventory-product-column' : '' ?>">Product</th>
+                <th class="product-category-column<?= !$product_photos_enabled ? ' inventory-category-column' : '' ?>">Category</th>
                 <th<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>Purchase Price</th>
                 <th class="sale-price-column">Sale Price</th>
                 <?php if($show_expired_on){ ?>
@@ -175,7 +172,7 @@ require_once '../includes/sidebar.php';
 
             <tbody>
 
-            <?php $serial=0; while($row = mysqli_fetch_assoc($result)){ ?>
+            <?php while($row = mysqli_fetch_assoc($result)){ ?>
 
             <?php
             $product_has_transactions = product_has_transactions($conn, (int)$row['id'], $user_id);
@@ -212,12 +209,11 @@ require_once '../includes/sidebar.php';
             ?>
 
             <tr>
-                <td><?= ++$serial ?></td>
-
                 <?php if($product_photos_enabled){ ?><td><button type="button" class="product-photo-preview" data-photo-src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="<?= htmlspecialchars($row['product_name']); ?>" style="width:46px;height:46px;object-fit:cover;border-radius:4px"></button></td><?php } ?>
 
-                <td<?= !$product_photos_enabled ? ' class="inventory-product-column"' : '' ?>>
+                <td class="product-name-column<?= !$product_photos_enabled ? ' inventory-product-column' : '' ?>">
                     <?= htmlspecialchars($row['product_name']); ?>
+                    <?php if(trim((string)$row['sku']) !== ''){ ?><div class="small text-muted">[Code: <?= htmlspecialchars($row['sku']); ?>]</div><?php } ?>
                 </td>
 
                 <td<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>
@@ -226,10 +222,6 @@ require_once '../includes/sidebar.php';
                     <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
                     <?php } ?>
                     <?php if(!empty($row['product_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['product_sub_category']); ?>]</div><?php } ?>
-                </td>
-
-                <td<?= !$product_photos_enabled ? ' class="inventory-code-column"' : '' ?>>
-                    <?= htmlspecialchars($row['sku']); ?>
                 </td>
 
                 <td<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>
@@ -376,7 +368,7 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
-$product_list_non_sortable_columns = $product_photos_enabled ? '[0,1]' : '[0]';
+$product_list_non_sortable_columns = $product_photos_enabled ? '[0]' : '[]';
 $page_script = str_replace('__NON_SORTABLE_COLUMNS__', $product_list_non_sortable_columns, <<<'SCRIPT'
 <script>
 $(function () {
@@ -384,11 +376,7 @@ $(function () {
         responsive: false, autoWidth: false, order: [], pageLength: 10,
         lengthMenu: [[10,25,50,100,200,-1],[10,25,50,100,200,'All loaded']],
         dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6 product-quick-search-slot">>rtip',
-        columnDefs: [{targets: __NON_SORTABLE_COLUMNS__, orderable: false, searchable: false}],
-        drawCallback: function () {
-            const api=this.api(), start=api.page.info().start;
-            api.column(0,{page:'current'}).nodes().each(function(cell,i){cell.textContent=start+i+1;});
-        }
+        columnDefs: [{targets: __NON_SORTABLE_COLUMNS__, orderable: false, searchable: false}]
     });
     $('#product-list_wrapper .product-quick-search-slot').html('<div class="d-flex align-items-center justify-content-md-end"><label for="product-quick-search" class="mb-0 mr-2 text-nowrap">Quick Search</label><input id="product-quick-search" class="form-control form-control-sm" style="max-width:280px" placeholder="Search loaded products"></div>');
     $('#product-quick-search').on('input', function(){table.search(this.value).draw();});

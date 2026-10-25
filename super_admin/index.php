@@ -25,6 +25,7 @@ require_once '../includes/bill_reminder_helper.php';
 
 require_super_admin_user();
 bill_reminder_ensure_columns($conn);
+ensure_company_bill_payment_references_table($conn);
 require_once '../includes/eshop_helper.php';
 ensure_eshop_table($conn);
 if(empty($_SESSION['eshop_csrf'])) $_SESSION['eshop_csrf'] = bin2hex(random_bytes(32));
@@ -594,17 +595,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Please select a monthly bill day between 1 and 31.', 'danger');
         }
 
+        // Enabling billing or changing the bill day starts counting bills from now.
+        $bill_reminder_start_date = bill_reminder_resolve_start_date($conn, $company_id, $bill_reminder_enabled, $bill_reminder_day);
         $stmt = mysqli_prepare(
             $conn,
             "UPDATE users
              SET bill_reminder_enabled=?,
                  bill_reminder_day=?,
-                 service_charge_amount=?
+                 service_charge_amount=?,
+                 bill_reminder_start_date=?
              WHERE id=?
              AND role='admin'
              LIMIT 1"
         );
-        mysqli_stmt_bind_param($stmt, 'iidi', $bill_reminder_enabled, $bill_reminder_day, $service_charge_amount, $company_id);
+        mysqli_stmt_bind_param($stmt, 'iidsi', $bill_reminder_enabled, $bill_reminder_day, $service_charge_amount, $bill_reminder_start_date, $company_id);
 
         if (!mysqli_stmt_execute($stmt)) {
             super_admin_flash_and_redirect('Bill reminder settings could not be updated.', 'danger');

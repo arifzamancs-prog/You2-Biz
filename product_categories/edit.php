@@ -255,7 +255,7 @@ require_once '../includes/sidebar.php';
     const source=document.getElementById('sub_category_value'), hidden=document.getElementById('sub_category_options'), list=document.getElementById('sub_category_list'), add=document.getElementById('add_sub_category');
     let subCategories=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);
     function render(){ hidden.value=subCategories.join(', '); list.innerHTML=''; subCategories.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{subCategories.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
-    function addSubCategory(){const name=source.value.trim();if(!name)return; if(!subCategories.some(item=>item.toLowerCase()===name.toLowerCase())){subCategories.push(name);render();} source.value='';source.focus();}
+    function addSubCategory(){let added=false; source.value.split(/[,;]/).map(item=>item.trim()).filter(Boolean).forEach(name=>{if(!subCategories.some(item=>item.toLowerCase()===name.toLowerCase())){subCategories.push(name);added=true;}}); if(added)render(); source.value='';source.focus();}
     add.addEventListener('click',addSubCategory);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addSubCategory();}});render();
 })();
 <?php if ($variants_enabled) { ?>
@@ -263,7 +263,7 @@ require_once '../includes/sidebar.php';
     const source=document.getElementById('variant_value'), hidden=document.getElementById('variant_options'), list=document.getElementById('variant_list'), add=document.getElementById('add_variant');
     let variants=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);
     function render(){ hidden.value=variants.join(', '); list.innerHTML=''; variants.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{variants.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
-    function addVariant(){const name=source.value.trim();if(!name)return; if(!variants.some(item=>item.toLowerCase()===name.toLowerCase())){variants.push(name);render();} source.value='';source.focus();}
+    function addVariant(){let added=false; source.value.split(/[,;]/).map(item=>item.trim()).filter(Boolean).forEach(name=>{if(!variants.some(item=>item.toLowerCase()===name.toLowerCase())){variants.push(name);added=true;}}); if(added)render(); source.value='';source.focus();}
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});render();
 })();
 <?php } ?>

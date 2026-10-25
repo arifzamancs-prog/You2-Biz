@@ -1,3 +1,8 @@
+<?php
+require_once __DIR__ . '/bill_reminder_helper.php';
+// A company with an older unpaid service charge bill sees only the payment page.
+if (isset($conn)) bill_reminder_enforce_lock($conn);
+?>
 <!DOCTYPE html>
 <html lang="en">
 

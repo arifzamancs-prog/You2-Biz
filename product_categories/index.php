@@ -131,7 +131,7 @@ require_once '../includes/sidebar.php';
 
                 </td>
 
-                <td<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>><?= !empty($row['created_at']) ? date($is_inventory_sales ? 'd-m-Y' : 'd-m-Y h:i A', strtotime($row['created_at'])) : '-'; ?></td>
+                <td<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>><?= !empty($row['created_at']) ? date('d-m-Y', strtotime($row['created_at'])) : '-'; ?></td>
 
                 <?php if(manager_can_modify()){ ?>
                 <td<?= $is_inventory_sales ? ' class="inventory-sales-fit-cell"' : '' ?>>

@@ -1089,7 +1089,7 @@ if($is_ajax){
         'invoice_id' => (int)$invoice_id,
         'invoice_no' => (string)$invoice_no,
         'action' => $action,
-        'print_url' => $should_post ? 'print_invoice.php?id=' . (int)$invoice_id : null,
+        'print_url' => $should_post ? 'print_invoice.php?id=' . (int)$invoice_id . '&auto_print=1' : null,
         'invoice' => $recent_invoice,
     ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
@@ -1100,10 +1100,8 @@ if(
     $_POST['action'] == 'print'
 ){
 
-    $print_url = "print_invoice.php?id=" . $invoice_id . "&reload_parent=create";
-    if(($_POST['auto_print'] ?? '') === '1'){
-        $print_url .= '&auto_print=1';
-    }
+    // Pay & Print always sends the invoice straight to the printer.
+    $print_url = "print_invoice.php?id=" . $invoice_id . "&reload_parent=create&auto_print=1";
     header("Location:" . $print_url);
 
 }else{

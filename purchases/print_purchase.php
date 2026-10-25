@@ -413,6 +413,7 @@ th{
             </div>
         </div>
     <?php } ?>
+<?= printing_powered_by_html(); ?>
 </main>
 
 </body>

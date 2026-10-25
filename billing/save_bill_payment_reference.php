@@ -39,23 +39,29 @@ if(strlen($reference_no) > 150){
     exit;
 }
 
-try {
-    $reminder = bill_reminder_current_for_company($conn, $company_id);
+$locked = false;
 
-    if(!$reminder){
+try {
+    $status = bill_reminder_status_for_company($conn, $company_id);
+
+    if(!$status){
         $_SESSION['bill_reminder_flash'] = ['type' => 'danger', 'message' => 'There is no active bill reminder to update.'];
         header('Location: ' . $return_to);
         exit;
     }
 
-    // A pending reference is locked until Super Admin approves or rejects it.
-    if(($reminder['reference_status'] ?? '') === 'pending'){
+    $locked = $status['mode'] === 'locked';
+    // A pending reference stays locked until Super Admin approves or rejects
+    // it; one reference covers every other unpaid bill.
+    $bills = array_values(array_filter($status['bills'], function($bill){
+        return $bill['reference_status'] !== 'pending';
+    }));
+
+    if(!$bills){
         header('Location: ' . $return_to);
         exit;
     }
 
-    $bill_date = $reminder['bill_cycle_date'];
-    $amount = (float)$reminder['service_charge_amount'];
     $verification_token = bill_reminder_verification_token();
     $verification_token_hash = bill_reminder_verification_token_hash($verification_token);
     $verification_expires_at = date('Y-m-d H:i:s', strtotime('+7 days'));
@@ -70,28 +76,48 @@ try {
         throw new Exception(mysqli_error($conn));
     }
 
-    mysqli_stmt_bind_param($stmt, 'isdsiss', $company_id, $bill_date, $amount, $reference_no, $login_user_id, $verification_token_hash, $verification_expires_at);
+    $amount = 0.0;
+    $bill_dates = [];
+    mysqli_begin_transaction($conn);
 
-    if(!mysqli_stmt_execute($stmt)){
-        throw new Exception(mysqli_stmt_error($stmt));
+    foreach($bills as $bill){
+        $bill_date = $bill['bill_cycle_date'];
+        $bill_amount = (float)$bill['amount'];
+        mysqli_stmt_bind_param($stmt, 'isdsiss', $company_id, $bill_date, $bill_amount, $reference_no, $login_user_id, $verification_token_hash, $verification_expires_at);
+
+        if(!mysqli_stmt_execute($stmt)){
+            mysqli_rollback($conn);
+            throw new Exception(mysqli_stmt_error($stmt));
+        }
+
+        $amount += $bill_amount;
+        $bill_dates[] = $bill_date;
     }
 
+    mysqli_commit($conn);
     mysqli_stmt_close($stmt);
 
     $verification_url = app_url('super_admin/bill_payment_verification.php?token=' . urlencode($verification_token));
     $email_body = '<p>A company has submitted a bill payment reference for verification.</p>'
-        . '<p><strong>Company:</strong> ' . htmlspecialchars($reminder['name']) . '<br>'
+        . '<p><strong>Company:</strong> ' . htmlspecialchars($status['name']) . '<br>'
         . '<strong>Amount:</strong> BDT ' . number_format($amount, 2) . '<br>'
-        . '<strong>Bill date:</strong> ' . htmlspecialchars($bill_date) . '<br>'
+        . '<strong>Bill date' . (count($bill_dates) > 1 ? 's' : '') . ':</strong> ' . htmlspecialchars(implode(', ', $bill_dates)) . '<br>'
         . '<strong>Reference No.:</strong> ' . htmlspecialchars($reference_no) . '</p>'
+        . ($locked ? '<p><strong>This company is locked until the payment is approved.</strong></p>' : '')
         . '<p><a href="' . htmlspecialchars($verification_url) . '" style="display:inline-block;padding:10px 16px;background:#007bff;color:#fff;text-decoration:none;border-radius:4px;">Verify Payment</a></p>'
         . '<p>This verification link expires in 7 days.</p>';
-    [$sent, $mail_error] = smtp_send_mail(
-        super_admin_notify_email(),
-        'Super Admin',
-        'Bill payment verification: ' . $reminder['name'],
-        $email_body
-    );
+    // The reference is already saved; a mail failure must not be reported as a save failure.
+    try {
+        [$sent, $mail_error] = smtp_send_mail(
+            super_admin_notify_email(),
+            'Super Admin',
+            'Bill payment verification: ' . $status['name'],
+            $email_body
+        );
+    } catch(Throwable $mail_exception) {
+        $sent = false;
+        $mail_error = $mail_exception->getMessage();
+    }
 
     $_SESSION['bill_reminder_flash'] = $sent
         ? ['type' => 'success', 'message' => 'Reference submitted. A payment verification link was sent to Super Admin.']
@@ -100,8 +126,14 @@ try {
     $_SESSION['bill_reminder_flash'] = ['type' => 'danger', 'message' => 'Could not save the payment reference: ' . $error->getMessage()];
 }
 
+// The locked payment page shows the result itself.
+if($locked){
+    header('Location: ' . bill_reminder_lock_path());
+    exit;
+}
+
 // Do not reopen the bill popup immediately after a successful submission.
 // A future login sets the reminder again if Super Admin has not approved it.
-unset($_SESSION['bill_reminder_notice_pending'], $_SESSION['bill_reminder_flash']);
+unset($_SESSION['bill_reminder_notice_pending'], $_SESSION['bill_reminder_flash'], $_SESSION['bill_reminder_countdown_until']);
 header('Location: ' . $return_to);
 exit;

@@ -1031,3 +1031,9 @@ function save_printing_option(
 
     return mysqli_stmt_execute($stmt);
 }
+
+// Shown at the very bottom of every printed document, POS and general layouts alike.
+function printing_powered_by_html()
+{
+    return '<div class="powered-by" style="clear:both;text-align:center;font-size:10px;color:#555;margin-top:10px;">Powered by You2technologies.com</div>';
+}

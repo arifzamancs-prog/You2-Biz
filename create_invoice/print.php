@@ -194,7 +194,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <?php if($company_seal_url !== ''){ ?><div class="seal-block company-seal-block"><img src="<?= htmlspecialchars($company_seal_url); ?>" alt="Company seal"></div><?php } ?>
         </div><?php } ?>
         <?php if($show_created_by){ ?><div class="created-by">Created by: <strong><?= htmlspecialchars($created_by_name); ?></strong></div><?php } ?>
-        <div class="footer">This is a system-generated invoice. Thank you for your business.</div>
+        <div class="footer">This is a system-generated invoice. Thank you for your business.</div><?= printing_powered_by_html(); ?>
     </div></div>
 </body>
 </html>

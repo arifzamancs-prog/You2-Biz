@@ -226,16 +226,39 @@ document.addEventListener('DOMContentLoaded', function () {
 require_once __DIR__ . '/bill_reminder_helper.php';
 
 $bill_reminder = null;
+$bill_countdown = 0;
 $bill_reminder_flash = $_SESSION['bill_reminder_flash'] ?? null;
 unset($_SESSION['bill_reminder_flash']);
 
-if(isset($_SESSION['bill_reminder_notice_pending']) && $_SESSION['bill_reminder_notice_pending'] && isset($conn) && $conn instanceof mysqli){
+if(!empty($_SESSION['bill_reminder_notice_pending']) && isset($conn) && $conn instanceof mysqli){
     try {
-        $bill_reminder = bill_reminder_current_for_session($conn);
-        unset($_SESSION['bill_reminder_notice_pending']);
+        $bill_reminder = bill_reminder_status_for_session($conn);
     } catch(Throwable $error) {
         // A notice must never prevent normal application pages from loading.
         error_log('Bill reminder popup: ' . $error->getMessage());
+    }
+
+    if($bill_reminder && $bill_reminder['mode'] === 'countdown'){
+        // The countdown end is kept in the session, so reloading or opening
+        // another page continues it instead of skipping it.
+        if(empty($_SESSION['bill_reminder_countdown_until'])){
+            $_SESSION['bill_reminder_countdown_until'] = time() + BILL_REMINDER_COUNTDOWN_SECONDS;
+        }
+
+        $bill_countdown = max(0, (int)$_SESSION['bill_reminder_countdown_until'] - time());
+
+        if($bill_countdown === 0){
+            $bill_reminder = null;
+        }
+    }
+
+    // A locked company never reaches this point: header.php sends it to the payment page.
+    if(!$bill_reminder || $bill_reminder['mode'] !== 'countdown'){
+        unset($_SESSION['bill_reminder_notice_pending'], $_SESSION['bill_reminder_countdown_until']);
+    }
+
+    if($bill_reminder && $bill_reminder['mode'] === 'locked'){
+        $bill_reminder = null;
     }
 }
 
@@ -243,17 +266,23 @@ if($bill_reminder):
     $bill_qr_url = bill_reminder_qr_url($conn);
     $return_to = $_SERVER['REQUEST_URI'] ?? app_path('dashboard.php');
 ?>
-<div class="modal fade" id="billReminderModal" tabindex="-1" role="dialog" aria-labelledby="billReminderModalLabel" aria-hidden="true">
+<div class="modal fade" id="billReminderModal" tabindex="-1" role="dialog" aria-labelledby="billReminderModalLabel" aria-hidden="true" <?= $bill_countdown > 0 ? 'data-backdrop="static" data-keyboard="false"' : ''; ?>>
     <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
-            <div class="modal-header bg-primary">
+            <div class="modal-header <?= $bill_countdown > 0 ? 'bg-danger' : 'bg-primary'; ?>">
                 <h5 class="modal-title" id="billReminderModalLabel"><i class="fas fa-receipt mr-1"></i> Bill Payment Reminder</h5>
-                <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close" id="billReminderClose" <?= $bill_countdown > 0 ? 'style="display:none"' : ''; ?>><span aria-hidden="true">&times;</span></button>
             </div>
             <div class="modal-body text-center">
                 <?php if(is_array($bill_reminder_flash)): ?>
                     <div class="alert alert-<?= htmlspecialchars($bill_reminder_flash['type'] ?? 'info'); ?> text-left">
                         <?= htmlspecialchars($bill_reminder_flash['message'] ?? ''); ?>
+                    </div>
+                <?php endif; ?>
+                <?php if($bill_countdown > 0): ?>
+                    <div class="alert alert-danger text-left mb-3">
+                        Your bill is overdue by <?= (int)$bill_reminder['days_since_bill']; ?> days. Please pay before the next bill is generated, otherwise the software will be locked.
+                        <div class="font-weight-bold mt-1" id="billReminderCountdown" data-seconds="<?= (int)$bill_countdown; ?>">You can close this window in <span><?= sprintf('%d:%02d', intdiv($bill_countdown, 60), $bill_countdown % 60); ?></span></div>
                     </div>
                 <?php endif; ?>
                 <p class="mb-1">Your company bill is due.</p>
@@ -288,7 +317,25 @@ if($bill_reminder):
     </div>
 </div>
 <script>
-$(function () { $('#billReminderModal').modal('show'); });
+$(function () {
+    $('#billReminderModal').modal('show');
+    var countdown = document.getElementById('billReminderCountdown');
+    if (!countdown) return;
+    // The window can be closed only when the countdown reaches zero.
+    var seconds = parseInt(countdown.getAttribute('data-seconds'), 10) || 0;
+    var label = countdown.querySelector('span');
+    var timer = setInterval(function () {
+        seconds = Math.max(0, seconds - 1);
+        label.textContent = Math.floor(seconds / 60) + ':' + ('0' + (seconds % 60)).slice(-2);
+        if (seconds === 0) {
+            clearInterval(timer);
+            countdown.textContent = 'You can close this window now.';
+            document.getElementById('billReminderClose').style.display = '';
+            var modal = $('#billReminderModal').data('bs.modal');
+            if (modal) { modal._config.backdrop = true; modal._config.keyboard = true; }
+        }
+    }, 1000);
+});
 </script>
 <?php endif; ?>
 </body>
