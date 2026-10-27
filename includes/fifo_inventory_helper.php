@@ -907,6 +907,85 @@ function fifo_inventory_product_opening_is_editable($conn, $user_id, $product_id
     return (int)($row['restricted_count'] ?? 0) === 0;
 }
 
+// Opening stock that was only transferred to other locations and has all come
+// back (no sale, purchase, return, damage or pending transfer) can still be
+// corrected. Returns the location holding the opening stock, or 0 if not allowed.
+function fifo_inventory_opening_round_trip_location($conn, $user_id, $product_id)
+{
+    if(!fifo_inventory_is_enabled()){
+        return 0;
+    }
+    ensure_fifo_inventory_tables($conn);
+
+    $user_id = (int)$user_id;
+    $product_id = (int)$product_id;
+    $opening_sql = "source_type='product_opening' AND source_id={$product_id}";
+
+    $origin = mysqli_fetch_assoc(mysqli_query($conn, "SELECT MIN(branch_id) AS branch_id, COUNT(DISTINCT branch_id) AS locations, COALESCE(SUM(quantity),0) AS opening
+        FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id} AND {$opening_sql}"));
+    if(!$origin || (int)$origin['locations'] !== 1){
+        return 0;
+    }
+    $origin_id = (int)$origin['branch_id'];
+
+    $row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT
+        (SELECT COUNT(*) FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id} AND NOT ({$opening_sql} OR source_type='distribution'))
+        + (SELECT COUNT(*) FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id} AND branch_id<>{$origin_id} AND remaining_quantity>0.0001)
+        + (SELECT COUNT(*) FROM invoice_items ii INNER JOIN invoices i ON i.id=ii.invoice_id WHERE i.user_id={$user_id} AND ii.product_id={$product_id})
+        + (SELECT COUNT(*) FROM stock_distributions WHERE user_id={$user_id} AND product_id={$product_id} AND (status<>'accepted' OR damaged_quantity>0))
+        + (SELECT COUNT(*) FROM stock_damage_returns WHERE user_id={$user_id} AND product_id={$product_id}) AS blocked,
+        (SELECT COALESCE(SUM(remaining_quantity),0) FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id}) AS on_hand"));
+    if(!$row || (int)$row['blocked'] > 0 || abs((float)$row['on_hand'] - (float)$origin['opening']) > 0.0001){
+        return 0;
+    }
+
+    return $origin_id;
+}
+
+// Sets the opening stock of a round-trip product ($opening_by_variant: variant => qty,
+// '' for products without variants). Stock that came back is folded into the
+// opening batch, so batch and transfer history rows are kept.
+function fifo_inventory_reset_round_trip_opening($conn, $user_id, $product_id, $origin_id, array $opening_by_variant, $unit_cost)
+{
+    $user_id = (int)$user_id;
+    $product_id = (int)$product_id;
+    $origin_id = (int)$origin_id;
+    if($origin_id <= 0 || fifo_inventory_opening_round_trip_location($conn, $user_id, $product_id) !== $origin_id){
+        return false;
+    }
+
+    $existing = mysqli_query($conn, "SELECT DISTINCT variant_name FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id} AND source_type='product_opening' AND source_id={$product_id}");
+    while($row = mysqli_fetch_assoc($existing)){
+        if(!array_key_exists((string)$row['variant_name'], $opening_by_variant)) $opening_by_variant[(string)$row['variant_name']] = 0;
+    }
+
+    try {
+        foreach($opening_by_variant as $variant => $quantity){
+            $quantity = max(0, (int)$quantity);
+            $variant_sql = mysqli_real_escape_string($conn, (string)$variant);
+            if(!mysqli_query($conn, "UPDATE stock_batches SET remaining_quantity=0 WHERE user_id={$user_id} AND product_id={$product_id} AND branch_id={$origin_id} AND source_type='distribution' AND variant_name='{$variant_sql}'")){
+                return false;
+            }
+            $batches = mysqli_query($conn, "SELECT id FROM stock_batches WHERE user_id={$user_id} AND product_id={$product_id} AND source_type='product_opening' AND source_id={$product_id} AND variant_name='{$variant_sql}' ORDER BY id FOR UPDATE");
+            $first = true;
+            while($batch = mysqli_fetch_assoc($batches)){
+                $batch_qty = $first ? $quantity : 0;
+                if(!mysqli_query($conn, "UPDATE stock_batches SET quantity={$batch_qty}, remaining_quantity={$batch_qty} WHERE id=" . (int)$batch['id'])){
+                    return false;
+                }
+                $first = false;
+            }
+            if($first && !fifo_inventory_create_batch($conn, $user_id, $product_id, $quantity, $unit_cost, 'product_opening', $product_id, 'OPEN-' . $product_id, date('Y-m-d'), $origin_id, (string)$variant)){
+                return false;
+            }
+        }
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    return true;
+}
+
 function fifo_inventory_product_is_editable_before_sale($conn, $user_id, $product_id)
 {
     if(!fifo_inventory_is_enabled()){

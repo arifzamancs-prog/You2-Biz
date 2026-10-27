@@ -45,10 +45,16 @@ if(!$product){
 }
 
 $product_fifo_editable = fifo_inventory_product_opening_is_editable($conn, $user_id, $id);
+// The company admin may still correct opening stock that was only sent to a
+// branch and fully brought back (nothing sold, purchased or damaged).
+$opening_round_trip_location = (!$product_fifo_editable && is_admin_user() && !is_manager_user())
+    ? fifo_inventory_opening_round_trip_location($conn, $user_id, $id)
+    : 0;
+$opening_stock_editable = $product_fifo_editable || $opening_round_trip_location > 0;
 $product_has_transactions = product_has_transactions($conn, $id, $user_id);
 $product_variant_names = product_variant_names($conn, $id, $user_id);
 $product_variant_opening = [];
-$variant_opening_stmt = mysqli_prepare($conn, "SELECT variant_name, COALESCE(SUM(remaining_quantity),0) AS quantity FROM stock_batches WHERE user_id=? AND product_id=? AND source_type='product_opening' AND source_id=? GROUP BY variant_name");
+$variant_opening_stmt = mysqli_prepare($conn, "SELECT variant_name, COALESCE(SUM(" . ($opening_round_trip_location ? 'quantity' : 'remaining_quantity') . "),0) AS quantity FROM stock_batches WHERE user_id=? AND product_id=? AND source_type='product_opening' AND source_id=? GROUP BY variant_name");
 if($variant_opening_stmt){
     mysqli_stmt_bind_param($variant_opening_stmt, 'iii', $user_id, $id, $id);
     mysqli_stmt_execute($variant_opening_stmt);
@@ -77,6 +83,10 @@ mysqli_stmt_get_result($stmt);
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
     $category_id    = (int)$_POST['category_id'];
+    if($opening_round_trip_location && $category_id !== (int)$product['category_id']){
+        $opening_round_trip_location = 0;
+        $opening_stock_editable = false;
+    }
     $sub_category   = trim($_POST['sub_category'] ?? '');
     $sub_category_options = product_category_subcategory_options($conn, $category_id, $user_id);
     $keeping_current_sub_category = $category_id === (int)$product['category_id']
@@ -109,10 +119,10 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $category_variants = product_category_variant_options($conn, $category_id, $user_id);
     $variant_quantities = $_POST['variant_opening_qty'] ?? [];
     $variant_opening = [];
-    if($product_fifo_editable){
+    if($opening_stock_editable){
         foreach($category_variants as $variant){ $variant_opening[$variant] = max(0, (int)($variant_quantities[$variant] ?? 0)); }
     }
-    $opening_stock  = $product_fifo_editable
+    $opening_stock  = $opening_stock_editable
         ? (empty($category_variants) ? (int)($_POST['current_stock'] ?? 0) : array_sum($variant_opening))
         : (int)($product['opening_stock_quantity'] ?? $product['current_stock']);
     $minimum_stock = (int)($_POST['minimum_stock'] ?? 0);
@@ -201,6 +211,16 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         }elseif($stock_saved){
             $stock_saved = fifo_inventory_create_batch($conn, $user_id, $id, $opening_stock, $purchase_price, 'product_opening', $id, 'OPEN-' . $id, date('Y-m-d'), ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : null);
         }
+    }elseif($stock_saved && $opening_round_trip_location && $is_stock_product){
+        $stock_saved = fifo_inventory_reset_round_trip_opening($conn, $user_id, $id, $opening_round_trip_location, empty($category_variants) ? ['' => $opening_stock] : $variant_opening, $purchase_price);
+        if($stock_saved && !empty($category_variants)){
+            $variant_stmt = mysqli_prepare($conn, 'INSERT INTO product_variants(user_id,product_id,variant_name) VALUES (?,?,?)');
+            foreach(array_diff($category_variants, $product_variant_names) as $variant){
+                mysqli_stmt_bind_param($variant_stmt, 'iis', $user_id, $id, $variant);
+                $stock_saved = mysqli_stmt_execute($variant_stmt) && $stock_saved;
+            }
+            mysqli_stmt_close($variant_stmt);
+        }
     }
 
     if($stock_saved){
@@ -250,7 +270,11 @@ require_once '../includes/sidebar.php';
             <?php unset($_SESSION['error']); ?>
         <?php } ?>
 
-        <?php if(!$product_fifo_editable){ ?>
+        <?php if($opening_round_trip_location){ ?>
+            <div class="alert alert-info">
+                This product was only transferred and all of its stock is back, with no sale or purchase. As admin you can still correct the opening stock. Purchase price stays read-only.
+            </div>
+        <?php }elseif(!$product_fifo_editable){ ?>
             <div class="alert alert-warning">
                 FIFO opening stock and purchase price are read-only because this product already has FIFO activity. Other product information can still be updated.
             </div>
@@ -294,7 +318,7 @@ require_once '../includes/sidebar.php';
             </div>
 
             <div class="form-group d-none" id="variant-opening-wrap">
-                <label>Variant Opening Stock<?= !$product_fifo_editable ? ' <small class="text-muted">(Read-only due to FIFO activity)</small>' : '' ?></label>
+                <label>Variant Opening Stock<?= !$opening_stock_editable ? ' <small class="text-muted">(Read-only due to FIFO activity)</small>' : '' ?></label>
                 <div class="row" id="variant-opening-fields"></div>
             </div>
 
@@ -381,7 +405,7 @@ require_once '../includes/sidebar.php';
                     name="current_stock"
                     class="form-control"
                 value="<?= (int)($product['opening_stock_quantity'] ?? $product['current_stock']); ?>"
-                <?= !$product_fifo_editable ? 'readonly' : '' ?>>
+                <?= !$opening_stock_editable ? 'readonly' : '' ?>>
 
             </div>
 
@@ -440,7 +464,7 @@ require_once '../includes/sidebar.php';
 <script>
 (function(){
 const category=document.getElementById('category_id'), subCategory=document.getElementById('sub_category'), opening=document.querySelector('[name="current_stock"]'), wrap=document.getElementById('variant-opening-wrap'), fields=document.getElementById('variant-opening-fields');
-const fifoEditable=<?= json_encode($product_fifo_editable) ?>;
+const fifoEditable=<?= json_encode($opening_stock_editable) ?>;
 const savedVariants=<?= json_encode($product_variant_opening, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 function syncCategoryFields(){
   let subCategories=[], variants=[];
