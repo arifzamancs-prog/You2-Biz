@@ -3,20 +3,10 @@
 require_once __DIR__ . '/branding_helper.php';
 require_once __DIR__ . '/company_settings_helper.php';
 
+// Product photos are optional for every company type, Inventory & Sales included.
 function product_photos_enabled($conn, $user_id)
 {
-    static $enabled_by_company = [];
-    $user_id = (int)$user_id;
-    if (isset($enabled_by_company[$user_id])) return $enabled_by_company[$user_id];
-
-    $stmt = mysqli_prepare($conn, 'SELECT company_type FROM users WHERE id=? LIMIT 1');
-    if (!$stmt) return $enabled_by_company[$user_id] = true;
-    mysqli_stmt_bind_param($stmt, 'i', $user_id);
-    mysqli_stmt_execute($stmt);
-    $company = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
-    mysqli_stmt_close($stmt);
-
-    return $enabled_by_company[$user_id] = normalize_company_type($company['company_type'] ?? '') !== 'Stock Product';
+    return true;
 }
 
 function ensure_product_image_column($conn)
