@@ -13,6 +13,8 @@ $is_stock_purchase_company = in_array($purchase_company_type, ['Stock Product', 
 // Stock, Housing, and Restaurant companies do not need the Category column in the purchase list.
 $hide_purchase_category_column = $is_stock_purchase_company || in_array($purchase_company_type, ['Housing', 'Restaurant & Cafe'], true);
 $show_purchase_note_in_number = $is_stock_purchase_company;
+// Every company type sees Due, the paying Wallet and a Print button (part of the vendor/supplier module).
+$show_purchase_due_wallet = true;
 $purchase_total_col = $hide_purchase_category_column ? 6 : 7;
 $purchase_paid_col = $purchase_total_col + 1;
 
@@ -20,6 +22,7 @@ $sql = "SELECT
 
             p.*,
             s.supplier_name,
+            (SELECT w.wallet_name FROM wallets w WHERE w.id = p.payment_wallet_id AND w.user_id = p.user_id) AS payment_wallet_name,
             COALESCE(SUM(pi.quantity), 0) AS total_quantity,
             GROUP_CONCAT(DISTINCT CONCAT(pr.product_name, ' [', COALESCE(NULLIF(pr.sku, ''), '—'), ']') ORDER BY pr.product_name SEPARATOR ', ') AS product_names,
             GROUP_CONCAT(DISTINCT NULLIF(pc.category_name, '') ORDER BY pc.category_name SEPARATOR ', ') AS category_names,
@@ -178,6 +181,10 @@ class="table table-bordered table-striped">
 <th>Qty</th>
 <th>Total</th>
 <th>Paid</th>
+<?php if($show_purchase_due_wallet){ ?>
+<th>Due</th>
+<th>Wallet</th>
+<?php } ?>
 <th>Status</th>
 <th>Action</th>
 
@@ -246,6 +253,21 @@ $row['paid_amount'],
 ); ?>
 </td>
 
+<?php if($show_purchase_due_wallet){ ?>
+<td>
+<?= number_format(
+$row['due_amount'],
+2
+); ?>
+</td>
+
+<td>
+<?= (float)$row['paid_amount'] > 0 && !empty($row['payment_wallet_name'])
+    ? htmlspecialchars($row['payment_wallet_name'])
+    : '-'; ?>
+</td>
+<?php } ?>
+
 <td>
 
 <?php
@@ -291,6 +313,17 @@ Due
         aria-label="View Purchase">
         <i class="fas fa-eye"></i>
     </a>
+
+    <?php if($show_purchase_due_wallet){ ?>
+    <a
+        href="print_purchase.php?id=<?= $row['id']; ?>"
+        target="_blank"
+        class="btn btn-success btn-sm"
+        title="Print Purchase"
+        aria-label="Print Purchase">
+        <i class="fas fa-print"></i>
+    </a>
+    <?php } ?>
 
     <?php if(manager_can_modify()){ ?>
 

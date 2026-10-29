@@ -5,15 +5,18 @@ require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/supplier_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $purchase_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 ensure_fifo_inventory_tables($conn);
 ensure_product_subcategory_schema($conn);
+ensure_supplier_code_column($conn);
 
 $sql = "SELECT
             p.*,
             s.supplier_name,
+            s.supplier_code,
             s.phone
         FROM purchases p
         LEFT JOIN suppliers s
@@ -355,7 +358,7 @@ th{
     </div>
     <div class="line">
         <span><?= supplier_display_text('Supplier'); ?></span>
-        <span><?= htmlspecialchars($purchase['supplier_name']); ?></span>
+        <span><?= htmlspecialchars(supplier_name_with_code($purchase['supplier_name'], $purchase['supplier_code'] ?? '')); ?></span>
     </div>
     <?php if(!empty($purchase['phone'])){ ?>
         <div class="line">

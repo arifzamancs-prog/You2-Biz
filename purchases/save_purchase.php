@@ -10,8 +10,15 @@ require_once '../includes/input_validation_helper.php';
 require_once '../includes/product_expiry_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/expense_helper.php';
+require_once '../includes/supplier_helper.php';
 
 $user_id = $_SESSION['user_id'];
+// Suppliers created from a purchase get the next Vendor/Supplier ID.
+// The column is prepared here because ALTER TABLE would commit the purchase transaction.
+$purchase_vendor_auto_code = supplier_uses_auto_code($conn, $user_id);
+if($purchase_vendor_auto_code){
+    ensure_supplier_code_column($conn);
+}
 
 function generate_compact_purchase_no($conn)
 {
@@ -119,7 +126,13 @@ function purchase_find_or_create_supplier($conn, $user_id)
             throw new Exception(supplier_display_text("Supplier could not be created."));
         }
 
-        return (int)mysqli_insert_id($conn);
+        $new_supplier_id = (int)mysqli_insert_id($conn);
+
+        if($GLOBALS['purchase_vendor_auto_code']){
+            supplier_assign_auto_code($conn, $new_supplier_id, $user_id);
+        }
+
+        return $new_supplier_id;
     }
 
     $supplier_id = (int)$supplier_choice;

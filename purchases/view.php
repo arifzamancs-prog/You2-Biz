@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/supplier_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -11,6 +12,7 @@ require_once '../includes/sidebar.php';
 $user_id = $_SESSION['user_id'];
 ensure_fifo_inventory_tables($conn);
 ensure_product_subcategory_schema($conn);
+ensure_supplier_code_column($conn);
 
 $purchase_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -22,6 +24,7 @@ $sql = "SELECT
 
             p.*,
             s.supplier_name,
+            s.supplier_code,
             s.phone
 
         FROM purchases p
@@ -152,7 +155,7 @@ $status_class = $payment_status === 'paid' ? 'success' : ($payment_status === 'p
                     <div class="row">
                         <div class="col-sm-7 mb-3 mb-sm-0">
                             <div class="small text-muted mb-1"><?= supplier_display_text('Supplier'); ?></div>
-                            <div class="font-weight-bold text-dark"><?= htmlspecialchars($purchase['supplier_name'] ?: '—'); ?></div>
+                            <div class="font-weight-bold text-dark"><?= htmlspecialchars($purchase['supplier_name'] ? supplier_name_with_code($purchase['supplier_name'], $purchase['supplier_code'] ?? '') : '—'); ?></div>
                         </div>
                         <div class="col-sm-5">
                             <div class="small text-muted mb-1">Phone</div>

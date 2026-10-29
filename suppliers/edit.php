@@ -2,12 +2,19 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
-require_once '../includes/header.php';
-require_once '../includes/navbar.php';
-require_once '../includes/sidebar.php';
+require_once '../includes/supplier_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $id = (int)$_GET['id'];
+$supplier_ids_enabled = supplier_uses_auto_code($conn, $user_id);
+if ($supplier_ids_enabled) {
+    ensure_supplier_code_column($conn);
+    supplier_code_fill_missing($conn, (int)$user_id);
+}
+
+require_once '../includes/header.php';
+require_once '../includes/navbar.php';
+require_once '../includes/sidebar.php';
 
 $sql = "SELECT *
         FROM suppliers
@@ -60,6 +67,10 @@ Edit <?= supplier_display_text('Supplier'); ?>
 <input type="hidden"
        name="id"
        value="<?= $row['id']; ?>">
+
+<?php if ($supplier_ids_enabled) { ?>
+<?= supplier_code_field_html($row['supplier_code'] ?? '', supplier_code_list($conn, (int)$user_id, $id)); ?>
+<?php } ?>
 
 <div class="form-group">
 

@@ -2,6 +2,9 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/customer_helper.php';
+// The You2 Wallet customer module (Inventory & Sales, Fashion retail, Restaurant & Cafe) has no custom form fields.
+if(customer_uses_wallet_module()){ header('Location: index.php'); exit; }
 require_once '../includes/customer_form_helper.php';
 
 if(!is_admin_user()){

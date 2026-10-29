@@ -1,5 +1,24 @@
 <?php
 
+// Inventory & Sales, Fashion retail and Restaurant & Cafe use the You2 Wallet
+// customer module (customers/simple/): a required Customer ID (CUS-0001),
+// Ledger and Print Ledger. Other company types keep the full Biz module.
+function customer_uses_wallet_module()
+{
+    $type = function_exists('normalize_company_type')
+        ? normalize_company_type($_SESSION['company_type'] ?? '')
+        : (string)($_SESSION['company_type'] ?? '');
+
+    return in_array($type, ['Stock Product', 'Fashion house', 'Restaurant & Cafe'], true);
+}
+
+// The Wallet-style page to load instead, or '' for the full Biz module. The caller
+// requires it at file level so the page keeps the global $conn, header and footer.
+function customer_wallet_module_page($page)
+{
+    return customer_uses_wallet_module() ? __DIR__ . '/../customers/simple/' . basename($page) : '';
+}
+
 function customer_has_transactions($conn, $customer_id, $user_id)
 {
     $customer_id = (int)$customer_id;

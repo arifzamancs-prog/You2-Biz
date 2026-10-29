@@ -4,8 +4,15 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/supplier_helper.php';
 
 $user_id = $_SESSION['user_id'];
+// Each supplier is listed with its Vendor/Supplier ID.
+$purchase_vendor_codes = supplier_uses_auto_code($conn, $user_id);
+if($purchase_vendor_codes){
+    ensure_supplier_code_column($conn);
+    supplier_code_fill_missing($conn, (int)$user_id);
+}
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
 $hide_purchase_product_add = in_array(
     normalize_company_type($_SESSION['company_type'] ?? ''),
@@ -22,7 +29,7 @@ if(!$housing_purchase) ensure_fifo_only_product_categories($conn, $user_id);
 
 $suppliers = mysqli_query(
     $conn,
-    "SELECT id, supplier_name, phone
+    "SELECT id, supplier_name, phone" . ($purchase_vendor_codes ? ', supplier_code' : '') . "
      FROM suppliers
      WHERE user_id='$user_id'" . restaurant_catalog_scope_sql($conn, '', true) . "
      AND status='active'
@@ -84,7 +91,7 @@ $history_items_stmt = mysqli_prepare($conn, "SELECT pi.product_id, p.product_nam
 
 $supplier_options_html = '';
 while($supplier = mysqli_fetch_assoc($suppliers)){
-    $label = $supplier['supplier_name'];
+    $label = supplier_name_with_code($supplier['supplier_name'], $supplier['supplier_code'] ?? '');
     if(!empty($supplier['phone'])){
         $label .= ' (Ph. ' . $supplier['phone'] . ')';
     }

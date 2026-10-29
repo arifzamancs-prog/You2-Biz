@@ -6,34 +6,19 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/supplier_helper.php';
 require_once '../includes/project_package_helper.php';
 
-if (restaurant_catalog_enabled($conn, (int)$_SESSION['user_id'])) {
-    ensure_restaurant_supplier_code_column($conn);
-    require_once '../restaurant/suppliers_create.php';
-    exit;
-}
-
-$is_fashion_retail = project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house';
-$last_supplier_code = '';
-if ($is_fashion_retail) {
-    ensure_supplier_code_column($conn);
-    $last_code_stmt = mysqli_prepare($conn, 'SELECT supplier_code FROM suppliers WHERE user_id=? AND supplier_code IS NOT NULL AND supplier_code<>\'\' ORDER BY id DESC LIMIT 1');
-    mysqli_stmt_bind_param($last_code_stmt, 'i', $_SESSION['user_id']);
-    mysqli_stmt_execute($last_code_stmt);
-    $last_supplier_code = (string)(mysqli_fetch_assoc(mysqli_stmt_get_result($last_code_stmt))['supplier_code'] ?? '');
-    mysqli_stmt_close($last_code_stmt);
-}
+// Every company type, Restaurant & Cafe included, uses this form with a required, suggested ID.
+ensure_supplier_code_column($conn);
+$next_supplier_code = supplier_code_next($conn, (int)$_SESSION['user_id']);
 
 $recent_vendors = [];
-if ($is_fashion_retail) {
-    $recent_stmt = mysqli_prepare($conn, 'SELECT supplier_code, supplier_name, phone, email FROM suppliers WHERE user_id=?' . restaurant_catalog_scope_sql($conn) . ' ORDER BY id DESC LIMIT 5');
-    mysqli_stmt_bind_param($recent_stmt, 'i', $_SESSION['user_id']);
-    mysqli_stmt_execute($recent_stmt);
-    $recent_result = mysqli_stmt_get_result($recent_stmt);
-    while ($recent_vendor = mysqli_fetch_assoc($recent_result)) {
-        $recent_vendors[] = $recent_vendor;
-    }
-    mysqli_stmt_close($recent_stmt);
+$recent_stmt = mysqli_prepare($conn, 'SELECT supplier_code, supplier_name, phone, email FROM suppliers WHERE user_id=?' . restaurant_catalog_scope_sql($conn) . ' ORDER BY id DESC LIMIT 5');
+mysqli_stmt_bind_param($recent_stmt, 'i', $_SESSION['user_id']);
+mysqli_stmt_execute($recent_stmt);
+$recent_result = mysqli_stmt_get_result($recent_stmt);
+while ($recent_vendor = mysqli_fetch_assoc($recent_result)) {
+    $recent_vendors[] = $recent_vendor;
 }
+mysqli_stmt_close($recent_stmt);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -72,21 +57,7 @@ require_once '../includes/sidebar.php';
             action="save.php"
             id="vendor-create-form">
 
-            <?php if ($is_fashion_retail) { ?>
-            <div class="form-group">
-
-                <label for="supplier_code">Vendor ID <small class="text-muted">(Optional)</small></label>
-
-                <input
-                    type="text"
-                    id="supplier_code"
-                    name="supplier_code"
-                    class="form-control">
-
-                <small class="form-text text-muted">Last created Vendor ID: <strong id="last-vendor-id"><?= $last_supplier_code !== '' ? htmlspecialchars($last_supplier_code) : 'No previous ID'; ?></strong></small>
-
-            </div>
-            <?php } ?>
+            <?= supplier_code_field_html($next_supplier_code, supplier_code_list($conn, (int)$_SESSION['user_id'])); ?>
 
             <div class="form-group">
 
@@ -153,22 +124,21 @@ require_once '../includes/sidebar.php';
 
         </form>
 
-        <?php if ($is_fashion_retail) { ?>
         <hr class="my-4">
-        <h5 class="mb-3">Last 5 Vendors</h5>
+        <h5 class="mb-3"><?= supplier_display_text('Last 5 Suppliers'); ?></h5>
         <div class="table-responsive">
             <table class="table table-bordered table-sm mb-0">
                 <thead>
                     <tr>
-                        <th>Vendor ID</th>
-                        <th>Vendor Name</th>
+                        <th><?= htmlspecialchars(supplier_code_label()); ?></th>
+                        <th><?= supplier_display_text('Supplier Name'); ?></th>
                         <th>Phone</th>
                         <th>Email</th>
                     </tr>
                 </thead>
                 <tbody id="recent-vendors-list">
                     <?php if (!$recent_vendors) { ?>
-                        <tr class="recent-vendors-empty"><td colspan="4" class="text-center text-muted">No vendors found.</td></tr>
+                        <tr class="recent-vendors-empty"><td colspan="4" class="text-center text-muted"><?= supplier_display_text('No suppliers found.'); ?></td></tr>
                     <?php } ?>
                     <?php foreach ($recent_vendors as $recent_vendor) { ?>
                         <tr>
@@ -181,7 +151,6 @@ require_once '../includes/sidebar.php';
                 </tbody>
             </table>
         </div>
-        <?php } ?>
 
     </div>
 
@@ -223,8 +192,6 @@ require_once '../includes/footer.php';
             message.innerHTML = '<div class="alert alert-' + (result.success ? 'success' : 'danger') + '"></div>';
             message.firstChild.textContent = result.message || 'Unable to save vendor.';
             if (result.success) {
-                const lastVendorId = document.getElementById('last-vendor-id');
-                if (lastVendorId && result.supplier_code) lastVendorId.textContent = result.supplier_code;
                 if (result.supplier) {
                     const list = document.getElementById('recent-vendors-list');
                     if (list) {
@@ -241,6 +208,14 @@ require_once '../includes/footer.php';
                     }
                 }
                 form.reset();
+                // Offer the next free ID and block the one just used.
+                const codeInput = document.getElementById('supplier_code');
+                if (codeInput && result.next_supplier_code) {
+                    if (window.supplierCodeExisting && result.supplier_code) window.supplierCodeExisting.push(result.supplier_code.toLowerCase());
+                    codeInput.value = result.next_supplier_code;
+                    const codeStatus = document.getElementById('supplier_code_status');
+                    if (codeStatus) { codeStatus.className = 'form-text text-muted'; codeStatus.textContent = 'The next free ID is filled in; you can change it.'; }
+                }
                 form.querySelector('[name="supplier_code"], [name="supplier_name"]').focus();
             }
         } catch (error) {

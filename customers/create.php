@@ -2,6 +2,9 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/customer_helper.php';
+// Inventory & Sales, Fashion retail and Restaurant & Cafe use the You2 Wallet customer module.
+if(($wallet_customer_page = customer_wallet_module_page('create.php')) !== ''){ require $wallet_customer_page; exit; }
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
 require_once '../includes/staff_helper.php';

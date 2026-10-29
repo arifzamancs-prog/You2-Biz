@@ -11,10 +11,16 @@ require_once '../includes/sidebar.php';
 $user_id = $_SESSION['user_id'];
 $is_fashion_retail = project_package_company_type($conn, $user_id) === 'Fashion house';
 $is_restaurant_catalog = project_package_company_type($conn, $user_id) === 'Restaurant & Cafe';
-$show_supplier_code = $is_fashion_retail || $is_restaurant_catalog;
+$supplier_ids_enabled = supplier_uses_auto_code($conn, $user_id);
+$show_supplier_code = $is_fashion_retail || $is_restaurant_catalog || $supplier_ids_enabled;
 if ($show_supplier_code) {
     ensure_supplier_code_column($conn);
 }
+if ($supplier_ids_enabled) {
+    // Older suppliers receive an ID before the list shows the column.
+    supplier_code_fill_missing($conn, (int)$user_id);
+}
+$show_action_column = manager_can_modify() || $supplier_ids_enabled;
 $supplier_can_add = is_admin_user() || (is_manager_user() && manager_has_permission('suppliers'));
 
 $sql = "SELECT *
@@ -87,14 +93,14 @@ class="table table-bordered table-striped">
 
 <tr>
 
-<?php if ($show_supplier_code) { ?><th style="width:110px"><?= $is_fashion_retail ? 'Vendor ID' : 'Supplier ID'; ?></th><?php } ?>
+<?php if ($show_supplier_code) { ?><th style="width:110px"><?= htmlspecialchars(supplier_code_label()); ?></th><?php } ?>
 <th>Name</th>
 <th style="width:145px">Phone</th>
 <th>Address</th>
 <th>Email</th>
 <th style="width:95px">Status</th>
-<?php if(manager_can_modify()){ ?>
-<th width="120">Action</th>
+<?php if($show_action_column){ ?>
+<th width="<?= $supplier_ids_enabled ? 190 : 120; ?>">Action</th>
 <?php } ?>
 
 </tr>
@@ -177,9 +183,21 @@ Inactive
 
 </td>
 
-<?php if(manager_can_modify()){ ?>
-<td>
+<?php if($show_action_column){ ?>
+<td style="white-space:nowrap">
 
+<?php if($supplier_ids_enabled){ ?>
+<a
+href="supplier_ledger.php?id=<?= (int)$row['id']; ?>"
+class="btn btn-info btn-sm"
+title="Ledger">
+
+<i class="fas fa-book"></i> Ledger
+
+</a>
+<?php } ?>
+
+<?php if(manager_can_modify()){ ?>
 <a
 href="edit.php?id=<?= (int)$row['id']; ?>"
 class="btn btn-warning btn-sm"
@@ -203,6 +221,7 @@ onclick="return confirm('Delete this <?= supplier_display_text('supplier'); ?>?'
 <button type="button" class="btn btn-secondary btn-sm" disabled title="This <?= supplier_display_text('supplier'); ?> has transactions and cannot be deleted">
 <i class="fas fa-trash"></i>
 </button>
+<?php } ?>
 <?php } ?>
 
 </td>

@@ -39,12 +39,17 @@ $email = trim($_POST['email'] ?? '');
 $address = trim($_POST['address'] ?? '');
 $is_restaurant_catalog = restaurant_catalog_enabled($conn, $user_id);
 $is_fashion_retail = project_package_company_type($conn, $user_id) === 'Fashion house';
-$uses_supplier_code = $is_restaurant_catalog || $is_fashion_retail;
-$supplier_code_label = $is_fashion_retail ? 'Vendor ID' : 'Supplier ID';
+$supplier_ids_enabled = supplier_uses_auto_code($conn, $user_id);
+$uses_supplier_code = $is_restaurant_catalog || $is_fashion_retail || $supplier_ids_enabled;
+$supplier_code_label = supplier_code_label();
 $supplier_code = trim($_POST['supplier_code'] ?? '');
 
 if($uses_supplier_code){
     ensure_supplier_code_column($conn);
+}
+
+if($supplier_ids_enabled && ($error_message = supplier_code_error($conn, $user_id, $supplier_code)) !== ''){
+    supplier_save_failure($error_message, $is_ajax_save);
 }
 
 $supplier_name = normalize_person_name($supplier_name);
@@ -109,7 +114,9 @@ $sql = $uses_supplier_code
 $stmt = mysqli_prepare($conn,$sql);
 
 if($uses_supplier_code){
-    mysqli_stmt_bind_param($stmt, "isssss", $user_id, $supplier_code, $supplier_name, $phone, $email, $address);
+    // An optional ID left blank is stored as NULL: the unique key allows many NULLs but only one ''.
+    $supplier_code_value = $supplier_code !== '' ? $supplier_code : null;
+    mysqli_stmt_bind_param($stmt, "isssss", $user_id, $supplier_code_value, $supplier_name, $phone, $email, $address);
 }else{
     mysqli_stmt_bind_param($stmt, "issss", $user_id, $supplier_name, $phone, $email, $address);
 }
@@ -119,6 +126,7 @@ if(mysqli_stmt_execute($stmt)){
     if ($is_ajax_save) {
         supplier_save_response(true, supplier_display_text('Supplier saved successfully.'), [
             'supplier_code' => $supplier_code,
+            'next_supplier_code' => $supplier_ids_enabled ? supplier_code_next($conn, $user_id) : '',
             'supplier' => [
                 'code' => $supplier_code,
                 'name' => $supplier_name,
