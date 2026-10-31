@@ -6,7 +6,8 @@ require_once '../includes/product_image_helper.php';
 require_once '../includes/project_package_helper.php';
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
-if (project_package_company_type($conn, $user_id) !== 'Fashion house' || !company_multi_branch_enabled($conn, $user_id)) { header('Location: stock_product.php'); exit; }
+if (!fifo_inventory_damage_return_enabled($conn, $user_id)) { header('Location: invoice_list.php'); exit; }
+ensure_fifo_inventory_tables($conn);
 if (is_manager_user() && !manager_has_permission('stock_sales')) { http_response_code(403); exit('Sales access is required.'); }
 $branch_id = selected_branch_id($conn, true);
 if ($branch_id <= 0) { http_response_code(403); exit('Current branch is not configured.'); }
@@ -17,17 +18,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['damage_return_message'] = "Damaged-return request #{$id} sent to warehouse."; header('Location: damaged_return.php'); exit;
     } catch (Throwable $e) { $error = $e->getMessage(); }
 }
+$damage_qty = fifo_inventory_damage_available($conn, $user_id, $branch_id);
 $damage_options = [];
-$damage_rows = mysqli_query($conn, "SELECT d.product_id,d.variant_name,p.product_name,p.sku,
-    COALESCE(SUM(d.damaged_quantity),0) - COALESCE((SELECT SUM(dr.quantity) FROM stock_damage_returns dr WHERE dr.user_id=d.user_id AND dr.branch_id=d.to_branch_id AND dr.product_id=d.product_id AND dr.variant_name=d.variant_name),0) AS available_quantity
-    FROM stock_distributions d INNER JOIN products p ON p.id=d.product_id
-    WHERE d.user_id={$user_id} AND d.to_branch_id={$branch_id} AND d.status='accepted' AND d.damaged_quantity>0
-    GROUP BY d.product_id,d.variant_name,p.product_name,p.sku,d.user_id,d.to_branch_id
-    HAVING available_quantity>0 ORDER BY p.product_name,d.variant_name");
-while($damage = mysqli_fetch_assoc($damage_rows)) {
-    $product_id = (int)$damage['product_id'];
-    if (!isset($damage_options[$product_id])) $damage_options[$product_id] = ['name'=>$damage['product_name'], 'sku'=>$damage['sku'], 'variants'=>[]];
-    $damage_options[$product_id]['variants'][] = ['name'=>$damage['variant_name'], 'quantity'=>(float)$damage['available_quantity']];
+if ($damage_qty) {
+    $product_rows = mysqli_query($conn, "SELECT id, product_name, sku FROM products WHERE user_id={$user_id} AND id IN (" . implode(',', array_map('intval', array_keys($damage_qty))) . ") ORDER BY product_name");
+    while($product_row = mysqli_fetch_assoc($product_rows)) {
+        $product_id = (int)$product_row['id'];
+        ksort($damage_qty[$product_id]);
+        foreach($damage_qty[$product_id] as $variant => $available) {
+            if ($available <= 0.0001) continue;
+            if (!isset($damage_options[$product_id])) $damage_options[$product_id] = ['name'=>$product_row['product_name'], 'sku'=>$product_row['sku'], 'variants'=>[]];
+            $damage_options[$product_id]['variants'][] = ['name'=>(string)$variant, 'quantity'=>(float)$available];
+        }
+    }
 }
 $returns = mysqli_query($conn, "SELECT dr.*,p.product_name,p.sku,b.branch_name FROM stock_damage_returns dr INNER JOIN products p ON p.id=dr.product_id INNER JOIN branches b ON b.id=dr.branch_id WHERE dr.user_id={$user_id} AND dr.branch_id={$branch_id} ORDER BY dr.id DESC LIMIT 200");
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';

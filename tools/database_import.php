@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/schema_cache_helper.php';
 require_once '../includes/super_admin_config.php';
 
 if(!is_super_admin_user()){
@@ -34,6 +35,8 @@ function db_import_run_sql($conn, $sql)
 }
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
+    // Tables may be rebuilt here, so the schema checks run again afterwards.
+    schema_cache_reset();
     $password = $_POST['password'] ?? '';
     $confirmed = isset($_POST['confirm_import']);
 

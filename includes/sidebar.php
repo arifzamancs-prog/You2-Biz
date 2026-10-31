@@ -144,6 +144,7 @@ if (isset($conn) && $conn instanceof mysqli && is_super_admin_user()) {
         }
     }
 }
+require_once __DIR__ . '/fifo_inventory_helper.php';
 $sidebar_damage_return_available_count = 0;
 if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
     $sidebar_company_id = (int)($_SESSION['user_id'] ?? 0);
@@ -156,23 +157,12 @@ if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
             $sidebar_stock_receive_pending_count = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($sidebar_receive_stmt))['total'] ?? 0);
             mysqli_stmt_close($sidebar_receive_stmt);
         }
-        if (project_package_company_type($conn, $sidebar_company_id) === 'Fashion house') {
-            // Match the return form: submitted returns are no longer available to request.
-            $sidebar_damage_stmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(available_quantity),0) AS total FROM (
-                SELECT SUM(d.damaged_quantity) - COALESCE((SELECT SUM(dr.quantity)
-                    FROM stock_damage_returns dr WHERE dr.user_id=d.user_id
-                    AND dr.branch_id=d.to_branch_id AND dr.product_id=d.product_id
-                    AND dr.variant_name=d.variant_name),0) AS available_quantity
-                FROM stock_distributions d INNER JOIN products p ON p.id=d.product_id
-                WHERE d.user_id=? AND d.to_branch_id=? AND d.status='accepted' AND d.damaged_quantity>0
-                GROUP BY d.user_id,d.to_branch_id,d.product_id,d.variant_name
-                HAVING available_quantity>0
-            ) returnable_damage");
-            if ($sidebar_damage_stmt) {
-                mysqli_stmt_bind_param($sidebar_damage_stmt, 'ii', $sidebar_company_id, $sidebar_branch_id);
-                mysqli_stmt_execute($sidebar_damage_stmt);
-                $sidebar_damage_return_available_count = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($sidebar_damage_stmt))['total'] ?? 0);
-                mysqli_stmt_close($sidebar_damage_stmt);
+        if (fifo_inventory_damage_return_enabled($conn, $sidebar_company_id)) {
+            // Match the return form: damaged on receipt + damaged customer returns - already sent back.
+            try {
+                $sidebar_damage_return_available_count = (int)array_sum(array_map('array_sum', fifo_inventory_damage_available($conn, $sidebar_company_id, $sidebar_branch_id)));
+            } catch (Throwable $e) {
+                $sidebar_damage_return_available_count = 0;
             }
         }
     }
@@ -723,10 +713,13 @@ if(
                                 ['href'=>app_path('sales/create_invoice.php'),'label'=>'Create Invoice'],
                                 ['href'=>app_path('sales/invoice_list.php'),'label'=>'Invoice List'],
                             ];
-                            if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') {
+                            if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) {
                                 $stock_sales_items[] = ['href'=>app_path('sales/stock_product.php'),'label'=>'My Stock'];
-                                if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $stock_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged','badge'=>$sidebar_damage_return_available_count];
                             }
+                            if(!is_agent_user() && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) {
+                                $stock_sales_items[] = ['href'=>app_path('sales/sales_return.php'),'label'=>'Sales Return'];
+                            }
+                            if (fifo_inventory_damage_return_enabled($conn, (int)$_SESSION['user_id'])) $stock_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged','badge'=>$sidebar_damage_return_available_count];
                             if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
                                 $stock_sales_items[] = ['href'=>app_path('sales/receive_stock.php'),'label'=>'Product Req.','badge'=>$sidebar_stock_receive_pending_count];
                             }
@@ -759,13 +752,19 @@ if(
                         'label' => 'Invoice List',
                     ],
                 ];
-                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') {
+                if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) {
                     $sidebar_sales_items[] = [
                         'href' => app_path('sales/stock_product.php'),
                         'label' => 'My Stock',
                     ];
-                    if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged','badge'=>$sidebar_damage_return_available_count];
                 }
+                if(!is_agent_user() && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) {
+                    $sidebar_sales_items[] = [
+                        'href' => app_path('sales/sales_return.php'),
+                        'label' => 'Sales Return',
+                    ];
+                }
+                if (fifo_inventory_damage_return_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_sales_items[] = ['href'=>app_path('sales/damaged_return.php'),'label'=>'Return Damaged','badge'=>$sidebar_damage_return_available_count];
                 if (!company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
                     $sidebar_sales_items[] = [
                         'href' => app_path('sales/opening_due_entry.php'),
@@ -1026,9 +1025,10 @@ if(
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('attendance_settings')) $sidebar_admin_items[] = ['href' => app_path('staff/attendance_settings.php'), 'label' => 'Attendance Settings', 'icon' => 'fas fa-user-clock'];
                     if((is_admin_user() || manager_has_selected_admin_sidebar_permission('branch_management')) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_admin_items[] = ['href' => app_path('user_management/branch_manage.php'), 'label' => 'Branch Management', 'icon' => 'fas fa-code-branch'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('wallet_approvals')) $sidebar_admin_items[] = ['href' => app_path('user_management/wallet_approvals.php'), 'label' => 'Wallet Approvals', 'icon' => 'fas fa-check-circle'];
-                    if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Fashion house') $sidebar_admin_items[] = ['href' => app_path('user_management/dump_approval.php'), 'label' => 'Dumps Approval', 'icon' => 'fas fa-dumpster'];
+                    if(is_admin_user() && fifo_inventory_damage_return_enabled($conn, (int)$_SESSION['user_id'])) $sidebar_admin_items[] = ['href' => app_path('user_management/dump_approval.php'), 'label' => 'Dumps Approval', 'icon' => 'fas fa-dumpster'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('invoice_charges')) $sidebar_admin_items[] = ['href' => app_path('user_management/invoice_charges.php'), 'label' => 'Invoice Charges', 'icon' => 'fas fa-percentage'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('printing_option')) $sidebar_admin_items[] = ['href' => app_path('user_management/printing_option.php'), 'label' => 'Printing Option', 'icon' => 'fas fa-print'];
+                    if(is_admin_user() && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) $sidebar_admin_items[] = ['href' => app_path('user_management/barcode_labels.php'), 'label' => 'Barcode Labels', 'icon' => 'fas fa-barcode'];
                     if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Stock Product') $sidebar_admin_items[] = ['href' => app_path('user_management/product_management.php'), 'label' => 'Product Management', 'icon' => 'fas fa-boxes'];
                     if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Wallet Cash Out', 'icon' => 'fas fa-coins'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];

@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/multi_branch_helper.php';
 
 // Exclude the reserved stock location from restaurant branch selectors and writes.
@@ -12,6 +14,7 @@ function warehouse_branch_filter_sql()
 
 function ensure_branches_table($conn)
 {
+    if(!schema_once('ensure_branches_table')) return;
     static $checked = false;
 
     if ($checked || !($conn instanceof mysqli)) {

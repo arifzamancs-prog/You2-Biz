@@ -1,7 +1,7 @@
 <?php
 require_once '../includes/auth.php'; require_once '../includes/db.php'; require_once '../includes/fifo_inventory_helper.php'; require_once '../includes/project_package_helper.php';
 $user_id=(int)($_SESSION['user_id']??0);
-if(project_package_company_type($conn,$user_id)!=='Fashion house' || !company_multi_branch_enabled($conn,$user_id) || !stock_can_manage_warehouse($conn)){ http_response_code(403); exit('Warehouse access is required.'); }
+if(!fifo_inventory_damage_return_enabled($conn,$user_id) || !stock_can_manage_warehouse($conn)){ http_response_code(403); exit('Warehouse access is required.'); }
 ensure_fifo_inventory_tables($conn);
 $selected_return_id=(int)($_GET['return_id']??0);
 $message=$_SESSION['warehouse_damage_message']??''; unset($_SESSION['warehouse_damage_message']); $message_type=$_SESSION['warehouse_damage_message_type']??'success'; unset($_SESSION['warehouse_damage_message_type']); $error='';

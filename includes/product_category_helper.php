@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/company_settings_helper.php';
 require_once __DIR__ . '/restaurant_catalog_branch_helper.php';
 
@@ -122,6 +124,7 @@ function ensure_fifo_only_product_categories($conn, $user_id)
 
 function ensure_product_category_type_column($conn)
 {
+    if(!schema_once('ensure_product_category_type_column')) return;
     $column_check = mysqli_query($conn, "SHOW COLUMNS FROM product_categories LIKE 'category_type'");
 
     if($column_check && mysqli_num_rows($column_check) === 0){
@@ -137,6 +140,7 @@ function ensure_product_category_type_column($conn)
 
 function ensure_product_variant_schema($conn)
 {
+    if(!schema_once('ensure_product_variant_schema')) return;
     $column = mysqli_query($conn, "SHOW COLUMNS FROM product_categories LIKE 'variant_options'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE product_categories ADD COLUMN variant_options TEXT NULL AFTER category_name");
@@ -235,6 +239,21 @@ function product_category_name_exists($conn, $user_id, $category_name, $exclude_
     $exists = mysqli_num_rows(mysqli_stmt_get_result($stmt)) > 0;
     mysqli_stmt_close($stmt);
     return $exists;
+}
+
+// Every product's variants in one query: [product_id => [variant names]] (empty when variants are off).
+function product_variant_names_by_product($conn, $user_id)
+{
+    $map = [];
+    if (!product_variants_enabled($conn, $user_id)) {
+        return $map;
+    }
+    ensure_product_variant_schema($conn);
+    $result = mysqli_query($conn, 'SELECT product_id, variant_name FROM product_variants WHERE user_id=' . (int)$user_id . ' ORDER BY product_id, id');
+    while ($row = mysqli_fetch_assoc($result)) {
+        $map[(int)$row['product_id']][] = $row['variant_name'];
+    }
+    return $map;
 }
 
 function product_variant_names($conn, $product_id, $user_id)

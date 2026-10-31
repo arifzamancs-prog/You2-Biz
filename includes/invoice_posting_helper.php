@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_invoice_posting_columns($conn)
 {
+    if(!schema_once('ensure_invoice_posting_columns')) return;
     $result = mysqli_query($conn, "SHOW COLUMNS FROM invoices LIKE 'accounting_status'");
 
     if($result && mysqli_num_rows($result) === 0){

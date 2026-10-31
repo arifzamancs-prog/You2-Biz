@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_customer_opening_due_tables($conn)
 {
+    if(!schema_once('ensure_customer_opening_due_tables')) return;
     static $ensured = false;
 
     if($ensured){

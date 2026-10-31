@@ -4,6 +4,7 @@ require_once __DIR__ . '/app_config.php';
 require_once __DIR__ . '/lead_management_helper.php';
 require_once __DIR__ . '/branch_context_helper.php';
 require_once __DIR__ . '/project_package_helper.php';
+require_once __DIR__ . '/fifo_inventory_helper.php';
 
 $avatar_file = $_SESSION['avatar'] ?? 'you2biz.png';
 $has_active_subscription = false;
@@ -92,7 +93,7 @@ if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
 // regardless of the branch currently selected in the navbar.
 if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
     $damage_notification_company_id = (int)($_SESSION['user_id'] ?? 0);
-    if ($damage_notification_company_id > 0 && stock_can_manage_warehouse($conn) && company_multi_branch_enabled($conn, $damage_notification_company_id) && project_package_company_type($conn, $damage_notification_company_id) === 'Fashion house') {
+    if ($damage_notification_company_id > 0 && stock_can_manage_warehouse($conn) && fifo_inventory_damage_return_enabled($conn, $damage_notification_company_id)) {
         $damage_notification_sql = "SELECT dr.id,dr.quantity,dr.variant_name,dr.created_at,p.product_name,p.sku,b.branch_name,b.is_head_office
             FROM stock_damage_returns dr
             INNER JOIN products p ON p.id=dr.product_id AND p.user_id=dr.user_id

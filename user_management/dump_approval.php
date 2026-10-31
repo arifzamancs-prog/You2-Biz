@@ -5,9 +5,9 @@ require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/project_package_helper.php';
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
-if (!is_admin_user() || project_package_company_type($conn, $user_id) !== 'Fashion house') {
+if (!is_admin_user() || !fifo_inventory_damage_return_enabled($conn, $user_id)) {
     http_response_code(403);
-    exit('Fashion House administrator access is required.');
+    exit('Administrator access is required.');
 }
 
 ensure_fifo_inventory_tables($conn);

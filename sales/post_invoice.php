@@ -44,7 +44,7 @@ try{
 
     if(!invoice_is_pending($invoice)){
         mysqli_commit($conn);
-        $print_redirect = "print_invoice.php?id=" . $invoice_id . "&auto_print=1";
+        $print_redirect = "print_invoice.php?id=" . $invoice_id;
 
         if($reload_parent !== ''){
             $print_redirect .= "&reload_parent=" . urlencode($reload_parent);
@@ -348,7 +348,7 @@ try{
 
     mysqli_commit($conn);
 
-    $print_redirect = "print_invoice.php?id=" . $invoice_id . "&auto_print=1";
+    $print_redirect = "print_invoice.php?id=" . $invoice_id;
 
     if($reload_parent !== ''){
         $print_redirect .= "&reload_parent=" . urlencode($reload_parent);

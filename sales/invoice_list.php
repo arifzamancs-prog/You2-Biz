@@ -7,6 +7,7 @@ require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/sales_return_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -34,6 +35,12 @@ $invoice_search = substr(trim((string)($_GET['invoice_no'] ?? '')), 0, 100);
 if($invoice_search !== ''){
     $invoice_like = addcslashes(mysqli_real_escape_string($conn, $invoice_search), '%_');
     $date_scope .= " AND invoice_no LIKE '%" . $invoice_like . "%'";
+}
+// Sales Return keeps its credit notes (REF-...) on the Sales Return page, not in the invoice list.
+$return_module_list = sales_return_enabled($conn, (int)$user_id);
+if($return_module_list){
+    sales_return_schema($conn);
+    $date_scope .= " AND COALESCE(created_by_type,'')<>'sales_refund'";
 }
 // Load 100 invoices at a time; Previous/Next 100 moves between batches.
 $invoice_batch_size = 100;
@@ -186,6 +193,7 @@ $result = mysqli_stmt_get_result($stmt);
 
                         <?php
                         $sl = 1;
+
                         while($row = mysqli_fetch_assoc($result)){
                             $can_modify_invoice = can_modify_customer_invoice(
                                 $conn,
@@ -193,6 +201,15 @@ $result = mysqli_stmt_get_result($stmt);
                                 (int)$row['id'],
                                 (int)$row['customer_id']
                             );
+
+                            // An invoice linked to a refund, return or exchange is locked (edit/delete refuse it too).
+                            if($can_modify_invoice){
+                                try{
+                                    sales_refund_protect_invoice($conn, (int)$user_id, (int)$row['id']);
+                                }catch(RuntimeException $e){
+                                    $can_modify_invoice = false;
+                                }
+                            }
                         ?>
 
                         <tr>
@@ -261,6 +278,14 @@ $result = mysqli_stmt_get_result($stmt);
                                             Due
                                           </span>';
 
+                                }
+
+                                if($return_module_list && (float)$row['total_amount'] > 0 && ($row['created_by_type'] ?? '') !== 'sales_refund'){
+                                    $return_badge = sales_return_state_badge(sales_return_invoice_state($conn, $row));
+
+                                    if($return_badge !== ''){
+                                        echo '<br>' . $return_badge;
+                                    }
                                 }
 
                                 ?>

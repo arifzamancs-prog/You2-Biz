@@ -208,6 +208,10 @@ function ensure_fifo_inventory_tables($conn)
 
     $checked = true;
 
+    if(!schema_once('ensure_fifo_inventory_tables')){
+        return;
+    }
+
     require_once __DIR__ . '/stock_schema_helper.php';
     ensure_stock_base_tables($conn);
     ensure_product_variant_schema($conn);
@@ -409,6 +413,37 @@ function fifo_inventory_pending_damage_qty($conn, $user_id, $product_id, $branch
     return (float)(mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['quantity'] ?? 0);
 }
 
+// Branches of a multi-branch Inventory & Sales or Fashion Retail company send damaged stock back to the warehouse.
+function fifo_inventory_damage_return_enabled($conn, $user_id)
+{
+    if (!function_exists('project_package_company_type')) require_once __DIR__ . '/project_package_helper.php';
+    return in_array(project_package_company_type($conn, (int)$user_id), ['Stock Product', 'Fashion house'], true)
+        && company_multi_branch_enabled($conn, (int)$user_id);
+}
+
+// Damaged stock a branch can still send back, by product and variant:
+// damaged on receipt + damaged products customers returned here - already sent back.
+function fifo_inventory_damage_available($conn, $user_id, $branch_id)
+{
+    $user_id = (int)$user_id; $branch_id = (int)$branch_id;
+    ensure_fifo_inventory_tables($conn);
+    if (!function_exists('sales_return_damaged_by_product')) require_once __DIR__ . '/sales_return_helper.php';
+    $damage_qty = sales_return_damaged_by_product($conn, $user_id, $branch_id);
+    $damage_rows = mysqli_query($conn, "SELECT product_id, variant_name, SUM(damaged_quantity) AS qty FROM stock_distributions WHERE user_id={$user_id} AND to_branch_id={$branch_id} AND status='accepted' AND damaged_quantity>0 GROUP BY product_id, variant_name");
+    while ($damage = mysqli_fetch_assoc($damage_rows)) {
+        $damage_qty[(int)$damage['product_id']][(string)$damage['variant_name']] = ($damage_qty[(int)$damage['product_id']][(string)$damage['variant_name']] ?? 0) + (float)$damage['qty'];
+    }
+    $sent_rows = mysqli_query($conn, "SELECT product_id, variant_name, SUM(quantity) AS qty FROM stock_damage_returns WHERE user_id={$user_id} AND branch_id={$branch_id} GROUP BY product_id, variant_name");
+    while ($sent = mysqli_fetch_assoc($sent_rows)) {
+        if (isset($damage_qty[(int)$sent['product_id']][(string)$sent['variant_name']])) $damage_qty[(int)$sent['product_id']][(string)$sent['variant_name']] -= (float)$sent['qty'];
+    }
+    foreach ($damage_qty as $product_id => $variants) {
+        $damage_qty[$product_id] = array_filter($variants, fn($available) => $available > 0.0001);
+        if (!$damage_qty[$product_id]) unset($damage_qty[$product_id]);
+    }
+    return $damage_qty;
+}
+
 function fifo_inventory_request_damage_return($conn, $user_id, $branch_id, $product_id, $variant_name, $quantity, $request_key, $note = '')
 {
     $branch_id = (int)$branch_id; $product_id = (int)$product_id; $quantity = (float)$quantity; $variant_name = trim((string)$variant_name);
@@ -421,11 +456,16 @@ function fifo_inventory_request_damage_return($conn, $user_id, $branch_id, $prod
         mysqli_stmt_bind_param($stmt, 'is', $user_id, $request_key); mysqli_stmt_execute($stmt);
         $duplicate = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
         if ($duplicate) { mysqli_commit($conn); return (int)$duplicate['id']; }
-        $damage_sql = "SELECT COALESCE(SUM(d.damaged_quantity),0) - COALESCE((SELECT SUM(dr.quantity) FROM stock_damage_returns dr WHERE dr.user_id=d.user_id AND dr.branch_id=d.to_branch_id AND dr.product_id=d.product_id AND dr.variant_name=d.variant_name),0) AS available_damage FROM stock_distributions d WHERE d.user_id=? AND d.to_branch_id=? AND d.product_id=? AND d.variant_name=? AND d.status='accepted'";
+        // Damaged on receipt + damaged products customers returned in this branch - already sent back.
+        $damage_sql = "SELECT
+            COALESCE((SELECT SUM(d.damaged_quantity) FROM stock_distributions d WHERE d.user_id=? AND d.to_branch_id=? AND d.product_id=? AND d.variant_name=? AND d.status='accepted'),0)
+            - COALESCE((SELECT SUM(dr.quantity) FROM stock_damage_returns dr WHERE dr.user_id=? AND dr.branch_id=? AND dr.product_id=? AND dr.variant_name=?),0) AS available_damage";
         $damage_stmt = mysqli_prepare($conn, $damage_sql);
-        mysqli_stmt_bind_param($damage_stmt, 'iiis', $user_id, $branch_id, $product_id, $variant_name);
+        mysqli_stmt_bind_param($damage_stmt, 'iiisiiis', $user_id, $branch_id, $product_id, $variant_name, $user_id, $branch_id, $product_id, $variant_name);
         mysqli_stmt_execute($damage_stmt);
-        $available = max(0, (float)(mysqli_fetch_assoc(mysqli_stmt_get_result($damage_stmt))['available_damage'] ?? 0));
+        $available = (float)(mysqli_fetch_assoc(mysqli_stmt_get_result($damage_stmt))['available_damage'] ?? 0);
+        if (!function_exists('sales_return_damaged_qty')) require_once __DIR__ . '/sales_return_helper.php';
+        $available = max(0, $available + sales_return_damaged_qty($conn, (int)$user_id, $branch_id, $product_id, $variant_name));
         if ($quantity > $available + 0.0001) throw new RuntimeException('Quantity exceeds damaged stock available in this branch.');
         $actor = (int)($_SESSION['login_user_id'] ?? $user_id); $note = mb_substr(trim($note), 0, 500);
         $stmt = mysqli_prepare($conn, "INSERT INTO stock_damage_returns(user_id,branch_id,product_id,variant_name,quantity,request_key,note,created_by) VALUES (?,?,?,?,?,?,?,?)");

@@ -15,10 +15,17 @@ require_once '../includes/staff_helper.php';
 require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/sales_return_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_branch_accounting_columns($conn, $user_id);
 $branch_id = selected_branch_id($conn, true);
+// Exchange: this invoice is paid partly with products returned from an earlier invoice.
+$exchange_source_id = (int)($_POST['exchange_invoice_id'] ?? 0);
+
+if($exchange_source_id > 0){
+    sales_return_schema($conn);
+}
 ensure_invoice_charge_columns($conn);
 ensure_invoice_posting_columns($conn);
 ensure_fifo_inventory_tables($conn);
@@ -81,6 +88,54 @@ try{
 
     $should_post = $action === 'print';
     $accounting_status = $should_post ? 'posted' : 'pending';
+
+    $exchange_return = null;
+    $exchange_credit = 0.0;
+    $exchange_leftover_mode = 'cash';
+
+    if($exchange_source_id > 0){
+        if(is_agent_user() || !$should_post || !sales_return_enabled($conn, (int)$user_id)){
+            throw new Exception("An exchange must be saved with Pay & Print.");
+        }
+
+        sales_refund_query($conn, 'SELECT id FROM invoices WHERE id=? AND user_id=? FOR UPDATE', 'ii', [$exchange_source_id, (int)$user_id])->get_result();
+        $exchange_source = sales_return_fetch_invoice($conn, (int)$user_id, $exchange_source_id);
+
+        if(($exchange_reason = sales_return_block_reason($exchange_source)) !== ''){
+            throw new Exception($exchange_reason);
+        }
+
+        if((int)$exchange_source['branch_id'] !== (int)$branch_id){
+            throw new Exception("This invoice belongs to another branch.");
+        }
+
+        // The new invoice is for the same customer as the returned one.
+        $_POST['customer_id'] = (int)$exchange_source['customer_id'] > 0 ? (int)$exchange_source['customer_id'] : '';
+
+        if((int)$exchange_source['customer_id'] <= 0){
+            $_POST['customer_name'] = '';
+            $_POST['customer_phone'] = '';
+            $_POST['customer_address'] = '';
+        }
+
+        $exchange_pick = sales_return_pick($conn, $exchange_source, $_POST['ex_return_qty'] ?? [], $_POST['ex_item_condition'] ?? []);
+
+        // The returned products go back into stock first, so they can be sold again in this same exchange.
+        $exchange_return = sales_return_create(
+            $conn,
+            (int)$user_id,
+            (int)$branch_id,
+            $exchange_source,
+            $exchange_pick,
+            (int)($_SESSION['login_user_id'] ?? $user_id),
+            trim((string)($_SESSION['login_name'] ?? '')),
+            (string)($_POST['ex_note'] ?? '')
+        );
+        $exchange_credit = (float)$exchange_pick['total'];
+        $exchange_leftover_mode = (int)$exchange_source['customer_id'] > 0 && ($_POST['exchange_leftover'] ?? '') === 'account'
+            ? 'account'
+            : 'cash';
+    }
 
 
     $limit_sql = "SELECT
@@ -411,11 +466,34 @@ try{
         }
     }
 
+    // Exchange credit pays the invoice first; it is not money, so the wallet only gets the cash part.
+    // What is left of the credit is refunded in cash, or kept on account (dues first, then advance).
+    $cash_paid_amount = $paid_amount;
+    $exchange_used = 0.0;
+    $exchange_refund = 0.0;
+    $exchange_leftover = 0.0;
+
+    if($exchange_return){
+        if($grand_total <= 0){
+            throw new Exception("Add the new products for the exchange.");
+        }
+
+        $exchange_used = round(min($exchange_credit, $grand_total), 2);
+        $exchange_leftover = round($exchange_credit - $exchange_used, 2);
+        $exchange_refund = $exchange_leftover_mode === 'cash' ? $exchange_leftover : 0.0;
+
+        if($exchange_leftover > 0 && $cash_paid_amount > 0.009){
+            throw new Exception("The exchange credit covers this invoice; no payment is needed.");
+        }
+
+        $paid_amount = round($cash_paid_amount + $exchange_used, 2);
+    }
+
     $customer_balance_before_invoice = $customer_id > 0
-        ? customer_signed_balance_total($conn, $user_id, $customer_id)
+        ? customer_signed_balance_total($conn, $user_id, $customer_id, (int)($exchange_return["credit_id"] ?? 0))
         : 0;
     $previous_due_total = $customer_id > 0
-        ? customer_previous_due_total($conn, $user_id, $customer_id)
+        ? customer_previous_due_total($conn, $user_id, $customer_id, (int)($exchange_return["credit_id"] ?? 0))
         : 0;
     $outstanding_amount_total = abs(min($customer_balance_before_invoice, 0));
 
@@ -601,6 +679,10 @@ try{
 
     $invoice_id =
         mysqli_insert_id($conn);
+
+    if($exchange_return){
+        sales_refund_query($conn, 'UPDATE sales_refunds SET exchange_invoice_id=? WHERE id=? AND user_id=?', 'iii', [(int)$invoice_id, (int)$exchange_return['id'], (int)$user_id]);
+    }
 
 /*
 ==========================================
@@ -921,11 +1003,27 @@ CUSTOMER PAYMENT
 
 if($should_post && $paid_amount > 0){
 
-    if($receive_wallet_id <= 0){
+    if($receive_wallet_id <= 0 && ($cash_paid_amount > 0 || $exchange_refund > 0)){
         throw new Exception("Receive wallet is required.");
     }
 
     $payment_note = "Invoice Payment - ".$invoice_no;
+
+    // Exchange: the part paid by the returned products gets its own note; the rest is the cash payment.
+    if($customer_id > 0 && $exchange_return && $current_invoice_cash_payment > 0.01){
+        $exchange_part = round(min($exchange_used, $current_invoice_cash_payment), 2);
+        sales_return_customer_payment(
+            $conn,
+            (int)$user_id,
+            (int)$branch_id,
+            $customer_id,
+            (int)$invoice_id,
+            0,
+            $exchange_part,
+            'Return ' . $exchange_return['number'] . ' (Exchange - ' . $invoice_no . ')'
+        );
+        $current_invoice_cash_payment = round($current_invoice_cash_payment - $exchange_part, 2);
+    }
 
     if($customer_id > 0){
         if($current_invoice_cash_payment > 0.01){
@@ -1009,6 +1107,8 @@ if($should_post && $paid_amount > 0){
         }
     }
 
+    if($cash_paid_amount > 0){
+
     record_wallet_transaction(
         $conn,
         $invoice_no,
@@ -1016,7 +1116,7 @@ if($should_post && $paid_amount > 0){
         $receive_wallet_id,
         'sales_invoice',
         $invoice_id,
-        $paid_amount,
+        $cash_paid_amount,
         'Sales Invoice - '.$invoice_no,
         date('Y-m-d'),
         $branch_id
@@ -1032,7 +1132,7 @@ if($should_post && $paid_amount > 0){
     mysqli_stmt_bind_param(
         $stmt,
         "dii",
-        $paid_amount,
+        $cash_paid_amount,
         $receive_wallet_id,
         $user_id
     );
@@ -1040,6 +1140,27 @@ if($should_post && $paid_amount > 0){
     if(!mysqli_stmt_execute($stmt)){
         throw new Exception(mysqli_stmt_error($stmt));
     }
+
+    }
+}
+
+// Exchange: settle the return credit (spent on this invoice, the rest refunded or kept on account).
+if($exchange_return){
+    $exchange_due = 0.0;
+    $exchange_advance = 0.0;
+
+    if($exchange_leftover_mode === 'account' && $exchange_leftover > 0){
+        $exchange_due = round(min($exchange_leftover, sales_return_customer_due($conn, (int)$user_id, (int)$branch_id, $customer_id)), 2);
+        $exchange_advance = round($exchange_leftover - $exchange_due, 2);
+    }
+
+    sales_return_settle($conn, (int)$user_id, (int)$branch_id, $exchange_source, $exchange_return, [
+        'cash' => $exchange_refund,
+        'wallet_id' => $receive_wallet_id,
+        'due' => $exchange_due,
+        'advance' => $exchange_advance,
+        'exchange' => $exchange_used,
+    ]);
 }
 
 /*
@@ -1089,7 +1210,8 @@ if($is_ajax){
         'invoice_id' => (int)$invoice_id,
         'invoice_no' => (string)$invoice_no,
         'action' => $action,
-        'print_url' => $should_post ? 'print_invoice.php?id=' . (int)$invoice_id . '&auto_print=1' : null,
+        // An exchange prints the exchange slip (returned and new products together).
+        'print_url' => $exchange_return ? 'sales_return_print.php?id=' . (int)$exchange_return['id'] : ($should_post ? 'print_invoice.php?id=' . (int)$invoice_id : null),
         'invoice' => $recent_invoice,
     ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
@@ -1100,8 +1222,9 @@ if(
     $_POST['action'] == 'print'
 ){
 
-    // Pay & Print always sends the invoice straight to the printer.
-    $print_url = "print_invoice.php?id=" . $invoice_id . "&reload_parent=create&auto_print=1";
+    $print_url = $exchange_return
+        ? "sales_return_print.php?id=" . (int)$exchange_return['id']
+        : "print_invoice.php?id=" . $invoice_id . "&reload_parent=create";
     header("Location:" . $print_url);
 
 }else{
@@ -1136,7 +1259,7 @@ if($is_ajax){
 
 $_SESSION['error'] = $e->getMessage();
 
-header("Location:create_invoice.php");
+header("Location:create_invoice.php" . ($exchange_source_id > 0 ? "?exchange=" . $exchange_source_id : ""));
 exit;
 
 

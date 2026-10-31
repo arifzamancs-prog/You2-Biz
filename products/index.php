@@ -26,6 +26,8 @@ ensure_product_subcategory_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
 $multi_branch = company_multi_branch_enabled($conn, $user_id);
 $is_fashion_house = project_package_company_type($conn, $user_id) === 'Fashion house';
+// Only Fashion Retail shows product photos in this list.
+$product_photos_enabled = $product_photos_enabled && $is_fashion_house;
 // Product setup is central. With Multi Branch enabled, its stock value means
 // Main Warehouse stock; branches sell only after receiving a distribution.
 $stock_branch_id = $multi_branch
@@ -134,8 +136,10 @@ require_once '../includes/sidebar.php';
             #product-list .all-branch-stock-column{min-width:130px!important;width:130px!important}
             #product-list .product-action-column{width:76px!important;min-width:76px!important;white-space:nowrap}
             #product-list.inventory-sales-product-list{table-layout:auto}
-            #product-list.inventory-sales-product-list .inventory-product-column{min-width:230px}
-            #product-list.inventory-sales-product-list .inventory-category-column{min-width:260px;overflow-wrap:anywhere}
+            #product-list .product-code-column{min-width:90px;white-space:nowrap}
+            #product-list .product-subcategory-column{min-width:130px}
+            #product-list.inventory-sales-product-list .inventory-product-column{min-width:200px}
+            #product-list.inventory-sales-product-list .inventory-category-column{min-width:150px;overflow-wrap:anywhere}
             #product-list.inventory-sales-product-list .purchase-price-column{width:125px;min-width:125px;word-break:normal;overflow-wrap:normal}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
@@ -151,7 +155,9 @@ require_once '../includes/sidebar.php';
 
                 <?php if($product_photos_enabled){ ?><th>Photo</th><?php } ?>
                 <th class="product-name-column<?= !$product_photos_enabled ? ' inventory-product-column' : '' ?>">Product</th>
+                <th class="product-code-column">Code</th>
                 <th class="product-category-column<?= !$product_photos_enabled ? ' inventory-category-column' : '' ?>">Category</th>
+                <th class="product-subcategory-column">Sub Category</th>
                 <th<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>Purchase Price</th>
                 <th class="sale-price-column">Sale Price</th>
                 <?php if($show_expired_on){ ?>
@@ -213,16 +219,18 @@ require_once '../includes/sidebar.php';
 
                 <td class="product-name-column<?= !$product_photos_enabled ? ' inventory-product-column' : '' ?>">
                     <?= htmlspecialchars($row['product_name']); ?>
-                    <?php if(trim((string)$row['sku']) !== ''){ ?><div class="small text-muted">[Code: <?= htmlspecialchars($row['sku']); ?>]</div><?php } ?>
                 </td>
+
+                <td class="product-code-column"><?= trim((string)$row['sku']) !== '' ? htmlspecialchars($row['sku']) : '-'; ?></td>
 
                 <td<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>
                     <?= htmlspecialchars($row['category_name']); ?>
                     <?php if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') { ?>
                     <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
                     <?php } ?>
-                    <?php if(!empty($row['product_sub_category'])){ ?><div class="small text-muted">[<?= htmlspecialchars($row['product_sub_category']); ?>]</div><?php } ?>
                 </td>
+
+                <td class="product-subcategory-column"><?= !empty($row['product_sub_category']) ? htmlspecialchars($row['product_sub_category']) : '-'; ?></td>
 
                 <td<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>
                     BDT <?= number_format($row['purchase_price'],2); ?>

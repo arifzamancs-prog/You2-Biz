@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_system_settings_table($conn)
 {
+    if(!schema_once('ensure_system_settings_table')) return;
     mysqli_query(
         $conn,
         "CREATE TABLE IF NOT EXISTS system_settings (

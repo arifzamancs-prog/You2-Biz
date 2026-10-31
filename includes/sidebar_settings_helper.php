@@ -1,4 +1,6 @@
 <?php
+
+require_once __DIR__ . '/schema_cache_helper.php';
 require_once __DIR__ . '/supplier_label_helper.php';
 
 require_once __DIR__ . '/product_expiry_helper.php';
@@ -8,6 +10,7 @@ require_once __DIR__ . '/restaurant_module_helper.php';
 
 function ensure_sidebar_settings_table($conn)
 {
+    if(!schema_once('ensure_sidebar_settings_table')) return;
     mysqli_query(
         $conn,
         "CREATE TABLE IF NOT EXISTS sidebar_settings (
@@ -144,6 +147,7 @@ function sidebar_default_layout_items($project_package_labels = [], $company_typ
         sidebar_setting_item('stock_receive_request', 'Product Req.', app_path('sales/receive_stock.php'), 'stock_sales', 5),
         sidebar_setting_item('stock_due', 'Due Payment', app_path('sales/receive_payment.php'), 'stock_sales', 6),
         sidebar_setting_item('stock_report', 'Sales Report', app_path('warehouse/sales_report.php'), 'stock_sales', 7),
+        sidebar_setting_item('stock_sales_return', 'Sales Return', app_path('sales/sales_return.php'), 'stock_sales', 8),
         sidebar_setting_item('supplier_list', supplier_display_text('Suppliers'), app_path('suppliers/index.php'), 'suppliers', 101),
         sidebar_setting_item('purchases', 'Purchases', app_path('purchases/index.php'), 'suppliers', 102),
         sidebar_setting_item('supplier_due_payment', supplier_display_text('Supplier Due Payment'), app_path('suppliers/supplier_payment.php'), 'suppliers', 103),
@@ -170,6 +174,7 @@ function sidebar_default_layout_items($project_package_labels = [], $company_typ
         sidebar_setting_item('dump_approval', 'Dumps Approval', app_path('user_management/dump_approval.php'), 'admin', 135),
         sidebar_setting_item('invoice_charges', 'Invoice Charges', app_path('user_management/invoice_charges.php'), 'admin', 135),
         sidebar_setting_item('printing_option', 'Printing Option', app_path('user_management/printing_option.php'), 'admin', 136),
+        sidebar_setting_item('barcode_labels', 'Barcode Labels', app_path('user_management/barcode_labels.php'), 'admin', 136),
         sidebar_setting_item('profit_cash_out', 'Wallet Cash Out', app_path('profit_cash_out/index.php'), 'admin', 137),
         sidebar_setting_item('sidebar_settings', 'Slidebar Settings', app_path('user_management/sidebar_settings.php'), 'admin', 138),
         sidebar_setting_item('tools', 'Tools', '', '', 140),
@@ -445,9 +450,6 @@ function sidebar_layout_items_for_current_user($items)
     $is_housing_company = $conn instanceof mysqli
         && function_exists('project_package_company_type')
         && project_package_company_type($conn, $company_id) === 'Housing';
-    $is_fashion_house = $conn instanceof mysqli
-        && function_exists('project_package_company_type')
-        && project_package_company_type($conn, $company_id) === 'Fashion house';
 
     foreach($items as $item){
         $id = (string)($item['id'] ?? '');
@@ -484,7 +486,11 @@ function sidebar_layout_items_for_current_user($items)
             continue;
         }
 
-        if($id === 'dump_approval' && !$is_fashion_house){
+        if($id === 'barcode_labels' && !($conn instanceof mysqli && in_array(project_package_company_type($conn, $company_id), ['Stock Product', 'Fashion house'], true))){
+            continue;
+        }
+
+        if($id === 'dump_approval' && !($conn instanceof mysqli && function_exists('fifo_inventory_damage_return_enabled') && fifo_inventory_damage_return_enabled($conn, $company_id))){
             continue;
         }
 

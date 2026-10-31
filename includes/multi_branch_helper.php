@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_multi_branch_column($conn)
 {
+    if(!schema_once('ensure_multi_branch_column')) return;
     static $checked = false;
     if ($checked) return;
     $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'multi_branch_enabled'");

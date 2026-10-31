@@ -31,6 +31,40 @@ $pay_customer_id = isset($_GET['pay_customer_id'])
     : 0;
 $existing_customer_phones = [];
 
+/* Exchange: products from an earlier invoice come back and pay for this one. */
+$exchange_invoice = null;
+$exchange_lines = [];
+$exchange_error = '';
+$exchange_id = !is_agent_user() ? (int)($_GET['exchange'] ?? 0) : 0;
+
+if($exchange_id > 0){
+    require_once '../includes/sales_return_helper.php';
+
+    if(!sales_return_enabled($conn, (int)$user_id)){
+        header('Location: create_invoice.php');
+        exit;
+    }
+
+    sales_return_schema($conn);
+    require_branch_record_access($conn, 'invoices', $exchange_id, 'sales_return.php');
+    $exchange_invoice = sales_return_fetch_invoice($conn, (int)$user_id, $exchange_id);
+    $exchange_error = sales_return_block_reason($exchange_invoice);
+
+    if($exchange_error === ''){
+        $exchange_lines = sales_return_lines($conn, $exchange_invoice);
+
+        if(array_sum(array_column($exchange_lines, 'returnable_qty')) <= 0){
+            $exchange_error = 'Everything on this invoice has already been returned.';
+        }
+    }
+
+    if($exchange_error !== ''){
+        $exchange_invoice = null;
+    }elseif((int)$exchange_invoice['customer_id'] > 0){
+        $pay_customer_id = (int)$exchange_invoice['customer_id'];
+    }
+}
+
 /* Customers */
 
 $customers = mysqli_query(
@@ -61,6 +95,15 @@ $products = mysqli_query(
      ORDER BY p.product_name"
 );
 
+/* Barcode scanner (Inventory & Sales, Fashion Retail): label barcodes and product Codes lead to the product (and variant). */
+
+$barcode_scan_enabled = in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true);
+$barcode_lookup = [];
+if($barcode_scan_enabled){
+    require_once '../includes/barcode_helper.php';
+    $barcode_lookup = product_barcode_lookup_map($conn, $user_id, mysqli_fetch_all($products, MYSQLI_ASSOC), product_variant_names_by_product($conn, $user_id));
+}
+
 /* Wallets */
 
 $wallets = active_wallets_result($conn, $user_id);
@@ -83,6 +126,10 @@ $charges = mysqli_query(
 
 /* Recent invoices: same branch/user scope as Invoice List. */
 $recent_branch_scope = branch_scope_sql($conn, 'invoices');
+// Sales Return credit notes (REF-...) stay on the Sales Return page.
+if (in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true)) {
+    $recent_branch_scope .= " AND COALESCE(created_by_type,'')<>'sales_refund'";
+}
 $recent_agent_user_id = (int)($_SESSION['login_user_id'] ?? 0);
 if (is_agent_user()) {
     $recent_sql = "SELECT * FROM invoices WHERE user_id=? {$recent_branch_scope} AND created_by_user_id=? ORDER BY id DESC LIMIT 5";
@@ -113,9 +160,9 @@ require_once '../includes/sidebar.php';
 
         <h3 class="card-title">
 
-            <i class="fas fa-file-invoice mr-2"></i>
+            <i class="fas fa-<?= $exchange_invoice ? 'exchange-alt' : 'file-invoice'; ?> mr-2"></i>
 
-            Create Invoice
+            <?= $exchange_invoice ? 'Exchange' : 'Create Invoice'; ?>
 
         </h3>
 
@@ -153,6 +200,12 @@ require_once '../includes/sidebar.php';
                 <?= htmlspecialchars($_SESSION['error']); ?>
             </div>
             <?php unset($_SESSION['error']); ?>
+        <?php } ?>
+
+        <?php if($exchange_error !== ''){ ?>
+            <div class="alert alert-danger">
+                <?= htmlspecialchars($exchange_error); ?>
+            </div>
         <?php } ?>
 
         <form
@@ -315,11 +368,88 @@ require_once '../includes/sidebar.php';
 
             <hr>
 
+            <?php if($exchange_invoice){ ?>
+
+            <!-- Exchange: products coming back -->
+
+            <input type="hidden" name="exchange_invoice_id" value="<?= (int)$exchange_invoice['id']; ?>">
+
+            <h5>
+                Return from <?= htmlspecialchars($exchange_invoice['invoice_no']); ?>
+                <small class="text-muted">(<?= htmlspecialchars(app_date($exchange_invoice['invoice_date'])); ?>,
+                <?= htmlspecialchars($exchange_invoice['customer_name'] ?: 'Instant Customer'); ?><?= !empty($exchange_invoice['customer_code']) ? ' (ID: ' . htmlspecialchars($exchange_invoice['customer_code']) . ')' : ''; ?>)</small>
+            </h5>
+
+            <div class="table-responsive">
+            <table class="table table-bordered" id="exchangeReturnTable">
+                <thead>
+                <tr>
+                    <th>Product</th>
+                    <th class="text-right">Sold</th>
+                    <th class="text-right">Returned</th>
+                    <th class="text-right">Refund / Unit</th>
+                    <th style="width:120px">Return Qty</th>
+                    <th style="width:170px">Condition</th>
+                    <th class="text-right" style="width:130px">Total</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach($exchange_lines as $line){ ?>
+                    <tr class="exchange-line" data-price="<?= htmlspecialchars(number_format($line['refund_unit_price'], 2, '.', '')); ?>">
+                        <td><?= htmlspecialchars(sales_return_line_label($line)); ?></td>
+                        <td class="text-right"><?= (int)$line['sold_qty']; ?></td>
+                        <td class="text-right"><?= (int)$line['returned_qty']; ?></td>
+                        <td class="text-right"><?= number_format($line['refund_unit_price'], 2); ?></td>
+                        <td>
+                            <input type="number" name="ex_return_qty[<?= (int)$line['id']; ?>]" class="form-control exchange-qty"
+                                   min="0" max="<?= (int)$line['returnable_qty']; ?>" step="1" value="0"
+                                   <?= (int)$line['returnable_qty'] <= 0 ? 'readonly' : ''; ?>>
+                            <small class="text-muted">Max <?= (int)$line['returnable_qty']; ?></small>
+                        </td>
+                        <td>
+                            <select name="ex_item_condition[<?= (int)$line['id']; ?>]" class="form-control">
+                                <option value="restock">Back to stock</option>
+                                <option value="damaged">Damaged</option>
+                            </select>
+                        </td>
+                        <td class="text-right exchange-line-total">0.00</td>
+                    </tr>
+                <?php } ?>
+                </tbody>
+                <tfoot>
+                <tr>
+                    <th colspan="6" class="text-right">Exchange Credit</th>
+                    <th class="text-right" id="exchange_credit_display">0.00</th>
+                </tr>
+                </tfoot>
+            </table>
+            </div>
+
+            <div class="row">
+                <?php if((int)$exchange_invoice['customer_id'] > 0){ ?>
+                <div class="col-md-4">
+                    <label>If the new products cost less</label>
+                    <select name="exchange_leftover" id="exchange_leftover" class="form-control">
+                        <option value="cash">Refund the rest in cash</option>
+                        <option value="account">Keep on account (due first, then advance)</option>
+                    </select>
+                </div>
+                <?php } ?>
+                <div class="col-md-8">
+                    <label>Note / Reason</label>
+                    <input type="text" name="ex_note" class="form-control" maxlength="500">
+                </div>
+            </div>
+
+            <hr>
+
+            <?php } ?>
+
             <!-- Product Table -->
 
             <h5>
 
-                Products
+                <?= $exchange_invoice ? 'New Products' : 'Products'; ?>
 
             </h5>
 
@@ -330,6 +460,8 @@ require_once '../includes/sidebar.php';
                 .variant-choice-input{width:15px;height:15px;margin:0;accent-color:#0d6efd}
                 .variant-choice-input:checked+span{font-weight:700;color:#0d6efd}
             </style>
+
+            <?= $barcode_scan_enabled ? barcode_scan_input_html() : ''; ?>
 
             <div class="table-responsive">
 
@@ -670,11 +802,12 @@ require_once '../includes/sidebar.php';
 <input
     type="hidden"
     id="action"
-    value="save">
+    value="<?= $exchange_invoice ? 'print' : 'save'; ?>">
             
 
 <div class="d-flex flex-column flex-sm-row">
 
+<?php if(!$exchange_invoice){ ?>
 <button
     type="submit"
     name="action"
@@ -687,6 +820,7 @@ require_once '../includes/sidebar.php';
     Save Invoice
 
 </button>
+<?php } ?>
 
 <?php if(!is_agent_user()){ ?>
 
@@ -694,7 +828,7 @@ require_once '../includes/sidebar.php';
     type="submit"
     name="action"
     value="print"
-    class="btn btn-success btn-lg ml-sm-2" id="print-invoice-button" <?= $restaurant_invoice_reference_enabled ? 'disabled' : '' ?>
+    class="btn btn-success btn-lg <?= $exchange_invoice ? '' : 'ml-sm-2'; ?>" id="print-invoice-button" <?= $restaurant_invoice_reference_enabled ? 'disabled' : '' ?>
     onclick="$('#action').val('print');">
 
     <i class="fas fa-print"></i>
@@ -869,9 +1003,16 @@ if($(this).val()=="instant"){
 
     $("form[action=\"save_invoice.php\"]").on("submit", function(e){
         const currentAction = $("#action").val() || "save";
-        const grandTotal = parseFloat($("#grand_total").val()) || 0;
+        // In an exchange the customer only pays what is left after the exchange credit.
+        const grandTotal = Math.max(exchangePayableTotal(parseFloat($("#grand_total").val()) || 0), 0);
         const paidTotal = parseFloat($("#paid_amount").val()) || 0;
         const isInstantCustomer = $("#customer_type").val() === "instant";
+
+        if(exchangeMode && exchangeCreditAmount() <= 0){
+            alert("Enter the quantities to return.");
+            e.preventDefault();
+            return false;
+        }
 
         if(paidTotal < 0){
             alert("Paid Amount cannot be negative.");
@@ -1035,6 +1176,19 @@ if($(this).val()=="instant"){
             let result;
             try{ result = JSON.parse(raw); }catch(parseError){ throw new Error("Invalid server response. Please try again."); }
             if(!response.ok || !result.ok) throw new Error(result.message || "Invoice could not be saved.");
+
+            // Exchange: the slip opens for printing and this page moves to the new invoice.
+            if(exchangeMode){
+                if(result.print_url){
+                    if(printWindow && !printWindow.closed){
+                        printWindow.location.replace(result.print_url);
+                    }else{
+                        window.open(result.print_url, "_blank");
+                    }
+                }
+                window.location.href = "view_invoice.php?id=" + result.invoice_id;
+                return;
+            }
 
             const normalizedPhone = normalizePhoneForCompare(originalPhone);
             if(normalizedPhone && !existingCustomerPhones.includes(normalizedPhone)) existingCustomerPhones.push(normalizedPhone);
@@ -1281,7 +1435,78 @@ $(document).on(
         calculateDue();
     }
 
+    // Exchange: the customer is the one on the returned invoice and cannot be changed here.
+    if(exchangeMode){
+        $("#customer_type").prop("disabled", true);
+        $(".customer-select").prop("disabled", true);
+
+        if(payCustomerId <= 0){
+            $("#instant_customer_div, #instant_phone_div, #instant_address_div").hide();
+        }
+
+        $(document).on("input change", ".exchange-qty", function(){
+            calculateGrandTotal();
+        });
+
+        $(document).on("change", "#exchange_leftover", function(){
+            calculateGrandTotal();
+        });
+
+        calculateGrandTotal();
+    }
+
 });
+
+const exchangeMode = ' . ($exchange_invoice ? 'true' : 'false') . ';
+
+// Value of the products coming back in an exchange (0 outside an exchange).
+function exchangeCreditAmount(){
+
+    if(!exchangeMode){
+        return 0;
+    }
+
+    let sum = 0;
+
+    $(".exchange-line").each(function(){
+        let input = $(this).find(".exchange-qty");
+        let max = parseInt(input.attr("max"), 10) || 0;
+        let qty = Math.max(0, Math.min(max, parseInt(input.val(), 10) || 0));
+        let line = qty * (parseFloat($(this).data("price")) || 0);
+        $(this).find(".exchange-line-total").text(line.toFixed(2));
+        sum += line;
+    });
+
+    sum = Math.round(sum * 100) / 100;
+    $("#exchange_credit_display").text(sum.toFixed(2));
+
+    return sum;
+
+}
+
+// Credit left after this invoice that is paid back in cash.
+function exchangeRefundAmount(grand){
+
+    let left = Math.max(exchangeCreditAmount() - grand, 0);
+
+    if(left <= 0 || $("#exchange_leftover").val() === "account"){
+        return 0;
+    }
+
+    return Math.round(left * 100) / 100;
+
+}
+
+// What the customer still has to pay after the exchange credit (negative when credit stays on account).
+function exchangePayableTotal(grand){
+
+    if(!exchangeMode){
+        return grand;
+    }
+
+    return grand - (exchangeCreditAmount() - exchangeRefundAmount(grand));
+
+}
 
 function initProductSelect(context){
 
@@ -1407,6 +1632,7 @@ function selectedCustomerPreviousDueAmount(){
 function autoPaidAmountForCurrentSelection(grand){
 
     grand = parseFloat(grand) || 0;
+    grand = Math.max(exchangePayableTotal(grand), 0);
 
     if($("#customer_type").val() !== "existing"){
         return grand;
@@ -1522,6 +1748,10 @@ function calculateDue(){
         $("#paid_amount").val()
     ) || 0;
 
+    // Exchange: the credit pays first; what is left of it is refunded or kept on account.
+    let exchangeRefund = exchangeMode ? exchangeRefundAmount(grand) : 0;
+    grand = exchangePayableTotal(grand);
+
     let customerBalance = selectedCustomerBalanceAmount();
     let isInstantCustomer = $("#customer_type").val() === "instant";
     let previousDueTotal = !isInstantCustomer
@@ -1550,6 +1780,11 @@ function calculateDue(){
     }else{
         $("#due_amount_label").text("Due Amount");
         $("#due_amount").val(totalDue.toFixed(2));
+    }
+
+    if(exchangeRefund > 0){
+        $("#due_amount_label").text("Refund to Customer");
+        $("#due_amount").val(exchangeRefund.toFixed(2));
     }
 
     if(isInstantCustomer && Math.abs(paid - grand) > 0.01){
@@ -1612,7 +1847,7 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 
-';
+' . ($barcode_scan_enabled ? barcode_scan_script($barcode_lookup) : '');
 ?>
 
 <?php

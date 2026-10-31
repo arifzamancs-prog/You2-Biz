@@ -24,8 +24,16 @@ function sales_refund_query($conn, $sql, $types='', $values=[]) {
 }
 
 function sales_refund_protect_invoice($conn,$cid,$id) {
-    if (!$conn->query("SHOW TABLES LIKE 'sales_refunds'")->num_rows) return;
+    // The Invoice List calls this for every row, so the schema is looked up once per request.
+    static $has_table = false, $has_exchange = false;
+    if (!$has_table && !($has_table = (bool)$conn->query("SHOW TABLES LIKE 'sales_refunds'")->num_rows)) return;
     $row=sales_refund_query($conn,'SELECT id FROM sales_refunds WHERE user_id=? AND (invoice_id=? OR credit_invoice_id=?) LIMIT 1','iii',[$cid,$id,$id])->get_result()->fetch_assoc();
+    // Sales Return: the new invoice of an exchange, or an invoice whose due a return paid off.
+    if (!$row && !$has_exchange) $has_exchange = (bool)$conn->query("SHOW COLUMNS FROM sales_refunds LIKE 'exchange_invoice_id'")->num_rows;
+    if (!$row && $has_exchange) {
+        $row=sales_refund_query($conn,'SELECT id FROM sales_refunds WHERE user_id=? AND exchange_invoice_id=? LIMIT 1','ii',[$cid,$id])->get_result()->fetch_assoc()
+            ?: sales_refund_query($conn,"SELECT id FROM customer_payments WHERE user_id=? AND invoice_id=? AND note LIKE 'Return REF-%' LIMIT 1",'ii',[$cid,$id])->get_result()->fetch_assoc();
+    }
     if ($row) throw new RuntimeException('An invoice linked to a refund cannot be edited or deleted.');
 }
 

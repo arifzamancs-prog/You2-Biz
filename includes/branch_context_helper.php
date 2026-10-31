@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/branch_helper.php';
+require_once __DIR__ . '/schema_cache_helper.php';
 
 function ensure_branch_accounting_columns($conn, $company_id)
 {
@@ -11,10 +12,26 @@ function ensure_branch_accounting_columns($conn, $company_id)
 
     ensure_head_office_branch($conn, $company_id);
 
+    // Table/column checks run once per session (schema_once); the branch backfill
+    // below them runs on every request. $existing lists the tables that exist.
+    $tables = ['staff', 'wallets', 'invoices', 'booking_invoices', 'expenses', 'money_ins', 'transfers', 'transactions', 'customer_payments', 'staff_ledger_entries', 'purchases', 'supplier_payments'];
+    $check_schema = schema_once('branch_accounting_columns');
+    $existing = $check_schema ? null : schema_recall('branch_accounting_tables');
+
+    if ($existing === null) {
+        $check_schema = true;
+        $existing = [];
+        foreach ($tables as $table) {
+            $exists = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $table) . "'");
+            if ($exists && mysqli_num_rows($exists) > 0) $existing[] = $table;
+        }
+        schema_remember('branch_accounting_tables', $existing);
+    }
+
     // An older live database may reach the navbar before any Staff page runs.
     // Provision branch ownership here as part of the common bootstrap as well.
-    $staff_table = mysqli_query($conn, "SHOW TABLES LIKE 'staff'");
-    if ($staff_table && mysqli_num_rows($staff_table) > 0) {
+    $staff_table = in_array('staff', $existing, true);
+    if ($check_schema && $staff_table) {
         $staff_branch_column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'branch_id'");
         if ($staff_branch_column && mysqli_num_rows($staff_branch_column) === 0) {
             mysqli_query($conn, 'ALTER TABLE staff ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER designation');
@@ -30,18 +47,18 @@ function ensure_branch_accounting_columns($conn, $company_id)
     mysqli_stmt_execute($head_stmt);
     $head_id = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($head_stmt))['id'] ?? 0);
 
-    if ($head_id > 0 && $staff_table && mysqli_num_rows($staff_table) > 0) {
+    if ($head_id > 0 && $staff_table) {
         mysqli_query($conn, "UPDATE staff SET branch_id={$head_id} WHERE user_id={$company_id} AND (branch_id IS NULL OR branch_id=0)");
     }
 
-    $tables = ['wallets', 'invoices', 'booking_invoices', 'expenses', 'money_ins', 'transfers', 'transactions', 'customer_payments', 'staff_ledger_entries', 'purchases', 'supplier_payments'];
     foreach ($tables as $table) {
-        $exists = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, $table) . "'");
-        if (!$exists || mysqli_num_rows($exists) === 0) continue;
-        $column = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE 'branch_id'");
-        if ($column && mysqli_num_rows($column) === 0) {
-            mysqli_query($conn, "ALTER TABLE `{$table}` ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id");
-            mysqli_query($conn, "ALTER TABLE `{$table}` ADD INDEX `idx_{$table}_user_branch` (user_id, branch_id)");
+        if ($table === 'staff' || !in_array($table, $existing, true)) continue;
+        if ($check_schema) {
+            $column = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE 'branch_id'");
+            if ($column && mysqli_num_rows($column) === 0) {
+                mysqli_query($conn, "ALTER TABLE `{$table}` ADD COLUMN branch_id BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER user_id");
+                mysqli_query($conn, "ALTER TABLE `{$table}` ADD INDEX `idx_{$table}_user_branch` (user_id, branch_id)");
+            }
         }
         if ($head_id > 0) {
             if ($table === 'wallets') {
@@ -67,13 +84,15 @@ function ensure_branch_accounting_columns($conn, $company_id)
         }
     }
 
-    $wallet_index = mysqli_query($conn, "SHOW INDEX FROM wallets WHERE Key_name='unique_user_wallet'");
-    if ($wallet_index && mysqli_num_rows($wallet_index) > 0) {
-        mysqli_query($conn, 'ALTER TABLE wallets DROP INDEX unique_user_wallet');
-    }
-    $wallet_branch_index = mysqli_query($conn, "SHOW INDEX FROM wallets WHERE Key_name='unique_user_branch_wallet'");
-    if ($wallet_branch_index && mysqli_num_rows($wallet_branch_index) === 0) {
-        mysqli_query($conn, 'ALTER TABLE wallets ADD UNIQUE INDEX unique_user_branch_wallet (user_id, branch_id, wallet_name)');
+    if ($check_schema) {
+        $wallet_index = mysqli_query($conn, "SHOW INDEX FROM wallets WHERE Key_name='unique_user_wallet'");
+        if ($wallet_index && mysqli_num_rows($wallet_index) > 0) {
+            mysqli_query($conn, 'ALTER TABLE wallets DROP INDEX unique_user_wallet');
+        }
+        $wallet_branch_index = mysqli_query($conn, "SHOW INDEX FROM wallets WHERE Key_name='unique_user_branch_wallet'");
+        if ($wallet_branch_index && mysqli_num_rows($wallet_branch_index) === 0) {
+            mysqli_query($conn, 'ALTER TABLE wallets ADD UNIQUE INDEX unique_user_branch_wallet (user_id, branch_id, wallet_name)');
+        }
     }
 
     // Every branch owns its own system Cash wallet. This also provisions wallets

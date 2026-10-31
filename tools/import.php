@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/schema_cache_helper.php';
 require_once '../includes/super_admin_config.php';
 require_once '../includes/company_backup_helper.php';
 
@@ -313,6 +314,8 @@ function import_insert_row($conn, $table, $row)
 }
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
+    // Tables may be rebuilt here, so the schema checks run again afterwards.
+    schema_cache_reset();
 
     $password = $_POST['password'];
 

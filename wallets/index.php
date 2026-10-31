@@ -8,6 +8,8 @@ $user_id = $_SESSION['user_id'];
 $branch_id = selected_branch_id($conn, false);
 
 ensure_default_cash_wallet($conn, $user_id);
+$wallet_message = $_SESSION['wallet_message'] ?? null;
+unset($_SESSION['wallet_message']);
 
 $result = mysqli_query(
     $conn,
@@ -33,7 +35,8 @@ require_once '../includes/sidebar.php';
             Wallet List
         </h3>
 
-        <?php if(manager_can_modify()){ ?>
+        <?php // Multi Branch: only the admin adds wallets (for one branch or every branch). ?>
+        <?php if(manager_can_modify() && (is_admin_user() || !company_multi_branch_enabled($conn, (int)$user_id))){ ?>
 
         <div class="card-tools">
 
@@ -52,6 +55,12 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
+
+        <?php if($wallet_message){ ?>
+            <div class="alert alert-<?= $wallet_message['type'] === 'success' ? 'success' : 'danger'; ?>">
+                <?= htmlspecialchars($wallet_message['text']); ?>
+            </div>
+        <?php } ?>
 
         <table
             id="example1"

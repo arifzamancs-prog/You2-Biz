@@ -1,6 +1,9 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/app_config.php';
+require_once __DIR__ . '/print_promo_helper.php';
 
 require_once __DIR__ . '/branding_helper.php';
 require_once __DIR__ . '/branch_context_helper.php';
@@ -13,6 +16,7 @@ function printing_branch_id($conn)
 
 function printing_ensure_branch_table($conn)
 {
+    if(!schema_once('printing_ensure_branch_table')) return true;
     static $ready = false;
     if($ready) return true;
     $ready = mysqli_query($conn, "CREATE TABLE IF NOT EXISTS branch_printing_settings (
@@ -46,6 +50,7 @@ function printing_branch_settings($conn, $reset = false)
 
 function printing_ensure_column($conn)
 {
+    if(!schema_once('printing_ensure_column')) return true;
     static $checked = false;
     static $available = false;
 

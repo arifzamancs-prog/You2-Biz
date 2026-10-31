@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_invoice_charge_columns($conn)
 {
+    if(!schema_once('ensure_invoice_charge_columns')) return;
     static $checked = false;
 
     if($checked){

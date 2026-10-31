@@ -5,6 +5,7 @@ date_default_timezone_set('Asia/Dhaka');
 require_once __DIR__ . '/app_guard.php';
 require_once __DIR__ . '/supplier_label_helper.php';
 require_once __DIR__ . '/product_display_helper.php';
+require_once __DIR__ . '/schema_cache_helper.php';
 
 $host = "localhost";
 $user = "root";

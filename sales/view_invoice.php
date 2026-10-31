@@ -4,9 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/invoice_posting_helper.php';
-require_once '../includes/header.php';
-require_once '../includes/navbar.php';
-require_once '../includes/sidebar.php';
+require_once '../includes/sales_return_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -14,7 +12,7 @@ ensure_invoice_posting_columns($conn);
 $invoice_id = isset($_GET['id'])
     ? (int)$_GET['id']
     : 0;
-require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
+require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php?error=' . urlencode('Invoice not found.'));
 
 /* Invoice */
 
@@ -54,9 +52,15 @@ $invoice =
 
 if(!$invoice){
 
-    die("Invoice Not Found");
+    header('Location: invoice_list.php?error=' . urlencode('Invoice not found.'));
+    exit;
 
 }
+
+// The page layout starts only after the checks above, which may redirect.
+require_once '../includes/header.php';
+require_once '../includes/navbar.php';
+require_once '../includes/sidebar.php';
 
 $invoice_due_label = ((float)$invoice['due_amount']) < 0 ? 'Outstanding Amount' : 'Due';
 $invoice_due_display = abs((float)$invoice['due_amount']);
@@ -162,7 +166,14 @@ function invoice_qty_display($quantity, $unit_price)
             </h3>
 
             <div class="float-right">
-                <?php if (($_SESSION['user_role']??'')==='admin' && !invoice_is_pending($invoice) && (float)$invoice['total_amount']>0) { ?>
+                <?php $return_module = sales_return_enabled($conn, (int)$user_id); ?>
+                <?php if($return_module){ ?>
+                <?php sales_return_schema($conn); $view_return_state = sales_return_invoice_state($conn, $invoice); ?>
+                <?php if(!is_agent_user() && sales_return_block_reason($invoice) === '' && $view_return_state !== 'returned'){ ?>
+                <a href="sales_return_create.php?invoice_id=<?= (int)$invoice_id ?>" class="btn btn-outline-danger btn-sm">Return</a>
+                <a href="create_invoice.php?exchange=<?= (int)$invoice_id ?>" class="btn btn-outline-primary btn-sm">Exchange</a>
+                <?php } ?>
+                <?php }elseif (($_SESSION['user_role']??'')==='admin' && !invoice_is_pending($invoice) && (float)$invoice['total_amount']>0) { ?>
                 <a href="refund.php?id=<?= (int)$invoice_id ?>" class="btn btn-danger btn-sm">Refund / History</a>
                 <?php } ?>
 
@@ -389,6 +400,10 @@ function invoice_qty_display($quantity, $unit_price)
                                     Due
                                     </span>';
 
+                                }
+
+                                if($return_module && !empty($view_return_state)){
+                                    echo ' ' . sales_return_state_badge($view_return_state);
                                 }
 
                                 ?>
@@ -632,6 +647,65 @@ function invoice_qty_display($quantity, $unit_price)
     </div>
 
 </div>
+
+            <?php if($return_module){ ?>
+            <?php
+            $invoice_returns = sales_return_list_for_invoice($conn, (int)$user_id, (int)$invoice_id);
+            // This invoice was paid partly by an exchange.
+            $exchange_from = sales_refund_query(
+                $conn,
+                'SELECT r.id, r.exchange_amount, cn.invoice_no AS credit_no, i.invoice_no
+                 FROM sales_refunds r
+                 LEFT JOIN invoices cn ON cn.id=r.credit_invoice_id
+                 LEFT JOIN invoices i ON i.id=r.invoice_id
+                 WHERE r.user_id=? AND r.exchange_invoice_id=?',
+                'ii',
+                [(int)$user_id, (int)$invoice_id]
+            )->get_result()->fetch_all(MYSQLI_ASSOC);
+            $returns_show_due = (bool)array_filter($invoice_returns, fn($row) => (float)$row['due_adjusted'] > 0.009);
+            $returns_show_advance = (bool)array_filter($invoice_returns, fn($row) => (float)$row['advance_amount'] > 0.009);
+            ?>
+            <?php foreach($exchange_from as $exchange_row){ ?>
+            <div class="alert alert-info mt-3">
+                Exchange of <?= htmlspecialchars((string)$exchange_row['invoice_no']); ?>:
+                <?= htmlspecialchars((string)$exchange_row['credit_no']); ?>, credit <?= number_format((float)$exchange_row['exchange_amount'], 2); ?>
+                <a href="sales_return_print.php?id=<?= (int)$exchange_row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-light ml-2" style="text-decoration:none">Exchange Slip</a>
+            </div>
+            <?php } ?>
+            <?php if($invoice_returns){ ?>
+            <hr>
+            <h4>Sales Returns</h4>
+            <table class="table table-bordered table-sm">
+                <thead>
+                <tr>
+                    <th>Return No</th>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th>Cash Refund</th>
+                    <?php if($returns_show_due){ ?><th>Due Deducted</th><?php } ?>
+                    <?php if($returns_show_advance){ ?><th>Advance</th><?php } ?>
+                    <th>Action</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach($invoice_returns as $return_row){ ?>
+                <tr>
+                    <td>
+                        <?= htmlspecialchars((string)($return_row['credit_no'] ?: ('#' . $return_row['id']))); ?>
+                        <?php if(!empty($return_row['exchange_invoice_id'])){ ?><span class="badge badge-primary">Exchange</span><?php } ?>
+                    </td>
+                    <td><?= htmlspecialchars(app_date($return_row['created_at'])); ?></td>
+                    <td><?= number_format((float)$return_row['return_value'] > 0 ? (float)$return_row['return_value'] : (float)$return_row['amount'], 2); ?></td>
+                    <td><?= number_format((float)$return_row['amount'], 2); ?></td>
+                    <?php if($returns_show_due){ ?><td><?= number_format((float)$return_row['due_adjusted'], 2); ?></td><?php } ?>
+                    <?php if($returns_show_advance){ ?><td><?= number_format((float)$return_row['advance_amount'], 2); ?></td><?php } ?>
+                    <td><a href="sales_return_print.php?id=<?= (int)$return_row['id']; ?>" target="_blank" class="btn btn-success btn-sm">Print</a></td>
+                </tr>
+                <?php } ?>
+                </tbody>
+            </table>
+            <?php } ?>
+            <?php } ?>
 
             <?php if(!empty($invoice['notes'])){ ?>
 

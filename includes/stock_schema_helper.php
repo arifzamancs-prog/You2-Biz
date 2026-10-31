@@ -1,9 +1,12 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 // Compatibility with live installations where the disabled stock modules never
 // created their base tables. Existing tables and financial history are retained.
 function ensure_stock_base_tables($conn)
 {
+    if(!schema_once('ensure_stock_base_tables')) return;
     $definitions = [
         'product_categories' => "id INT AUTO_INCREMENT PRIMARY KEY,user_id INT NOT NULL,category_name VARCHAR(100) NOT NULL,category_type ENUM('non_stock','stock_product') NOT NULL DEFAULT 'non_stock',status ENUM('active','inactive') DEFAULT 'active',created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         'products' => "id INT AUTO_INCREMENT PRIMARY KEY,user_id INT NOT NULL,category_id INT NOT NULL,product_name VARCHAR(150) NOT NULL,sku VARCHAR(50),photo_path VARCHAR(255) NULL,purchase_price DECIMAL(15,2) DEFAULT 0,sale_price DECIMAL(15,2) DEFAULT 0,expired_on DATE,current_stock INT NOT NULL DEFAULT 0,minimum_stock INT NOT NULL DEFAULT 0,status ENUM('active','inactive') DEFAULT 'active',created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",

@@ -1,9 +1,12 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/company_settings_helper.php';
 
 function ensure_product_expiry_column($conn)
 {
+    if(!schema_once('ensure_product_expiry_column')) return;
     $result = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'expired_on'");
 
     if($result && mysqli_num_rows($result) === 0){
@@ -17,6 +20,7 @@ function ensure_product_expiry_column($conn)
 
 function ensure_product_management_columns($conn)
 {
+    if(!schema_once('ensure_product_management_columns')) return;
     ensure_product_expiry_column($conn);
 
     $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'product_expiry_option'");

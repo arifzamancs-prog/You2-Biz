@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_lead_management_table($conn)
 {
     mysqli_query(
@@ -126,6 +128,7 @@ function lead_reference_options($conn, $company_user_id, $current_login_user_id 
 
 function ensure_lead_followup_notification_table($conn)
 {
+    if(!schema_once('ensure_lead_followup_notification_table')) return;
     mysqli_query(
         $conn,
         "CREATE TABLE IF NOT EXISTS lead_followup_notification_reads (

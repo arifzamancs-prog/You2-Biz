@@ -1,7 +1,10 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_pricing_plan_visibility_column($conn)
 {
+    if(!schema_once('ensure_pricing_plan_visibility_column')) return;
     static $checked = false;
     if ($checked || !($conn instanceof mysqli)) {
         return;

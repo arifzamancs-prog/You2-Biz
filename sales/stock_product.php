@@ -10,7 +10,7 @@ require_once '../includes/pending_invoice_stock_helper.php';
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
 
-if (project_package_company_type($conn, $user_id) !== 'Fashion house') {
+if (!in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true)) {
     header('Location: create_invoice.php');
     exit;
 }
@@ -101,8 +101,15 @@ function branch_stock_product($conn, $user_id, $product_id)
     return $product;
 }
 
+function my_stock_show_photo($conn, $user_id)
+{
+    return project_package_company_type($conn, (int)$user_id) === 'Fashion house';
+}
+
 function my_stock_rows_html($conn, $user_id, $branch_id)
 {
+    // Only Fashion Retail shows product photos.
+    $show_photo = my_stock_show_photo($conn, $user_id);
     $stock_sql = "SELECT p.id,p.product_name,p.sku,p.photo_path,p.sale_price,
                          COALESCE(SUM(sb.remaining_quantity), 0) AS on_hand,
                          COALESCE(SUM(sb.remaining_quantity * sb.unit_cost), 0) AS stock_cost,
@@ -162,7 +169,7 @@ function my_stock_rows_html($conn, $user_id, $branch_id)
         $available = max(0, (float)$row['on_hand'] - (float)$row['reserved']);
     ?>
         <tr data-stock-search="<?= htmlspecialchars(strtolower($row['product_name'] . ' ' . ($row['sku'] ?? '') . ' ' . implode(' ', $variants)), ENT_QUOTES, 'UTF-8'); ?>">
-            <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
+            <?php if ($show_photo) { ?><td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td><?php } ?>
             <td><?= htmlspecialchars($row['product_name']); ?><?php if ($variants) { ?><small class="d-block text-muted"><?= implode(' || ', $variants); ?></small><?php } ?></td>
             <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
             <td><?= number_format((float)$row['on_hand'], 0); ?></td>
@@ -172,7 +179,7 @@ function my_stock_rows_html($conn, $user_id, $branch_id)
             <td><?= number_format((float)$row['stock_cost'], 2); ?></td>
             <td><?= number_format((float)$row['on_hand'] * (float)$row['sale_price'], 2); ?></td>
         </tr>
-    <?php } } else { ?><tr><td colspan="9" class="text-center text-muted py-4">No stock is available in this branch.</td></tr><?php }
+    <?php } } else { ?><tr><td colspan="<?= $show_photo ? 9 : 8 ?>" class="text-center text-muted py-4">No stock is available in this branch.</td></tr><?php }
     return ob_get_clean();
 }
 
@@ -251,7 +258,7 @@ function my_stock_history_html($conn, $user_id, $branch_id)
     $can_manage = branch_stock_can_manage_history();
     if ($entries) { foreach ($entries as $entry_id => $entry) {
         ?>
-        <tr>
+        <tr<?= array_filter(array_column($entry['products'], 'variants')) ? ' data-has-variant="1"' : ''; ?>>
             <td class="text-nowrap"><?= htmlspecialchars(app_date($entry['date'])); ?></td>
             <td class="text-nowrap"><?= htmlspecialchars($entry['ref']); ?></td>
             <td><?php foreach ($entry['products'] as $product) { ?><div><?= htmlspecialchars($product['label']); ?></div><?php } ?></td>
@@ -542,7 +549,7 @@ require_once '../includes/sidebar.php';
     <div class="card-body">
         <p class="text-muted">Only stock available in the current branch is shown here.</p>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0" id="my-stock-table">
-            <thead><tr><th>Photo</th><th>Product</th><th>Code</th><th>On Hand</th><th>Reserved</th><th>Damaged</th><th>Available</th><th>Stock Cost</th><th>Sale Value</th></tr></thead>
+            <thead><tr><?php if (my_stock_show_photo($conn, $user_id)) { ?><th>Photo</th><?php } ?><th>Product</th><th>Code</th><th>On Hand</th><th>Reserved</th><th>Damaged</th><th>Available</th><th>Stock Cost</th><th>Sale Value</th></tr></thead>
             <tbody id="my-stock-body"><?= my_stock_rows_html($conn, $user_id, $branch_id); ?></tbody>
         </table></div>
         <div id="my-stock-no-results" class="text-center text-muted py-4 d-none">No matching product was found.</div>
@@ -553,7 +560,7 @@ require_once '../includes/sidebar.php';
     <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Stock Add History — <?= htmlspecialchars($current_branch_label); ?></h3></div>
     <div class="card-body p-0">
         <div class="table-responsive p-3"><table class="table table-bordered table-striped mb-0" id="adjust-history-table">
-            <thead><tr><th style="width:105px">Date</th><th style="width:165px">Ref No</th><th style="width:17%">Product</th><th style="width:24%">Variant</th><th style="width:90px">Qty</th><th style="width:150px">By</th><th style="width:20%">Note</th><?php if (branch_stock_can_manage_history()) { ?><th style="width:90px">Action</th><?php } ?></tr></thead>
+            <thead><tr><th class="text-nowrap" style="width:105px">Date</th><th class="text-nowrap" style="width:200px">Ref No</th><th style="width:30%">Product</th><th style="width:20%">Variant</th><th style="width:80px">Qty</th><th style="width:140px">By</th><th>Note</th><?php if (branch_stock_can_manage_history()) { ?><th style="width:90px">Action</th><?php } ?></tr></thead>
             <tbody id="adjust-history-body"><?= my_stock_history_html($conn, $user_id, $branch_id); ?></tbody>
         </table></div>
         <small class="text-muted d-block px-3 pb-2">The latest 100 stock entries are loaded.</small>
@@ -857,6 +864,8 @@ $page_script = <<<HTML
             autoWidth: false,
             language: {emptyTable: 'No stock has been added in this branch yet.'}
         });
+        // The Variant column only shows when an entry has variants.
+        \$('#adjust-history-table').DataTable().column(3).visible(!!document.querySelector('#adjust-history-body tr[data-has-variant]'));
     }
     function destroyHistoryTable(){
         if(\$ && \$.fn.DataTable && \$.fn.DataTable.isDataTable('#adjust-history-table')){

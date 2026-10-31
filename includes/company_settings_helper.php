@@ -1,7 +1,13 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_company_setting_columns($conn)
 {
+    if(!schema_once('company_setting_columns')){
+        return;
+    }
+
     $columns = [
         'company_type' => "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name",
         'currency_code' => "ALTER TABLE users ADD COLUMN currency_code VARCHAR(10) NOT NULL DEFAULT 'BDT'",

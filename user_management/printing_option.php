@@ -71,6 +71,11 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         )){
             $message = 'Printing option updated successfully.';
 
+            // Super admin edits only the defaults for new companies; the message is one per company (all branches).
+            if(!is_super_admin_user()){
+                save_print_promo_settings($conn, $_POST['print_promo_status'] ?? 'inactive', $_POST['print_promo_message'] ?? '');
+            }
+
             if($company_seal_changed || $paid_seal_changed){
                 $message .= ' Seal stamp preview and print settings have been updated.';
             }
@@ -100,6 +105,7 @@ $print_general_top_margin = current_print_general_top_margin_option($conn);
 $company_seal_url = current_company_seal_url($conn);
 $paid_seal_url = current_paid_seal_url($conn);
 $company_logo_url = current_print_company_logo_url($conn);
+$print_promo = print_promo_settings($conn);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -527,6 +533,50 @@ require_once '../includes/sidebar.php';
                             </div>
                         </div>
                     </div>
+
+                    <?php if(!is_super_admin_user()){ ?>
+                    <div class="border rounded p-3 mb-3">
+                        <label class="mb-1">Promotional / Special Message</label>
+                        <div class="text-muted small mb-3">
+                            A message such as an offer or greeting, printed in a box at the bottom of the sales invoice, just above "Thank you".
+                            <?php if(company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])){ ?>The same message is used by every branch.<?php } ?>
+                        </div>
+
+                        <div class="custom-control custom-radio mb-2">
+                            <input
+                                type="radio"
+                                id="print_promo_status_active"
+                                name="print_promo_status"
+                                value="active"
+                                class="custom-control-input"
+                                <?= $print_promo['status'] === 'active' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_promo_status_active">
+                                Active
+                            </label>
+                        </div>
+
+                        <div class="custom-control custom-radio mb-3">
+                            <input
+                                type="radio"
+                                id="print_promo_status_inactive"
+                                name="print_promo_status"
+                                value="inactive"
+                                class="custom-control-input"
+                                <?= $print_promo['status'] !== 'active' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_promo_status_inactive">
+                                Inactive
+                            </label>
+                        </div>
+
+                        <textarea
+                            name="print_promo_message"
+                            class="form-control"
+                            rows="3"
+                            maxlength="<?= PRINT_PROMO_MAX_LENGTH; ?>"
+                            placeholder="e.g. Eid offer: 10% off on your next purchase!"><?= htmlspecialchars($print_promo['message']); ?></textarea>
+                        <small class="text-muted">Up to <?= PRINT_PROMO_MAX_LENGTH; ?> characters. Printed only while Active.</small>
+                    </div>
+                    <?php } ?>
 
                     <button type="submit" class="btn btn-primary">
                         <i class="fas fa-save"></i>

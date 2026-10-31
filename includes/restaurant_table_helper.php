@@ -1,9 +1,12 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/company_settings_helper.php';
 
 function ensure_restaurant_tables_table($conn)
 {
+    if(!schema_once('ensure_restaurant_tables_table')) return;
     $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'table_system_enabled'");
     if ($column && mysqli_num_rows($column) === 0) {
         mysqli_query($conn, "ALTER TABLE users ADD COLUMN table_system_enabled TINYINT(1) NOT NULL DEFAULT 1");

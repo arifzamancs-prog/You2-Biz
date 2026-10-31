@@ -13,7 +13,7 @@ $central = stock_can_manage_warehouse($conn);
 $multi_branch = company_multi_branch_enabled($conn, $company_id);
 $is_fashion_house = project_package_company_type($conn, $company_id) === 'Fashion house';
 $pending_damaged_return_count = 0;
-if ($central && $multi_branch && $is_fashion_house) {
+if ($central && fifo_inventory_damage_return_enabled($conn, $company_id)) {
     $pending_damage_result = mysqli_query($conn, "SELECT COUNT(*) AS total FROM stock_damage_returns WHERE user_id={$company_id} AND status='pending'");
     $pending_damaged_return_count = (int)(mysqli_fetch_assoc($pending_damage_result)['total'] ?? 0);
 }
@@ -164,7 +164,7 @@ require_once '../includes/sidebar.php';
 <?php if ($central && $multi_branch && $pending_warehouse_receipts > 0) { ?>
 <div class="mb-3"><a href="receive_stock.php" class="btn btn-primary"><i class="fas fa-truck-loading mr-1"></i>Product Receive Request <span class="badge badge-light ml-2"><?= $pending_warehouse_receipts; ?></span></a></div>
 <?php } ?>
-<?php if ($central && $multi_branch && $is_fashion_house && $pending_damaged_return_count > 0) { ?>
+<?php if ($central && fifo_inventory_damage_return_enabled($conn, $company_id) && $pending_damaged_return_count > 0) { ?>
 <div class="mb-3"><a class="btn btn-outline-danger position-relative" href="damaged_returns.php"><i class="fas fa-exclamation-triangle mr-1"></i>Damaged Product Returns<?php if($pending_damaged_return_count > 0){ ?> <span class="badge badge-danger ml-1"><?= $pending_damaged_return_count ?></span><?php } ?></a></div>
 <?php } ?>
 <?php if (false) { // Product List / Product Setup section removed from this page ?>

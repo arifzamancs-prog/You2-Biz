@@ -19,7 +19,6 @@ $reload_parent = isset($_GET['reload_parent'])
     ? trim((string)$_GET['reload_parent'])
     : '';
 $reload_parent_url = '';
-$auto_print = isset($_GET['auto_print']) && $_GET['auto_print'] === '1';
 
 if($reload_parent === 'invoice_list'){
     $reload_parent_url = 'invoice_list.php';
@@ -630,9 +629,6 @@ function preparePosPrintPage() {
 
 window.addEventListener('load', preparePosPrintPage);
 </script>
-<?php if($auto_print){ ?>
-<script>window.addEventListener('load', function(){ window.setTimeout(function(){ preparePosPrintPage(); window.print(); }, 250); });</script>
-<?php } ?>
 </head>
 
 <body>
@@ -743,6 +739,8 @@ window.addEventListener('load', preparePosPrintPage);
     <?php if($invoice_created_by_text !== ''){ ?>
         <p><strong><?= htmlspecialchars($invoice_created_by_text); ?></strong></p>
     <?php } ?>
+
+    <?= print_promo_html($conn, true); ?>
 
     <div class="footer">
         Thank you for your cooperation.
@@ -1049,9 +1047,6 @@ window.addEventListener('load', function () {
 });
 </script>
 <?php } ?>
-<?php if($auto_print){ ?>
-<script>window.addEventListener('load', function(){ window.setTimeout(function(){ window.print(); }, 250); });</script>
-<?php } ?>
 <?= printing_fit_one_page_html('.page', printing_fit_area_mm($conn)); ?>
 </head>
 
@@ -1250,6 +1245,8 @@ window.addEventListener('load', function () {
         <div class="signature-line">Customer Signature</div>
         <div class="signature-line">Authorized Signature</div>
     </section>
+
+    <?= print_promo_html($conn); ?>
 
     <div class="footer-note">
         Thank you for your cooperation.

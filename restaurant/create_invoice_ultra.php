@@ -55,7 +55,6 @@ require_once '../includes/sidebar.php';
     <form method="post" action="../sales/save_invoice.php" id="ultra-pos-form" target="_blank">
         <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="action" value="print">
-        <input type="hidden" name="auto_print" value="1">
         <input type="hidden" name="customer_name" value="">
         <input type="hidden" name="customer_phone" value="">
         <input type="hidden" name="customer_address" value="">

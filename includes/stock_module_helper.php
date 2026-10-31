@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 require_once __DIR__ . '/branch_context_helper.php';
 require_once __DIR__ . '/restaurant_catalog_branch_helper.php';
 
@@ -142,6 +144,7 @@ function stock_verify_csrf()
 
 function ensure_stock_module_feature_column($conn)
 {
+    if(!schema_once('ensure_stock_module_feature_column')) return;
     $col = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'fifo_enabled'");
     if ($col && mysqli_num_rows($col) === 0) {
         mysqli_query($conn, 'ALTER TABLE users ADD COLUMN fifo_enabled TINYINT(1) NOT NULL DEFAULT 0');
@@ -247,7 +250,14 @@ function stock_module_bootstrap($conn)
         $id = (int)($_POST['invoice_id'] ?? $_GET['id'] ?? 0);
         if ($id > 0) {
             try { $GLOBALS['stock_wallet_branch_id'] = stock_invoice_branch($conn, $company_id, $id); }
-            catch (RuntimeException $e) { http_response_code(403); exit(htmlspecialchars($e->getMessage())); }
+            catch (RuntimeException $e) {
+                // A page opened from a stale or wrong link goes back to the list instead of a blank error.
+                if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && in_array($file, ['view_invoice.php', 'print_invoice.php', 'edit_invoice.php'], true)) {
+                    header('Location: invoice_list.php?error=' . urlencode('Invoice not found.'));
+                    exit;
+                }
+                http_response_code(403); exit(htmlspecialchars($e->getMessage()));
+            }
         }
     }
     restaurant_supplier_guard_request($conn, $module, $file);

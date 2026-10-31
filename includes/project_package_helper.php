@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/schema_cache_helper.php';
+
 function ensure_project_package_tables($conn)
 {
     project_package_ensure_company_type_column($conn);
@@ -47,6 +49,10 @@ function project_package_ensure_company_type_column($conn)
         return;
     }
 
+    if(!schema_once('project_package_company_type_column')){
+        return;
+    }
+
     $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'company_type'");
     if($column && mysqli_num_rows($column) === 0){
         mysqli_query($conn, "ALTER TABLE users ADD COLUMN company_type VARCHAR(30) NOT NULL DEFAULT 'Housing' AFTER name");
@@ -55,12 +61,22 @@ function project_package_ensure_company_type_column($conn)
 
 function project_package_company_type($conn, $user_id)
 {
-    project_package_ensure_company_type_column($conn);
-
     $user_id = (int)$user_id;
     if($user_id <= 0){
         return 'Housing';
     }
+
+    // Pages ask for the company type many times per request; read it once.
+    if(!array_key_exists($user_id, $GLOBALS['project_package_company_type_cache'] ?? [])){
+        $GLOBALS['project_package_company_type_cache'][$user_id] = project_package_company_type_read($conn, $user_id);
+    }
+
+    return $GLOBALS['project_package_company_type_cache'][$user_id];
+}
+
+function project_package_company_type_read($conn, $user_id)
+{
+    project_package_ensure_company_type_column($conn);
 
     $stmt = mysqli_prepare(
         $conn,
