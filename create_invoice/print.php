@@ -107,6 +107,7 @@ $invoice_is_confirmed = strtolower(trim((string) ($invoice['status'] ?? 'pending
 $paid_seal_url = should_print_paid_seal($conn) && $invoice_is_confirmed ? current_paid_seal_url($conn) : '';
 $show_notes = should_print_invoice_notes($conn);
 $show_created_by = should_print_invoice_created_by($conn);
+$show_invoice_barcode = should_print_invoice_barcode($conn);
 $created_by_name = trim((string)($invoice['created_by_name'] ?? '')) ?: trim((string)($company_profile['name'] ?? 'System'));
 $page_size = $printing_option === 'pos' ? '80mm auto' : ($printing_option === 'custom' ? number_format((float)$custom_size['width'], 2, '.', '') . 'in ' . number_format((float)$custom_size['height'], 2, '.', '') . 'in' : 'A4');
 $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'custom' ? number_format((float)$custom_size['width'], 2, '.', '') . 'in' : '900px');
@@ -144,9 +145,10 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
         .approval-row { position:relative; display:block; margin-top:44px; min-height:96px; } .seal-block { position:absolute; text-align:center; min-width:130px; } .seal-block img { display:block; margin:0 auto; max-width:115px; max-height:76px; object-fit:contain; } .company-seal-block { right:0; bottom:0; }
         .created-by { margin-top:18px; color:#65748a; font-size:12px; }
         .print-end { break-inside: avoid; page-break-inside: avoid; } .footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5eaf1; color: #7b8799; font-size: 12px; text-align: center; }
+        .invoice-barcode-wrap { margin:6px 0 8px; } .invoice-barcode-wrap svg { margin-left:auto; }
         .print-button { border: 0; border-radius: 4px; padding: 10px 16px; background: #1479e8; color: #fff; cursor: pointer; font-weight: 700; }
         <?php if($printing_option === 'pos'){ ?>
-        body { font-size:11px; } .invoice-content { padding:18px 14px; padding-top:calc(18px + <?= number_format((float)$print_top_margin, 2, '.', '') ?>in); } .header { gap:8px; padding-bottom:14px; } .company-head { max-width:52%; } .brand-row { gap:7px; } .company-logo { width:34px; height:34px; } .brand { font-size:14px; } .company-contact { margin-top:6px; font-size:8px; } .title { font-size:17px; } .meta { font-size:9px; } .customer-grid { grid-template-columns:1fr; gap:12px; margin:16px 0; } th,td { padding:7px 6px; font-size:9px; } .total-row { min-height:56px; margin-top:14px; } .summary { width:100%; } .paid-total-seal img { max-width:78px; max-height:48px; } .approval-row { margin-top:22px; min-height:72px; } .seal-block { min-width:90px; } .seal-block img { max-width:78px; max-height:48px; } .footer { margin-top:20px; font-size:9px; }
+        body { font-size:11px; } .invoice-content { padding:18px 14px; padding-top:calc(18px + <?= number_format((float)$print_top_margin, 2, '.', '') ?>in); } .header { gap:8px; padding-bottom:14px; } .company-head { max-width:52%; } .brand-row { gap:7px; } .company-logo { width:34px; height:34px; } .brand { font-size:14px; } .company-contact { margin-top:6px; font-size:8px; } .title { font-size:17px; } .meta { font-size:9px; } .customer-grid { grid-template-columns:1fr; gap:12px; margin:16px 0; } th,td { padding:7px 6px; font-size:9px; } .total-row { min-height:56px; margin-top:14px; } .summary { width:100%; } .paid-total-seal img { max-width:78px; max-height:48px; } .approval-row { margin-top:22px; min-height:72px; } .seal-block { min-width:90px; } .seal-block img { max-width:78px; max-height:48px; } .footer { margin-top:20px; font-size:9px; } .invoice-barcode-wrap { margin:14px 0 0; } .invoice-barcode-wrap svg { margin:0 auto; }
         <?php } ?>
         @media print { body { padding: 0; background: #fff; } .invoice-box { box-shadow: none; max-width: none; } .no-print { display:none; } }
     </style>
@@ -165,6 +167,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <div>
                 <p class="title"><?= htmlspecialchars(booking_invoice_page_title($invoice['invoice_type'], $invoice_types)); ?></p>
                 <div class="meta">Invoice No: <strong><?= htmlspecialchars($invoice['invoice_no']); ?></strong></div>
+                <?php if($show_invoice_barcode && $printing_option !== 'pos'){ ?><div class="invoice-barcode-wrap"><?= printing_invoice_barcode_html($invoice['invoice_no'], 1, 40); ?></div><?php } ?>
                 <div class="meta">Date: <strong><?= htmlspecialchars(date('d-m-Y', strtotime($invoice['invoice_date'])) . ($printing_option === 'pos' && !empty($invoice['created_at']) ? ' ' . date('h:i A', strtotime($invoice['created_at'])) : '')); ?></strong></div>
                 <div class="meta"><span class="badge badge-<?= ($invoice['status'] ?? 'pending') === 'confirmed' ? 'confirmed' : 'pending'; ?>"><?= htmlspecialchars($invoice['status'] ?? 'pending'); ?></span></div>
                 <p><button class="no-print print-button" onclick="window.print()">Print Invoice</button></p>
@@ -195,7 +198,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <?php if($company_seal_url !== ''){ ?><div class="seal-block company-seal-block"><img src="<?= htmlspecialchars($company_seal_url); ?>" alt="Company seal"></div><?php } ?>
         </div><?php } ?>
         <?php if($show_created_by){ ?><div class="created-by">Created by: <strong><?= htmlspecialchars($created_by_name); ?></strong></div><?php } ?>
-        <div class="print-end"><?= print_promo_html($conn); ?><div class="footer">This is a system-generated invoice. Thank you for your business.</div><?= printing_powered_by_html(); ?></div>
+        <div class="print-end"><?= print_promo_html($conn); ?><?php if($show_invoice_barcode && $printing_option === 'pos'){ ?><div class="invoice-barcode-wrap"><?= printing_invoice_barcode_html($invoice['invoice_no'], 0.9, 36); ?></div><?php } ?><div class="footer">Thank you for your cooperation.</div><?= printing_powered_by_html(); ?></div>
     </div></div>
 </body>
 </html>

@@ -178,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                          print_company_profile='" . mysqli_real_escape_string($conn, printing_default_user_value($conn, 'print_company_profile', 'active')) . "',
                          printing_general_top_margin='" . (float)printing_default_user_value($conn, 'printing_general_top_margin', 0.50) . "',
                          print_general_top_margin='" . mysqli_real_escape_string($conn, printing_default_user_value($conn, 'print_general_top_margin', 'inactive')) . "',
+                         print_invoice_barcode='" . mysqli_real_escape_string($conn, printing_default_user_value($conn, 'print_invoice_barcode', 'active')) . "',
                          subscription_plan='Trial',
                          subscription_status='trial',
                          max_managers=2,

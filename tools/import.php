@@ -542,6 +542,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                             'printing_general_top_margin',
                             'print_general_top_margin',
                             'print_company_profile',
+                            'print_invoice_barcode',
                         ];
 
                         $profile_fields = [];

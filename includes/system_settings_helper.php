@@ -73,6 +73,7 @@ function system_settings_defaults()
         'default_print_company_profile' => 'active',
         'default_printing_general_top_margin' => '0.50',
         'default_print_general_top_margin' => 'inactive',
+        'default_print_invoice_barcode' => 'active',
     ];
 }
 

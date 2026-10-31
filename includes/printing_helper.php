@@ -244,6 +244,19 @@ function printing_ensure_column($conn)
         ) ? true : false;
     }
 
+    $print_invoice_barcode_result = mysqli_query(
+        $conn,
+        "SHOW COLUMNS FROM users LIKE 'print_invoice_barcode'"
+    );
+
+    if($available && (!$print_invoice_barcode_result || mysqli_num_rows($print_invoice_barcode_result) === 0)){
+        $available = mysqli_query(
+            $conn,
+            "ALTER TABLE users
+             ADD print_invoice_barcode VARCHAR(20) NOT NULL DEFAULT 'active'"
+        ) ? true : false;
+    }
+
     return $available;
 }
 
@@ -421,6 +434,7 @@ function printing_default_system_key($column)
         'print_company_profile' => 'default_print_company_profile',
         'printing_general_top_margin' => 'default_printing_general_top_margin',
         'print_general_top_margin' => 'default_print_general_top_margin',
+        'print_invoice_barcode' => 'default_print_invoice_barcode',
     ];
 
     return $map[$column] ?? '';
@@ -451,7 +465,8 @@ function printing_default_settings_payload(
     $print_company_logo,
     $print_company_profile,
     $general_top_margin,
-    $print_general_top_margin
+    $print_general_top_margin,
+    $print_invoice_barcode
 ) {
     return [
         'default_printing_option' => $option,
@@ -468,6 +483,7 @@ function printing_default_settings_payload(
         'default_print_company_profile' => $print_company_profile,
         'default_printing_general_top_margin' => (string)$general_top_margin,
         'default_print_general_top_margin' => $print_general_top_margin,
+        'default_print_invoice_barcode' => $print_invoice_barcode,
     ];
 }
 
@@ -505,6 +521,7 @@ function current_printing_user_value($conn, $column, $default = '')
         'print_company_profile',
         'printing_general_top_margin',
         'print_general_top_margin',
+        'print_invoice_barcode',
     ];
 
     if(!in_array($column, $allowed_columns, true)){
@@ -696,6 +713,46 @@ function current_print_company_profile_option($conn)
 function should_print_company_profile($conn)
 {
     return current_print_company_profile_option($conn) === 'active';
+}
+
+function current_print_invoice_barcode_option($conn)
+{
+    return normalize_printing_yes_no_option(
+        current_printing_user_value($conn, 'print_invoice_barcode', 'active')
+    );
+}
+
+function should_print_invoice_barcode($conn)
+{
+    return current_print_invoice_barcode_option($conn) === 'active';
+}
+
+// Invoice No as a Code128 barcode, drawn by JsBarcode as soon as the markup is parsed.
+function printing_invoice_barcode_html($invoice_no, $bar_width = 1.5, $bar_height = 40)
+{
+    $value = preg_replace('/[^\x20-\x7E]/', '', (string)$invoice_no);
+
+    if($value === ''){
+        return '';
+    }
+
+    $options = json_encode([
+        'format' => 'CODE128',
+        'width' => (float)$bar_width,
+        'height' => (int)$bar_height,
+        'margin' => 0,
+        'displayValue' => false,
+    ]);
+
+    return '<svg class="invoice-barcode" style="display:block;max-width:100%;height:auto;"></svg>'
+        . '<script src="' . htmlspecialchars(app_path('adminlte/plugins/jsbarcode/JsBarcode.code128.min.js')) . '"></script>'
+        . '<script>(function(){'
+        . 'var svg=document.querySelectorAll(".invoice-barcode");svg=svg[svg.length-1];'
+        . 'try{JsBarcode(svg,' . json_encode($value, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ',' . $options . ');'
+        // JsBarcode replaces the svg style attribute, so restore the block layout afterwards.
+        . 'svg.style.display="block";svg.style.maxWidth="100%";svg.style.height="auto";}'
+        . 'catch(e){svg.style.display="none";}'
+        . '})();</script>';
 }
 
 function current_print_company_logo_url($conn)
@@ -911,7 +968,8 @@ function save_printing_option(
     $print_company_logo = 'inactive',
     $print_company_profile = 'active',
     $general_top_margin = 0.50,
-    $print_general_top_margin = 'inactive'
+    $print_general_top_margin = 'inactive',
+    $print_invoice_barcode = 'active'
 ) 
 {
     $option = normalize_printing_option($option);
@@ -927,6 +985,7 @@ function save_printing_option(
     $print_company_profile = normalize_printing_yes_no_option($print_company_profile);
     $general_top_margin = normalize_printing_custom_top_margin($general_top_margin);
     $print_general_top_margin = normalize_printing_yes_no_option($print_general_top_margin);
+    $print_invoice_barcode = normalize_printing_yes_no_option($print_invoice_barcode);
 
     if(is_super_admin_user()){
         $_SESSION['printing_option'] = $option;
@@ -943,6 +1002,7 @@ function save_printing_option(
         $_SESSION['print_company_profile'] = $print_company_profile;
         $_SESSION['printing_general_top_margin'] = $general_top_margin;
         $_SESSION['print_general_top_margin'] = $print_general_top_margin;
+        $_SESSION['print_invoice_barcode'] = $print_invoice_barcode;
 
         return system_settings_save_many(
             $conn,
@@ -960,7 +1020,8 @@ function save_printing_option(
                 $print_company_logo,
                 $print_company_profile,
                 $general_top_margin,
-                $print_general_top_margin
+                $print_general_top_margin,
+                $print_invoice_barcode
             )
         );
     }
@@ -978,7 +1039,7 @@ function save_printing_option(
     $branch_id = printing_branch_id($conn);
     if($branch_id > 0){
         if(!printing_ensure_branch_table($conn)) return false;
-        $payload = printing_default_settings_payload($option, $custom_size['width'], $custom_size['height'], $custom_top_margin, $print_invoice_notes, $print_invoice_created_by, $company_seal_file, $paid_seal_file, $print_company_seal, $print_paid_seal, $print_company_logo, $print_company_profile, $general_top_margin, $print_general_top_margin);
+        $payload = printing_default_settings_payload($option, $custom_size['width'], $custom_size['height'], $custom_top_margin, $print_invoice_notes, $print_invoice_created_by, $company_seal_file, $paid_seal_file, $print_company_seal, $print_paid_seal, $print_company_logo, $print_company_profile, $general_top_margin, $print_general_top_margin, $print_invoice_barcode);
         $settings = [];
         foreach($payload as $key => $value) $settings[substr($key, 8)] = $value;
         $json = json_encode($settings, JSON_THROW_ON_ERROR);
@@ -1006,7 +1067,8 @@ function save_printing_option(
              print_company_logo=?,
              print_company_profile=?,
              printing_general_top_margin=?,
-             print_general_top_margin=?
+             print_general_top_margin=?,
+             print_invoice_barcode=?
          WHERE id=?"
     );
 
@@ -1016,7 +1078,7 @@ function save_printing_option(
 
     mysqli_stmt_bind_param(
         $stmt,
-        "sdddssssssssdsi",
+        "sdddssssssssdssi",
         $option,
         $custom_size['width'],
         $custom_size['height'],
@@ -1031,6 +1093,7 @@ function save_printing_option(
         $print_company_profile,
         $general_top_margin,
         $print_general_top_margin,
+        $print_invoice_barcode,
         $user_id
     );
 

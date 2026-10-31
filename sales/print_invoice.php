@@ -461,6 +461,7 @@ $company_logo_url = current_print_company_logo_url($conn);
 $show_company_profile = should_print_company_profile($conn);
 $show_general_company_logo = $general_printing && should_print_company_logo($conn) && $company_logo_url !== '';
 $show_general_company_seal = $general_printing && should_print_company_seal($conn) && $company_seal_url !== '';
+$show_invoice_barcode = should_print_invoice_barcode($conn);
 $show_general_paid_seal = $general_printing && should_print_paid_seal($conn) && $paid_seal_url !== '' && (($invoice['payment_status'] ?? '') === 'paid' || $total_due_amount <= 0.009);
 
 if(is_pos_printing($conn)){
@@ -576,6 +577,14 @@ th{
     font-size:13px;
     font-weight:bold;
     padding-top:5px;
+}
+
+.invoice-barcode-wrap{
+    margin:10px 0 0;
+}
+
+.invoice-barcode-wrap svg{
+    margin:0 auto;
 }
 
 .footer{
@@ -742,6 +751,12 @@ window.addEventListener('load', preparePosPrintPage);
 
     <?= print_promo_html($conn, true); ?>
 
+    <?php if($show_invoice_barcode){ ?>
+    <div class="invoice-barcode-wrap">
+        <?= printing_invoice_barcode_html($invoice['invoice_no'], 0.9, 36); ?>
+    </div>
+    <?php } ?>
+
     <div class="footer">
         Thank you for your cooperation.
     </div>
@@ -839,6 +854,18 @@ body{
 }
 
 .invoice-title{
+    text-align:right;
+}
+
+.invoice-barcode-wrap{
+    margin-top:6px;
+}
+
+.invoice-barcode-wrap svg{
+    margin-left:auto;
+}
+
+.invoice-meta{
     text-align:right;
 }
 
@@ -1016,7 +1043,7 @@ td{
 .footer-note{
     color:#6b7280;
     font-size:12px;
-    margin-top:12px;
+    margin-top:28px;
     text-align:center;
 }
 
@@ -1092,10 +1119,11 @@ window.addEventListener('load', function () {
             <h2>Sales Invoice</h2>
             <div class="muted">Invoice No</div>
             <strong><?= htmlspecialchars($invoice['invoice_no']); ?></strong>
-            <br>
-            <span class="status <?= $status_class[$invoice['payment_status']] ?? 'status-due'; ?>">
-                <?= $status_label[$invoice['payment_status']] ?? 'Due'; ?>
-            </span>
+            <?php if($show_invoice_barcode){ ?>
+            <div class="invoice-barcode-wrap">
+                <?= printing_invoice_barcode_html($invoice['invoice_no'], 1, 40); ?>
+            </div>
+            <?php } ?>
         </div>
 
     </section>
@@ -1123,6 +1151,15 @@ window.addEventListener('load', function () {
                 <span class="value"><?= htmlspecialchars($invoice['address']); ?></span>
             </div>
             <?php } ?>
+        </div>
+
+        <div class="invoice-meta">
+            <div class="muted">Date</div>
+            <strong><?= htmlspecialchars(app_date($invoice['invoice_date'] ?? '')); ?></strong>
+            <br>
+            <span class="status <?= $status_class[$invoice['payment_status']] ?? 'status-due'; ?>">
+                <?= $status_label[$invoice['payment_status']] ?? 'Due'; ?>
+            </span>
         </div>
 
     </section>

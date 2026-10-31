@@ -31,6 +31,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $print_company_logo = $_POST['print_company_logo'] ?? 'inactive';
     $print_company_profile = $_POST['print_company_profile'] ?? 'active';
     $print_general_top_margin = $_POST['print_general_top_margin'] ?? 'inactive';
+    $print_invoice_barcode = $_POST['print_invoice_barcode'] ?? 'active';
     $current_company_seal_file = current_company_seal_file($conn);
     $current_paid_seal_file = current_paid_seal_file($conn);
 
@@ -67,7 +68,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $print_company_logo,
             $print_company_profile,
             $general_top_margin,
-            $print_general_top_margin
+            $print_general_top_margin,
+            $print_invoice_barcode
         )){
             $message = 'Printing option updated successfully.';
 
@@ -102,6 +104,7 @@ $print_paid_seal = current_print_paid_seal_option($conn);
 $print_company_logo = current_print_company_logo_option($conn);
 $print_company_profile = current_print_company_profile_option($conn);
 $print_general_top_margin = current_print_general_top_margin_option($conn);
+$print_invoice_barcode = current_print_invoice_barcode_option($conn);
 $company_seal_url = current_company_seal_url($conn);
 $paid_seal_url = current_paid_seal_url($conn);
 $company_logo_url = current_print_company_logo_url($conn);
@@ -483,6 +486,39 @@ require_once '../includes/sidebar.php';
                                 class="custom-control-input"
                                 <?= $print_company_profile === 'inactive' ? 'checked' : ''; ?>>
                             <label class="custom-control-label" for="print_company_profile_inactive">
+                                Inactive
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="border rounded p-3 mb-3">
+                        <label class="mb-1">Invoice Barcode Print</label>
+                        <div class="text-muted small mb-3">
+                            Print the Invoice No as a barcode on invoices, in General, POS and Custom Size print.
+                        </div>
+
+                        <div class="custom-control custom-radio mb-2">
+                            <input
+                                type="radio"
+                                id="print_invoice_barcode_active"
+                                name="print_invoice_barcode"
+                                value="active"
+                                class="custom-control-input"
+                                <?= $print_invoice_barcode === 'active' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_invoice_barcode_active">
+                                Active
+                            </label>
+                        </div>
+
+                        <div class="custom-control custom-radio">
+                            <input
+                                type="radio"
+                                id="print_invoice_barcode_inactive"
+                                name="print_invoice_barcode"
+                                value="inactive"
+                                class="custom-control-input"
+                                <?= $print_invoice_barcode === 'inactive' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_invoice_barcode_inactive">
                                 Inactive
                             </label>
                         </div>

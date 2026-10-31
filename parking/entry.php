@@ -19,13 +19,14 @@ parking_ensure_company_defaults($conn, $company_id);
 function parking_entry_recent_entries($conn, $company_id)
 {
     $entries = [];
-    $stmt = mysqli_prepare($conn, "SELECT t.ticket_no, t.vehicle_number, t.entry_at, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.entry_gate_id WHERE t.company_id=? ORDER BY t.entry_at DESC, t.id DESC LIMIT 10");
+    $stmt = mysqli_prepare($conn, "SELECT t.id, t.ticket_no, t.vehicle_number, t.entry_at, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.entry_gate_id WHERE t.company_id=? ORDER BY t.entry_at DESC, t.id DESC LIMIT 10");
     mysqli_stmt_bind_param($stmt, 'i', $company_id);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
     while ($row = mysqli_fetch_assoc($result)) {
         $status = (string)($row['ticket_status'] ?? '');
         $entries[] = [
+            'id' => (int)$row['id'],
             'ticket_no' => (string)$row['ticket_no'],
             'vehicle_name' => (string)$row['vehicle_name'],
             'vehicle_number' => (string)($row['vehicle_number'] ?: '—'),
@@ -234,7 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     mysqli_stmt_close($log_stmt);
     if ($slot_transaction) mysqli_commit($conn);
 
-    header('Location: print_entry.php?id=' . $inserted_ticket_id);
+    header('Location: print_entry.php?id=' . $inserted_ticket_id . '&auto=1');
     exit;
 }
 
@@ -287,10 +288,10 @@ require_once '../includes/sidebar.php';
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
-                <thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Entry Gate</th><th>Entry Time</th><th>Status</th></tr></thead>
+                <thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Entry Gate</th><th>Entry Time</th><th>Status</th><th class="text-right">Action</th></tr></thead>
                 <tbody id="recent-entry-rows">
                     <?php if (!$recent_entries) { ?>
-                        <tr><td colspan="6" class="text-center text-muted py-4">No parking entry found.</td></tr>
+                        <tr><td colspan="7" class="text-center text-muted py-4">No parking entry found.</td></tr>
                     <?php } else { foreach ($recent_entries as $recent_entry) { ?>
                         <tr>
                             <td><?= htmlspecialchars($recent_entry['ticket_no']) ?></td>
@@ -299,6 +300,7 @@ require_once '../includes/sidebar.php';
                             <td><?= htmlspecialchars($recent_entry['gate_name']) ?></td>
                             <td><?= htmlspecialchars($recent_entry['entry_time']) ?></td>
                             <td><span class="badge badge-<?= in_array($recent_entry['status'], ['paid', 'exited'], true) ? 'success' : 'info' ?>"><?= htmlspecialchars($recent_entry['status_label']) ?></span></td>
+                            <td class="text-right"><a class="btn btn-sm btn-outline-secondary" href="print_entry.php?id=<?= (int)$recent_entry['id'] ?>" target="_blank"><i class="fas fa-print mr-1"></i>Print</a></td>
                         </tr>
                     <?php } } ?>
                 </tbody>
@@ -380,7 +382,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!entries.length) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = 6;
+            cell.colSpan = 7;
             cell.className = 'text-center text-muted py-4';
             cell.textContent = 'No parking entry found.';
             row.appendChild(cell);
@@ -400,6 +402,17 @@ document.addEventListener('DOMContentLoaded', function () {
             badge.textContent = entry.status_label;
             statusCell.appendChild(badge);
             row.appendChild(statusCell);
+            const actionCell = document.createElement('td');
+            actionCell.className = 'text-right';
+            const printLink = document.createElement('a');
+            printLink.className = 'btn btn-sm btn-outline-secondary';
+            printLink.href = 'print_entry.php?id=' + encodeURIComponent(entry.id);
+            printLink.target = '_blank';
+            const printIcon = document.createElement('i');
+            printIcon.className = 'fas fa-print mr-1';
+            printLink.append(printIcon, 'Print');
+            actionCell.appendChild(printLink);
+            row.appendChild(actionCell);
             recentRows.appendChild(row);
         });
     }

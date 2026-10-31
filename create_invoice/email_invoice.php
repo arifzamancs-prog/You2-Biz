@@ -124,7 +124,9 @@ if($company_seal_path !== '' && is_file($company_seal_path)){
 }
 $pdf->Ln(34);
 $pdf->SetFont('Arial', 'I', 9);
-$pdf->Cell(0, 7, 'This is a system-generated invoice.', 0, 1, 'C');
+$pdf->Cell(0, 7, 'Thank you for your cooperation.', 0, 1, 'C');
+$pdf->SetFont('Arial', '', 8);
+$pdf->Cell(0, 5, 'Powered by You2technologies.com', 0, 1, 'C');
 $pdf_content = $pdf->Output('S', 'invoice.pdf');
 $filename = preg_replace('/[^A-Za-z0-9_-]+/', '_', (string)$invoice['invoice_no']) . '.pdf';
 $customer_name = trim((string)($invoice['customer_name'] ?? 'Customer')) ?: 'Customer';

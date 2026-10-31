@@ -53,30 +53,32 @@ function parking_exit_redirect($location, $message = '', $type = 'danger')
     exit;
 }
 
-function parking_exit_recent_entries($conn, $company_id)
+function parking_exit_recent_exits($conn, $company_id)
 {
-    $entries = [];
-    $stmt = mysqli_prepare($conn, "SELECT t.id, t.ticket_no, t.vehicle_number, t.entry_at, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.entry_gate_id WHERE t.company_id=? AND t.ticket_status IN ('active','payment_pending','paid') ORDER BY t.entry_at DESC, t.id DESC LIMIT 10");
+    $stmt = mysqli_prepare($conn, "SELECT t.id, t.ticket_no, t.vehicle_number, t.exit_at, t.duration_minutes, t.paid_amount, t.ticket_status, v.vehicle_name, g.gate_name FROM parking_tickets t INNER JOIN parking_vehicle_types v ON v.id=t.vehicle_type_id LEFT JOIN parking_gates g ON g.id=t.exit_gate_id WHERE t.company_id=? AND t.ticket_status IN ('exited','lost') ORDER BY t.exit_at DESC, t.id DESC LIMIT 10");
     mysqli_stmt_bind_param($stmt, 'i', $company_id);
     mysqli_stmt_execute($stmt);
     $result = mysqli_stmt_get_result($stmt);
+    $exits = [];
     while ($row = mysqli_fetch_assoc($result)) {
-        $entries[] = [
-            'id' => (int)$row['id'],
+        $exits[] = [
             'ticket_no' => (string)$row['ticket_no'],
+            'lost' => $row['ticket_status'] === 'lost',
             'vehicle_name' => (string)$row['vehicle_name'],
             'vehicle_number' => (string)($row['vehicle_number'] ?: '—'),
             'gate_name' => (string)($row['gate_name'] ?: '—'),
-            'entry_time' => date('d M Y, h:i A', strtotime((string)$row['entry_at'])),
+            'exit_time' => $row['exit_at'] ? date('d M Y, h:i A', strtotime((string)$row['exit_at'])) : '—',
+            'duration' => (int)$row['duration_minutes'] . ' min',
+            'paid' => 'BDT ' . number_format((float)$row['paid_amount'], 2),
         ];
     }
     mysqli_stmt_close($stmt);
-    return $entries;
+    return $exits;
 }
 
-if (($_GET['ajax'] ?? '') === 'recent_entries') {
+if (($_GET['ajax'] ?? '') === 'recent_exits') {
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['ok' => true, 'entries' => parking_exit_recent_entries($conn, $company_id)]);
+    echo json_encode(['ok' => true, 'exits' => parking_exit_recent_exits($conn, $company_id)]);
     exit;
 }
 
@@ -251,7 +253,7 @@ $exit_gate_filter = parking_operator_gate_filter($conn, $company_id, 'exit', 'id
 $exit_gates = mysqli_query($conn, "SELECT id, gate_name, gate_code FROM parking_gates WHERE company_id={$company_id} AND status='active' AND gate_type IN ('exit','both'){$exit_gate_filter} ORDER BY gate_name ASC");
 $wallet_branches = parking_exit_wallet_branches($conn, $company_id, (int)($ticket['branch_id'] ?? 0));
 $wallets = mysqli_query($conn, "SELECT id, wallet_name, branch_id FROM wallets WHERE user_id={$company_id} AND COALESCE(branch_id,0) IN ({$wallet_branches}) AND status='active' ORDER BY is_system DESC, wallet_name ASC");
-$recent_entries = parking_exit_recent_entries($conn, $company_id);
+$recent_exits = parking_exit_recent_exits($conn, $company_id);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -259,18 +261,19 @@ require_once '../includes/sidebar.php';
 ?>
 
 <?php if ($flash) { ?><div class="alert alert-<?= htmlspecialchars($flash['type']) ?> alert-dismissible"><button type="button" class="close" data-dismiss="alert">&times;</button><?= htmlspecialchars($flash['message']) ?></div><?php } ?>
-<div class="card card-outline card-warning"><div class="card-header"><h3 class="card-title"><i class="fas fa-sign-out-alt mr-2"></i>Vehicle Exit</h3></div><div class="card-body"><form method="post" autocomplete="off"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="scan"><div class="row align-items-end"><div class="col-md-8 form-group mb-md-0"><label>Scan Barcode</label><input class="form-control form-control-lg" name="barcode_value" placeholder="Scan ticket barcode here" autofocus required></div><div class="col-md-4"><button class="btn btn-warning btn-lg btn-block"><i class="fas fa-search mr-1"></i>Find Ticket</button></div></div></form></div></div>
-
-<div class="card card-outline card-info">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Last 10 Active Entries</h3><div class="card-tools"><button type="button" class="btn btn-sm btn-outline-primary" id="refresh-recent-entries"><i class="fas fa-sync-alt mr-1"></i>Refresh</button></div></div>
-    <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Entry Gate</th><th>Entry Time</th><th></th></tr></thead><tbody id="recent-entry-rows">
-        <?php if (!$recent_entries) { ?><tr><td colspan="6" class="text-center text-muted py-4">No active parking entry found.</td></tr><?php } else { foreach ($recent_entries as $recent_entry) { ?><tr><td><?= htmlspecialchars($recent_entry['ticket_no']) ?></td><td><?= htmlspecialchars($recent_entry['vehicle_name']) ?></td><td><?= htmlspecialchars($recent_entry['vehicle_number']) ?></td><td><?= htmlspecialchars($recent_entry['gate_name']) ?></td><td><?= htmlspecialchars($recent_entry['entry_time']) ?></td><td class="text-right"><a class="btn btn-sm btn-warning" href="exit.php?ticket=<?= (int)$recent_entry['id'] ?>">Select</a></td></tr><?php } } ?>
-    </tbody></table></div></div>
-</div>
+<div class="card card-outline card-warning"><div class="card-header"><h3 class="card-title"><i class="fas fa-sign-out-alt mr-2"></i>Vehicle Exit</h3></div><div class="card-body"><form method="post" autocomplete="off" id="scan-form"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="scan"><div class="row align-items-end"><div class="col-md-8 form-group mb-md-0"><label>Scan Barcode</label><input class="form-control form-control-lg" name="barcode_value" id="scan-barcode" placeholder="Scan ticket barcode here" autofocus required></div><div class="col-md-4"><button class="btn btn-warning btn-lg btn-block"><i class="fas fa-search mr-1"></i>Find Ticket</button></div></div></form></div></div>
 
 <?php if ($ticket && $calculation) { ?>
 <div class="card card-outline card-success"><div class="card-header"><h3 class="card-title">Ticket: <?= htmlspecialchars($ticket['ticket_no']) ?></h3></div><form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['parking_exit_csrf']) ?>"><input type="hidden" name="action" value="confirm_exit"><input type="hidden" name="ticket_id" value="<?= (int)$ticket['id'] ?>"><div class="card-body row"><div class="col-md-6"><table class="table table-sm table-bordered"><tr><th>Vehicle</th><td><?= htmlspecialchars($ticket['vehicle_name']) ?></td></tr><tr><th>Vehicle Number</th><td><?= htmlspecialchars($ticket['vehicle_number'] ?: 'N/A') ?></td></tr><tr><th>Entry</th><td><?= htmlspecialchars(date('d M Y, h:i A', strtotime($ticket['entry_at']))) ?></td></tr><tr><th>Duration</th><td><?= (int)$calculation['duration_minutes'] ?> minutes</td></tr><tr><th>Rate Plan</th><td><?= htmlspecialchars($ticket['plan_name'] ?: '-') ?></td></tr></table></div><div class="col-md-6"><div class="callout callout-success"><h4>Payable: BDT <?= number_format((float)$calculation['fee'], 2) ?></h4><p class="mb-0">Fee is calculated from the saved entry-time rate.</p></div><div class="form-group"><label>Exit Gate</label><select class="form-control" name="exit_gate_id" required><option value="">Select exit gate</option><?php while ($gate = mysqli_fetch_assoc($exit_gates)) { ?><option value="<?= (int)$gate['id'] ?>"><?= htmlspecialchars($gate['gate_name'] . ' (' . $gate['gate_code'] . ')') ?></option><?php } ?></select></div><div class="form-group"><label>Receive Wallet <?= (float)$calculation['fee'] <= 0 ? '(not required for free exit)' : '' ?></label><select class="form-control" name="wallet_id"><option value="">Select wallet</option><?php while ($wallet = mysqli_fetch_assoc($wallets)) { ?><option value="<?= (int)$wallet['id'] ?>" data-branch="<?= (int)$wallet['branch_id'] ?>"><?= htmlspecialchars($wallet['wallet_name']) ?></option><?php } ?></select></div><div class="form-group"><label>Note</label><input class="form-control" name="payment_note" maxlength="500" placeholder="Optional"></div></div></div><div class="card-footer text-right"><button class="btn btn-success btn-lg"><i class="fas fa-check-circle mr-1"></i>Confirm Exit</button></div></form></div>
 <?php } ?>
+
+<div class="card card-outline card-info">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Last 10 Activities</h3><div class="card-tools"><button type="button" class="btn btn-sm btn-outline-primary" id="refresh-recent-exits"><i class="fas fa-sync-alt mr-1"></i>Refresh</button></div></div>
+    <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Ticket</th><th>Vehicle</th><th>Vehicle Number</th><th>Exit Gate</th><th>Exit Time</th><th>Duration</th><th class="text-right">Paid</th></tr></thead><tbody id="recent-exit-rows">
+        <?php if (!$recent_exits) { ?><tr><td colspan="7" class="text-center text-muted py-4">No vehicle exit found yet.</td></tr><?php } ?>
+        <?php foreach ($recent_exits as $recent_exit) { ?><tr><td><?= htmlspecialchars($recent_exit['ticket_no']) ?><?php if ($recent_exit['lost']) { ?> <span class="badge badge-danger">Lost</span><?php } ?></td><td><?= htmlspecialchars($recent_exit['vehicle_name']) ?></td><td><?= htmlspecialchars($recent_exit['vehicle_number']) ?></td><td><?= htmlspecialchars($recent_exit['gate_name']) ?></td><td><?= htmlspecialchars($recent_exit['exit_time']) ?></td><td><?= htmlspecialchars($recent_exit['duration']) ?></td><td class="text-right"><?= htmlspecialchars($recent_exit['paid']) ?></td></tr><?php } ?>
+    </tbody></table></div></div>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
@@ -303,18 +306,74 @@ document.addEventListener('DOMContentLoaded', function () {
     if (exitGate) exitGate.addEventListener('change', saveExitPreferences);
     if (receiveWallet) receiveWallet.addEventListener('change', saveExitPreferences);
 
-    const rows = document.getElementById('recent-entry-rows');
-    const refresh = document.getElementById('refresh-recent-entries');
-    function cell(row, value) { const item = document.createElement('td'); item.textContent = value || '—'; row.appendChild(item); }
-    function render(entries) {
-        rows.replaceChildren();
-        if (!entries.length) { const row = document.createElement('tr'); const item = document.createElement('td'); item.colSpan = 6; item.className = 'text-center text-muted py-4'; item.textContent = 'No active parking entry found.'; row.appendChild(item); rows.appendChild(row); return; }
-        entries.forEach(function (entry) { const row = document.createElement('tr'); cell(row, entry.ticket_no); cell(row, entry.vehicle_name); cell(row, entry.vehicle_number); cell(row, entry.gate_name); cell(row, entry.entry_time); const action = document.createElement('td'); action.className = 'text-right'; const link = document.createElement('a'); link.className = 'btn btn-sm btn-warning'; link.href = 'exit.php?ticket=' + encodeURIComponent(entry.id); link.textContent = 'Select'; action.appendChild(link); row.appendChild(action); rows.appendChild(row); });
+    const exitRows = document.getElementById('recent-exit-rows');
+    const refreshExits = document.getElementById('refresh-recent-exits');
+    function exitCell(row, value, className) { const item = document.createElement('td'); item.textContent = value || '—'; if (className) item.className = className; row.appendChild(item); return item; }
+    function renderExits(exits) {
+        exitRows.replaceChildren();
+        if (!exits.length) { const row = document.createElement('tr'); const item = exitCell(row, 'No vehicle exit found yet.', 'text-center text-muted py-4'); item.colSpan = 7; exitRows.appendChild(row); return; }
+        exits.forEach(function (exit) {
+            const row = document.createElement('tr');
+            const ticket = exitCell(row, exit.ticket_no);
+            if (exit.lost) { const badge = document.createElement('span'); badge.className = 'badge badge-danger'; badge.textContent = 'Lost'; ticket.append(' ', badge); }
+            exitCell(row, exit.vehicle_name); exitCell(row, exit.vehicle_number); exitCell(row, exit.gate_name); exitCell(row, exit.exit_time); exitCell(row, exit.duration); exitCell(row, exit.paid, 'text-right');
+            exitRows.appendChild(row);
+        });
     }
-    async function loadRecentEntries() { try { const response = await fetch('exit.php?ajax=recent_entries', {credentials: 'same-origin', cache: 'no-store'}); const data = await response.json(); if (response.ok && data.ok) render(data.entries || []); } catch (error) {} }
-    refresh.addEventListener('click', loadRecentEntries);
-    window.addEventListener('focus', loadRecentEntries);
-    window.setInterval(loadRecentEntries, 15000);
+    async function loadRecentExits() { try { const response = await fetch('exit.php?ajax=recent_exits', {credentials: 'same-origin', cache: 'no-store'}); const data = await response.json(); if (response.ok && data.ok) renderExits(data.exits || []); } catch (error) {} }
+    refreshExits.addEventListener('click', loadRecentExits);
+    window.addEventListener('focus', loadRecentExits);
+    window.setInterval(loadRecentExits, 15000);
+
+    // Barcode readers type the whole code in a fast burst. Catch it wherever the focus is
+    // and find the ticket as soon as the burst ends, even when the reader sends no Enter.
+    const scanForm = document.getElementById('scan-form');
+    const scanInput = document.getElementById('scan-barcode');
+    const SCAN_KEY_GAP_MS = 50;
+    const SCAN_IDLE_MS = 150;
+    const SCAN_MIN_LENGTH = 4;
+    let lastKeyAt = 0;
+    let fastKeys = 0;
+    let idleTimer = null;
+    let submitting = false;
+
+    function isOtherField(element) {
+        if (!element || element === scanInput) return false;
+        return element.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName);
+    }
+    function submitScan() {
+        if (submitting || scanInput.value.trim() === '') return;
+        submitting = true;
+        scanForm.submit();
+    }
+    document.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.altKey || event.metaKey || isOtherField(document.activeElement)) return;
+        const now = Date.now();
+        if (event.key === 'Enter') {
+            if (document.activeElement === scanInput || fastKeys >= SCAN_MIN_LENGTH - 1) {
+                event.preventDefault();
+                submitScan();
+            }
+            return;
+        }
+        if (event.key.length !== 1) return;
+        fastKeys = now - lastKeyAt <= SCAN_KEY_GAP_MS ? fastKeys + 1 : 0;
+        lastKeyAt = now;
+        if (document.activeElement !== scanInput) {
+            // Start a fresh code in the scan box when typing begins outside it.
+            event.preventDefault();
+            if (fastKeys === 0) scanInput.value = '';
+            scanInput.value += event.key;
+            scanInput.focus();
+        }
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () {
+            if (fastKeys >= SCAN_MIN_LENGTH - 1) submitScan();
+            fastKeys = 0;
+        }, SCAN_IDLE_MS);
+    });
+    scanForm.addEventListener('submit', function () { submitting = true; });
+    if (!document.querySelector('select[name="exit_gate_id"]')) scanInput.focus();
 });
 </script>
 
