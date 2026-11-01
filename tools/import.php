@@ -871,6 +871,11 @@ require_once '../includes/sidebar.php';
 
         </div>
 
+        <div class="alert alert-info">
+            Importing a CloudPOS products / store stock JSON file (large file)?
+            <a href="import_cloudpos.php<?= is_super_admin_user() ? '?company_id=' . (int)$user_id : ''; ?>" class="btn btn-sm btn-info ml-2">Open CloudPOS Importer</a>
+        </div>
+
         <?php if(is_super_admin_user()){ ?>
             <div class="alert alert-info">
                 Super Admin import target:
