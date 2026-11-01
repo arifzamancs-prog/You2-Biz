@@ -28,6 +28,34 @@ if(is_super_admin_user()){
 $message = '';
 $message_type = '';
 
+// A file over post_max_size makes PHP drop the whole form (password too),
+// so report the real cause instead of "Invalid Password".
+function import_upload_ok(&$message, &$message_type)
+{
+    $limits = 'upload_max_filesize=' . ini_get('upload_max_filesize') . ', post_max_size=' . ini_get('post_max_size');
+
+    if(empty($_POST) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0){
+        $message = 'Backup file is too large for the server (' . $limits . '). Increase these limits in cPanel > MultiPHP INI Editor and try again.';
+        $message_type = 'danger';
+        return false;
+    }
+
+    $error = $_FILES['backup_file']['error'] ?? UPLOAD_ERR_NO_FILE;
+    if($error === UPLOAD_ERR_OK) return true;
+
+    if($error === UPLOAD_ERR_INI_SIZE || $error === UPLOAD_ERR_FORM_SIZE){
+        $message = 'Backup file is too large for the server (' . $limits . '). Increase these limits in cPanel > MultiPHP INI Editor and try again.';
+    }elseif($error === UPLOAD_ERR_NO_FILE){
+        $message = 'Choose a backup file.';
+    }elseif($error === UPLOAD_ERR_PARTIAL){
+        $message = 'The file was only partially uploaded. Try again.';
+    }else{
+        $message = 'File upload failed (error code ' . (int)$error . ').';
+    }
+    $message_type = 'danger';
+    return false;
+}
+
 function import_valid_table_name($table)
 {
     return preg_match('/^[A-Za-z0-9_]+$/', (string)$table) === 1;
@@ -161,6 +189,13 @@ function import_preflight($conn, $backup)
            !array_key_exists($table, $backup['row_counts']) ||
            count($rows) !== (int)$backup['row_counts'][$table]){
             throw new Exception('Invalid table/row count: ' . $table);
+        }
+        // A table this installation never created (module not used yet) is
+        // harmless when the backup holds no rows for it; skip it.
+        $exists_check = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, str_replace('_', '\\_', $table)) . "'");
+        if(!$exists_check || mysqli_num_rows($exists_check) !== 1){
+            if(count($rows) === 0) continue;
+            throw new Exception('Target table missing: ' . $table);
         }
         if($table === 'users_manager_agents') continue;
         $allowed_child_tables = ['purchase_items','invoice_items','invoice_charges',
@@ -313,11 +348,18 @@ function import_insert_row($conn, $table, $row)
     return (int)mysqli_insert_id($conn);
 }
 
-if($_SERVER['REQUEST_METHOD']=='POST'){
+$is_import_post = $_SERVER['REQUEST_METHOD'] == 'POST';
+
+if($is_import_post && import_upload_ok($message, $message_type)){
     // Tables may be rebuilt here, so the schema checks run again afterwards.
     schema_cache_reset();
 
-    $password = $_POST['password'];
+    // Large backups (tens of thousands of rows) need more time and memory.
+    @set_time_limit(0);
+    @ini_set('memory_limit', '1024M');
+    ignore_user_abort(true);
+
+    $password = (string)($_POST['password'] ?? '');
 
     if(is_super_admin_user()){
         $password_valid = password_verify($password, SUPER_ADMIN_PASSWORD_HASH);
@@ -833,6 +875,18 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             }
         }
     }
+}
+
+// Post/Redirect/Get: show the result after a redirect so a page refresh
+// does not ask to resubmit the form (and never re-runs the import).
+if($is_import_post){
+    $_SESSION['import_flash'] = [$message, $message_type];
+    header('Location: import.php' . (is_super_admin_user() ? '?company_id=' . (int)$user_id : ''));
+    exit;
+}
+if(isset($_SESSION['import_flash'])){
+    [$message, $message_type] = $_SESSION['import_flash'];
+    unset($_SESSION['import_flash']);
 }
 
 require_once '../includes/header.php';
