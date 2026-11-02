@@ -44,6 +44,21 @@ function ensure_customer_opening_due_tables($conn)
         );
     }
 
+    // One due collection can pay several entries; receipt_no groups them for the money receipt.
+    $column_result = mysqli_query(
+        $conn,
+        "SHOW COLUMNS FROM customer_payments LIKE 'receipt_no'"
+    );
+
+    if($column_result && mysqli_num_rows($column_result) === 0){
+        mysqli_query(
+            $conn,
+            "ALTER TABLE customer_payments
+             ADD COLUMN receipt_no VARCHAR(50) NULL,
+             ADD KEY idx_user_receipt_no (user_id, receipt_no)"
+        );
+    }
+
     $ensured = true;
 }
 

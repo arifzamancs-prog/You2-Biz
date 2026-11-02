@@ -475,6 +475,22 @@ if(
         'visible' => 0,
     ];
 }
+// Without a saved layout, Multi Branch stock companies still start with Due Payment hidden.
+if(
+    !$sidebar_has_saved_layout
+    && isset($conn) && $conn instanceof mysqli
+    && sidebar_due_payment_hidden_by_default($conn, $sidebar_settings_user_id, $sidebar_settings_company_type)
+){
+    $sidebar_layout_items[] = [
+        'id' => 'stock_due',
+        'label' => 'Due Payment',
+        'href' => app_path('sales/receive_payment.php'),
+        'parent' => 'stock_sales',
+        'sort' => 6,
+        'section' => 'OPERATIONS',
+        'visible' => 0,
+    ];
+}
 if(
     !$sidebar_has_saved_layout
     && is_admin_user()
@@ -723,9 +739,8 @@ if(
                             if (company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
                                 $stock_sales_items[] = ['href'=>app_path('sales/receive_stock.php'),'label'=>'Product Req.','badge'=>$sidebar_stock_receive_pending_count];
                             }
-                            if (!company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) {
-                                $stock_sales_items[] = ['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment'];
-                            }
+                            // Registered customers can clear their due from any branch.
+                            $stock_sales_items[] = ['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment'];
                             sidebar_tree('Sales', 'fas fa-cash-register', $stock_sales_items);
                         }
                     }
@@ -770,10 +785,6 @@ if(
                         'href' => app_path('sales/opening_due_entry.php'),
                         'label' => 'Previous Due Entry',
                     ];
-                    $sidebar_sales_items[] = [
-                        'href' => app_path('sales/receive_payment.php'),
-                        'label' => 'Due Payment',
-                    ];
                 } else {
                     $sidebar_sales_items[] = [
                         'href' => app_path('sales/receive_stock.php'),
@@ -781,6 +792,11 @@ if(
                         'badge' => $sidebar_stock_receive_pending_count,
                     ];
                 }
+                // Registered customers can clear their due from any branch.
+                $sidebar_sales_items[] = [
+                    'href' => app_path('sales/receive_payment.php'),
+                    'label' => 'Due Payment',
+                ];
                 sidebar_tree(
                     'Sales',
                     'fas fa-file-invoice',

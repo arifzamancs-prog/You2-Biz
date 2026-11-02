@@ -10,6 +10,8 @@ require_once '../includes/sidebar.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $stock_due_scope = stock_customer_scope($conn);
+// A registered customer's due is company-wide: it can be cleared from any branch.
+$customer_due_scope = '';
 ensure_invoice_posting_columns($conn);
 ensure_customer_opening_due_tables($conn);
 $show_actions = !is_agent_user();
@@ -47,7 +49,7 @@ $sql = "SELECT
                 COUNT(id) AS invoice_count,
                 SUM(total_amount) AS total_amount
             FROM invoices
-            WHERE user_id=? {$stock_due_scope}
+            WHERE user_id=? {$customer_due_scope}
             AND accounting_status='posted'
             AND customer_id > 0
             GROUP BY customer_id
@@ -59,7 +61,7 @@ $sql = "SELECT
                 COUNT(id) AS due_count,
                 SUM(amount) AS total_amount
             FROM customer_opening_dues
-            WHERE user_id=? {$stock_due_scope}
+            WHERE user_id=? {$customer_due_scope}
             GROUP BY customer_id
         ) open_due
             ON open_due.customer_id = c.id
@@ -68,7 +70,7 @@ $sql = "SELECT
                 customer_id,
                 SUM(amount) AS total_paid
             FROM customer_payments
-            WHERE user_id=? {$stock_due_scope}
+            WHERE user_id=? {$customer_due_scope}
             GROUP BY customer_id
         ) pay
             ON pay.customer_id = c.id
@@ -137,6 +139,11 @@ while($row = mysqli_fetch_assoc($instant_due)){
 
 <div class="alert alert-success">
     Due Payment Received Successfully.
+    <?php if(!empty($_GET['receipt'])){ ?>
+        <a href="print_money_receipt.php?no=<?= urlencode((string)$_GET['receipt']); ?>" target="_blank" class="btn btn-sm btn-light ml-2">
+            <i class="fas fa-print"></i> Print Money Receipt
+        </a>
+    <?php } ?>
 </div>
 
 <?php } ?>
@@ -207,7 +214,7 @@ class="table table-bordered table-striped">
 <td>
 
 <?php if($row['row_type'] === 'customer'){ ?>
-    <a href="create_invoice.php?pay_customer_id=<?= (int)$row['customer_id']; ?>"
+    <a href="payment_entry.php?customer_id=<?= (int)$row['customer_id']; ?>"
        class="btn btn-primary btn-sm">
         Pay
     </a>

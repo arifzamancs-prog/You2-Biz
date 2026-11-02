@@ -14,6 +14,11 @@ $payment_mode = $_POST['payment_mode'] ?? 'invoice';
 $amount = (float)($_POST['amount'] ?? 0);
 $receive_wallet_id = (int)($_POST['receive_wallet_id'] ?? 0);
 $payment_date = date('Y-m-d');
+$extra_note = trim(mb_substr((string)($_POST['note'] ?? ''), 0, 255));
+$print_receipt = !empty($_POST['print_receipt']);
+// A registered customer's due is company-wide: it can be cleared from any branch.
+$customer_due_scope = '';
+$collect_branch_id = (int)stock_customer_branch($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -28,6 +33,8 @@ try{
         throw new Exception("Invalid Amount");
     }
 
+    // One receipt number ties the wallet entry to every due entry this payment clears.
+    $receipt_no = generate_short_unique_txn_no($conn, 'RCV');
     $remaining_amount = $amount;
     $first_payment_id = 0;
     $wallet_note = '';
@@ -58,7 +65,7 @@ try{
                           LEFT JOIN (
                               SELECT customer_id, SUM(total_amount) AS total_sales
                               FROM invoices
-                              WHERE user_id=? {$stock_due_scope}
+                              WHERE user_id=? {$customer_due_scope}
                               AND accounting_status='posted'
                               GROUP BY customer_id
                           ) inv
@@ -66,14 +73,14 @@ try{
                           LEFT JOIN (
                               SELECT customer_id, SUM(amount) AS total_sales
                               FROM customer_opening_dues
-                              WHERE user_id=? {$stock_due_scope}
+                              WHERE user_id=? {$customer_due_scope}
                               GROUP BY customer_id
                           ) open_due
                               ON open_due.customer_id = c.id
                           LEFT JOIN (
                               SELECT customer_id, SUM(amount) AS total_paid
                               FROM customer_payments
-                              WHERE user_id=? {$stock_due_scope}
+                              WHERE user_id=? {$customer_due_scope}
                               GROUP BY customer_id
                           ) pay
                               ON pay.customer_id = c.id
@@ -102,10 +109,10 @@ try{
             throw new Exception("Payment cannot exceed Due Amount");
         }
 
-        $sql = "SELECT id, invoice_no, invoice_date, paid_amount, due_amount
+        $sql = "SELECT id, branch_id, invoice_no, invoice_date, paid_amount, due_amount
                 FROM invoices
                 WHERE customer_id=?
-                AND user_id=? {$stock_due_scope}
+                AND user_id=? {$customer_due_scope}
                 AND accounting_status='posted'
                 AND due_amount > 0
                 ORDER BY invoice_date ASC, id ASC FOR UPDATE";
@@ -121,6 +128,7 @@ try{
             $due_entries[] = [
                 'entry_type' => 'invoice',
                 'id' => (int)$invoice['id'],
+                'branch_id' => (int)$invoice['branch_id'],
                 'reference_no' => $invoice['invoice_no'],
                 'entry_date' => $invoice['invoice_date'],
                 'paid_amount' => (float)$invoice['paid_amount'],
@@ -130,10 +138,10 @@ try{
 
         $opening_stmt = mysqli_prepare(
             $conn,
-            "SELECT id, due_no, entry_date, paid_amount, due_amount
+            "SELECT id, branch_id, due_no, entry_date, paid_amount, due_amount
              FROM customer_opening_dues
              WHERE customer_id=?
-             AND user_id=? {$stock_due_scope}
+             AND user_id=? {$customer_due_scope}
              AND due_amount > 0
              ORDER BY entry_date ASC, id ASC FOR UPDATE"
         );
@@ -145,6 +153,7 @@ try{
             $due_entries[] = [
                 'entry_type' => 'opening_due',
                 'id' => (int)$opening_due['id'],
+                'branch_id' => (int)$opening_due['branch_id'],
                 'reference_no' => $opening_due['due_no'],
                 'entry_date' => $opening_due['entry_date'],
                 'paid_amount' => (float)$opening_due['paid_amount'],
@@ -178,7 +187,7 @@ try{
             }
 
             if($entry['entry_type'] === 'invoice'){
-                $note = 'Due Collection - ' . $entry['reference_no'];
+                $note = 'Due Collection - ' . $entry['reference_no'] . ($extra_note !== '' ? ' - ' . $extra_note : '');
 
                 $sql = "INSERT INTO customer_payments (branch_id,
                             user_id,
@@ -186,29 +195,32 @@ try{
                             invoice_id,
                             amount,
                             payment_date,
-                            note
-                        ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
+                            note,
+                            receipt_no
+                        ) VALUES (" . (int)($entry['branch_id'] > 0 ? $entry['branch_id'] : $collect_branch_id) . ",
                             ?,
                             ?,
                             ?,
                             ?,
                             CURDATE(),
+                            ?,
                             ?
                         )";
 
                 $payment_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
                     $payment_stmt,
-                    "iiids",
+                    "iiidss",
                     $user_id,
                     $customer_id,
                     $entry['id'],
                     $pay_amount,
-                    $note
+                    $note,
+                    $receipt_no
                 );
                 mysqli_stmt_execute($payment_stmt);
             }else{
-                $note = 'Previous Due Collection - ' . $entry['reference_no'];
+                $note = 'Previous Due Collection - ' . $entry['reference_no'] . ($extra_note !== '' ? ' - ' . $extra_note : '');
 
                 $sql = "INSERT INTO customer_payments (branch_id,
                             user_id,
@@ -217,26 +229,29 @@ try{
                             opening_due_id,
                             amount,
                             payment_date,
-                            note
-                        ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
+                            note,
+                            receipt_no
+                        ) VALUES (" . (int)($entry['branch_id'] > 0 ? $entry['branch_id'] : $collect_branch_id) . ",
                             ?,
                             ?,
                             NULL,
                             ?,
                             ?,
                             CURDATE(),
+                            ?,
                             ?
                         )";
 
                 $payment_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
                     $payment_stmt,
-                    "iiids",
+                    "iiidss",
                     $user_id,
                     $customer_id,
                     $entry['id'],
                     $pay_amount,
-                    $note
+                    $note,
+                    $receipt_no
                 );
                 mysqli_stmt_execute($payment_stmt);
             }
@@ -251,7 +266,7 @@ try{
                             due_amount=?,
                             payment_status=?
                         WHERE id=?
-                        AND user_id=? {$stock_due_scope}";
+                        AND user_id=? {$customer_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
@@ -270,7 +285,7 @@ try{
                             due_amount=?,
                             status=?
                         WHERE id=?
-                        AND user_id=? {$stock_due_scope}";
+                        AND user_id=? {$customer_due_scope}";
 
                 $update_stmt = mysqli_prepare($conn, $sql);
                 mysqli_stmt_bind_param(
@@ -323,7 +338,7 @@ try{
         }
 
         $payment_id = 0;
-        $note = 'Due Collection - ' . $invoice['invoice_no'];
+        $note = 'Due Collection - ' . $invoice['invoice_no'] . ($extra_note !== '' ? ' - ' . $extra_note : '');
 
         if((int)$invoice['customer_id'] > 0){
             $sql = "INSERT INTO customer_payments (branch_id,
@@ -332,25 +347,28 @@ try{
                         invoice_id,
                         amount,
                         payment_date,
-                        note
+                        note,
+                        receipt_no
                     ) VALUES (" . (int)(function_exists('stock_customer_branch') ? stock_customer_branch($conn) : selected_branch_id($conn, true)) . ",
                         ?,
                         ?,
                         ?,
                         ?,
                         CURDATE(),
+                        ?,
                         ?
                     )";
 
             $stmt = mysqli_prepare($conn, $sql);
             mysqli_stmt_bind_param(
                 $stmt,
-                "iiids",
+                "iiidss",
                 $user_id,
                 $invoice['customer_id'],
                 $invoice_id,
                 $amount,
-                $note
+                $note,
+                $receipt_no
             );
             mysqli_stmt_execute($stmt);
             $payment_id = mysqli_insert_id($conn);
@@ -401,11 +419,9 @@ try{
         throw new Exception(mysqli_stmt_error($stmt));
     }
 
-    $txn_no = generate_short_unique_txn_no($conn, 'RCV');
-
     record_wallet_transaction(
         $conn,
-        $txn_no,
+        $receipt_no,
         $user_id,
         $receive_wallet_id,
         'receive_payment',
@@ -413,15 +429,17 @@ try{
         $amount,
         $wallet_note,
         $payment_date,
-        stock_customer_branch($conn)
+        $collect_branch_id
     );
 
     mysqli_commit($conn);
 
-    header("Location:receive_payment.php?success=1");
+    header("Location:" . ($print_receipt
+        ? "print_money_receipt.php?no=" . urlencode($receipt_no) . "&back=1"
+        : "receive_payment.php?success=1&receipt=" . urlencode($receipt_no)));
     exit;
 
-}catch(Exception $e){
+}catch(Throwable $e){
 
     mysqli_rollback($conn);
 

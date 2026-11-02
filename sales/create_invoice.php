@@ -1089,6 +1089,9 @@ if($(this).val()=="instant"){
             .show();
         if(success){
             window.setTimeout(function(){ alertBox.fadeOut(250); }, 3500);
+        }else if(alertBox[0].scrollIntoView){
+            // The message sits above the form; bring it into view so a failed save is not silent.
+            alertBox[0].scrollIntoView({behavior: "smooth", block: "center"});
         }
     }
 

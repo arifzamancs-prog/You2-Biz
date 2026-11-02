@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
+require_once '../includes/project_package_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -380,6 +381,47 @@ mysqli_stmt_execute($returnable_stmt);
 $returnable_products =
     mysqli_stmt_get_result($returnable_stmt);
 
+// Inventory and Fashion Retail show this section only when the customer has returnable products.
+$show_returnable_products = mysqli_num_rows($returnable_products) > 0
+    || !in_array(project_package_company_type($conn, (int)$user_id), ['Stock Product', 'Fashion house'], true);
+
+/* Purchased Products: every product line on the customer's posted invoices */
+
+$show_purchase_history = in_array(project_package_company_type($conn, (int)$user_id), ['Stock Product', 'Fashion house'], true);
+$show_purchase_branch = $show_purchase_history && company_multi_branch_enabled($conn, (int)$user_id);
+$purchase_history = [];
+$purchase_total_qty = 0;
+$purchase_total_amount = 0;
+
+if($show_purchase_history){
+    $purchase_stmt = mysqli_prepare(
+        $conn,
+        "SELECT i.invoice_no, i.invoice_date,
+                COALESCE(NULLIF(b.branch_name, ''), 'Head Office') AS branch_name,
+                p.product_name, p.sku, ii.variant_name, ii.quantity, ii.unit_price, ii.total_price
+         FROM invoice_items ii
+         INNER JOIN invoices i ON i.id = ii.invoice_id
+         LEFT JOIN products p ON p.id = ii.product_id
+         LEFT JOIN branches b ON b.id = i.branch_id
+         WHERE i.customer_id=?
+         AND i.user_id=?
+         AND i.accounting_status='posted'
+         ORDER BY i.invoice_date DESC, i.id DESC, ii.id ASC"
+    );
+    mysqli_stmt_bind_param($purchase_stmt, "ii", $customer_id, $user_id);
+    mysqli_stmt_execute($purchase_stmt);
+    $purchase_history = mysqli_fetch_all(mysqli_stmt_get_result($purchase_stmt), MYSQLI_ASSOC);
+
+    foreach($purchase_history as &$purchase_line){
+        $purchase_line['product_label'] = (string)($purchase_line['product_name'] ?? 'Product')
+            . (trim((string)$purchase_line['variant_name']) !== '' ? ' (' . trim((string)$purchase_line['variant_name']) . ')' : '')
+            . ((float)$purchase_line['quantity'] < 0 ? ' [Return]' : '');
+        $purchase_total_qty += (float)$purchase_line['quantity'];
+        $purchase_total_amount += (float)$purchase_line['total_price'];
+    }
+    unset($purchase_line);
+}
+
 $custom_printing = is_custom_printing($conn);
 $custom_size = current_printing_custom_size($conn);
 $custom_top_margin = current_printing_custom_top_margin($conn);
@@ -581,6 +623,42 @@ th{
         </tbody>
     </table>
 
+<?php if($show_purchase_history){ ?>
+    <h3>Purchased Products</h3>
+
+    <table>
+        <thead>
+        <tr>
+            <th>Product</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Total</th>
+        </tr>
+        </thead>
+        <tbody>
+        <?php if(empty($purchase_history)){ ?>
+            <tr>
+                <td colspan="3" class="text-center muted">No products purchased yet.</td>
+            </tr>
+        <?php } ?>
+        <?php foreach($purchase_history as $line){ ?>
+            <tr>
+                <td><?= htmlspecialchars($line['product_label']); ?><br><span class="muted"><?= htmlspecialchars(app_date($line['invoice_date'])); ?> · <?= htmlspecialchars($line['invoice_no']); ?><?= $show_purchase_branch ? ' · ' . htmlspecialchars($line['branch_name']) : ''; ?></span></td>
+                <td class="text-right"><?= number_format((float)$line['quantity'],0); ?></td>
+                <td class="text-right"><?= number_format((float)$line['total_price'],2); ?></td>
+            </tr>
+        <?php } ?>
+        <?php if(!empty($purchase_history)){ ?>
+            <tr>
+                <th class="text-right">Total</th>
+                <th class="text-right"><?= number_format($purchase_total_qty,0); ?></th>
+                <th class="text-right"><?= number_format($purchase_total_amount,2); ?></th>
+            </tr>
+        <?php } ?>
+        </tbody>
+    </table>
+<?php } ?>
+
+<?php if($show_returnable_products){ ?>
     <h3>Returnable Products</h3>
 
     <table>
@@ -615,6 +693,7 @@ th{
         <?php } ?>
         </tbody>
     </table>
+<?php } ?>
 </main>
 
 </body>
@@ -949,6 +1028,81 @@ foreach($ledger as $row){
 
 </table>
 
+<?php if($show_purchase_history){ ?>
+<h3>
+Purchased Products
+</h3>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Date</th>
+<th>Invoice</th>
+<?php if($show_purchase_branch){ ?><th>Branch</th><?php } ?>
+<th>Product</th>
+<th class="text-right">Qty</th>
+<th class="text-right">Price</th>
+<th class="text-right">Total</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<?php if(empty($purchase_history)){ ?>
+
+<tr>
+
+<td colspan="<?= $show_purchase_branch ? 7 : 6; ?>" class="text-center muted">
+No products purchased yet.
+</td>
+
+</tr>
+
+<?php } ?>
+
+<?php foreach($purchase_history as $line){ ?>
+
+<tr>
+
+<td><?= htmlspecialchars(app_date($line['invoice_date'])); ?></td>
+<td><?= htmlspecialchars($line['invoice_no']); ?></td>
+<?php if($show_purchase_branch){ ?><td><?= htmlspecialchars($line['branch_name']); ?></td><?php } ?>
+<td>
+<?= htmlspecialchars($line['product_label']); ?>
+<?php if(trim((string)$line['sku']) !== ''){ ?><br><span class="muted">Code: <?= htmlspecialchars($line['sku']); ?></span><?php } ?>
+</td>
+<td class="text-right"><?= number_format((float)$line['quantity'],0); ?></td>
+<td class="text-right"><?= number_format((float)$line['unit_price'],2); ?></td>
+<td class="text-right"><?= number_format((float)$line['total_price'],2); ?></td>
+
+</tr>
+
+<?php } ?>
+
+<?php if(!empty($purchase_history)){ ?>
+
+<tr>
+
+<th colspan="<?= $show_purchase_branch ? 4 : 3; ?>" class="text-right">Total</th>
+<th class="text-right"><?= number_format($purchase_total_qty,0); ?></th>
+<th></th>
+<th class="text-right"><?= number_format($purchase_total_amount,2); ?></th>
+
+</tr>
+
+<?php } ?>
+
+</tbody>
+
+</table>
+<?php } ?>
+
+<?php if($show_returnable_products){ ?>
 <h3>
 Returnable Products
 </h3>
@@ -1006,6 +1160,7 @@ $remaining_qty = $given_qty - $returned_qty;
 </tbody>
 
 </table>
+<?php } ?>
 
 </main>
 

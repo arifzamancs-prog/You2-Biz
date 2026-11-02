@@ -1245,7 +1245,7 @@ if(
 exit;
 
 
-}catch(Exception $e){
+}catch(Throwable $e){
 
 
 mysqli_rollback($conn);

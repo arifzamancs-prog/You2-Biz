@@ -16,6 +16,9 @@ ensure_customer_opening_due_tables($conn);
 $customer_id = isset($_GET['customer_id']) ? (int)$_GET['customer_id'] : 0;
 $invoice_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $mode = $customer_id > 0 ? 'customer' : 'invoice';
+// A registered customer's due is company-wide: it can be cleared from any branch.
+$customer_due_scope = '';
+$due_entries = [];
 
 if($mode === 'customer'){
     $sql = "SELECT
@@ -30,7 +33,7 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, SUM(total_amount) AS total_amount
                 FROM invoices
-                WHERE user_id=? {$stock_due_scope}
+                WHERE user_id=? {$customer_due_scope}
                 AND accounting_status='posted'
                 GROUP BY customer_id
             ) inv
@@ -38,21 +41,21 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS total_amount
                 FROM customer_opening_dues
-                WHERE user_id=? {$stock_due_scope}
+                WHERE user_id=? {$customer_due_scope}
                 GROUP BY customer_id
             ) open_total
                 ON open_total.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, SUM(amount) AS paid_amount
                 FROM customer_payments
-                WHERE user_id=? {$stock_due_scope}
+                WHERE user_id=? {$customer_due_scope}
                 GROUP BY customer_id
             ) pay
                 ON pay.customer_id = c.id
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS invoice_count
                 FROM invoices
-                WHERE user_id=? {$stock_due_scope}
+                WHERE user_id=? {$customer_due_scope}
                 AND accounting_status='posted'
                 AND due_amount > 0
                 GROUP BY customer_id
@@ -61,7 +64,7 @@ if($mode === 'customer'){
             LEFT JOIN (
                 SELECT customer_id, COUNT(id) AS due_count
                 FROM customer_opening_dues
-                WHERE user_id=? {$stock_due_scope}
+                WHERE user_id=? {$customer_due_scope}
                 AND due_amount > 0
                 GROUP BY customer_id
             ) open_due
@@ -93,6 +96,29 @@ if($mode === 'customer'){
     $reference_value = "All Due Entries (" . (int)$payment_target['invoice_count'] . ")";
     $customer_name = $payment_target['customer_name'];
     $current_due = (float)$payment_target['due_amount'];
+
+    // Open due entries from every branch, oldest first (the order payments are applied in).
+    // Two queries (the tables use different collations, so no UNION).
+    foreach([
+        "SELECT i.invoice_no AS reference_no, i.invoice_date AS entry_date, i.id AS entry_id, i.due_amount,
+                COALESCE(NULLIF(b.branch_name, ''), 'Head Office') AS branch_name
+         FROM invoices i
+         LEFT JOIN branches b ON b.id=i.branch_id
+         WHERE i.user_id=? AND i.customer_id=? AND i.accounting_status='posted' AND i.due_amount > 0",
+        "SELECT d.due_no AS reference_no, d.entry_date, d.id AS entry_id, d.due_amount,
+                COALESCE(NULLIF(b.branch_name, ''), 'Head Office') AS branch_name
+         FROM customer_opening_dues d
+         LEFT JOIN branches b ON b.id=d.branch_id
+         WHERE d.user_id=? AND d.customer_id=? AND d.due_amount > 0",
+    ] as $due_sql){
+        $stmt = mysqli_prepare($conn, $due_sql);
+        mysqli_stmt_bind_param($stmt, "ii", $user_id, $customer_id);
+        mysqli_stmt_execute($stmt);
+        $due_entries = array_merge($due_entries, mysqli_fetch_all(mysqli_stmt_get_result($stmt), MYSQLI_ASSOC));
+    }
+    usort($due_entries, function($a, $b){
+        return [(string)$a['entry_date'], (int)$a['entry_id']] <=> [(string)$b['entry_date'], (int)$b['entry_id']];
+    });
 }else{
     $sql = "SELECT *
             FROM invoices
@@ -203,6 +229,27 @@ readonly>
 
 </div>
 
+<?php if($due_entries){ ?>
+<div class="form-group">
+<label>Due Entries (paid oldest first)</label>
+<div class="table-responsive">
+<table class="table table-sm table-bordered mb-0">
+<thead><tr><th>Reference</th><th>Date</th><th>Branch</th><th class="text-right">Due</th></tr></thead>
+<tbody>
+<?php foreach($due_entries as $entry){ ?>
+<tr>
+<td><?= htmlspecialchars($entry['reference_no']); ?></td>
+<td><?= htmlspecialchars(app_date($entry['entry_date'])); ?></td>
+<td><?= htmlspecialchars($entry['branch_name']); ?></td>
+<td class="text-right"><?= number_format((float)$entry['due_amount'], 2); ?></td>
+</tr>
+<?php } ?>
+</tbody>
+</table>
+</div>
+</div>
+<?php } ?>
+
 <div class="form-group">
 
 <label>
@@ -214,6 +261,7 @@ type="number"
 step="0.01"
 min="0.01"
 name="amount"
+value="<?= htmlspecialchars(number_format($current_due, 2, '.', '')); ?>"
 max="<?= htmlspecialchars((string)$current_due); ?>"
 class="form-control"
 required>
@@ -245,11 +293,26 @@ value="<?= (int)$wallet['id']; ?>"
 
 </div>
 
+<div class="form-group">
+<label>Note</label>
+<input type="text" name="note" maxlength="255" class="form-control" placeholder="Optional">
+</div>
+
 <button
 type="submit"
 class="btn btn-success">
 
 Save Payment
+
+</button>
+
+<button
+type="submit"
+name="print_receipt"
+value="1"
+class="btn btn-primary">
+
+<i class="fas fa-print"></i> Save &amp; Print Receipt
 
 </button>
 

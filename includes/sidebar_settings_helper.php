@@ -200,6 +200,15 @@ function sidebar_setting_map_by_id($items)
     return $map;
 }
 
+// Inventory and Fashion Retail companies with Multi Branch get Due Payment hidden
+// until the admin turns it on in Sidebar Settings.
+function sidebar_due_payment_hidden_by_default($conn, $user_id, $company_type)
+{
+    return in_array($company_type, ['Stock Product', 'Fashion house'], true)
+        && function_exists('company_multi_branch_enabled')
+        && company_multi_branch_enabled($conn, (int)$user_id);
+}
+
 function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
 {
     ensure_sidebar_settings_table($conn);
@@ -268,6 +277,12 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         && !in_array($customer_manage_hidden_marker, array_column($saved, 'id'), true);
     if($customer_manage_default_hidden_update && isset($default_map['customer_manage'])){
         $default_map['customer_manage']['visible'] = 0;
+    }
+    // Multi Branch stock companies start with Due Payment hidden; the admin can show it here.
+    $due_payment_default_hidden_update = sidebar_due_payment_hidden_by_default($conn, $user_id, $company_type)
+        && !in_array('__multi_branch_due_payment_default_hidden_v1', array_column($saved, 'id'), true);
+    if($due_payment_default_hidden_update && isset($default_map['stock_due'])){
+        $default_map['stock_due']['visible'] = 0;
     }
 
     // These are structural children of the Admin menu. Older saved sidebar
@@ -402,7 +417,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         }
         unset($layout_item);
     }
-    if (($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order || $lead_management_default_hidden_update || $lead_management_submenus_visible_update || $customer_manage_default_hidden_update) && $saved) {
+    if (($upgrade_housing_order || $upgrade_inventory_order || $stock_product_operations_order_update || $fashion_house_operations_order_update || $upgrade_parking_order || $upgrade_restaurant_order || $lead_management_default_hidden_update || $lead_management_submenus_visible_update || $customer_manage_default_hidden_update || $due_payment_default_hidden_update) && $saved) {
         sidebar_save_layout($conn, $user_id, $items);
     }
     usort($items, static function($a, $b){
@@ -553,6 +568,9 @@ function sidebar_save_layout($conn, $user_id, $items)
         $clean[] = ['id' => '__inventory_operations_v2'];
         $clean[] = ['id' => '__lead_management_default_hidden_v1'];
         $clean[] = ['id' => '__lead_management_submenus_visible_v2'];
+    }
+    if (sidebar_due_payment_hidden_by_default($conn, $user_id, $company_type)) {
+        $clean[] = ['id' => '__multi_branch_due_payment_default_hidden_v1'];
     }
     if ($company_type === 'Stock Product') {
         $clean[] = ['id' => '__stock_product_operations_order_v3'];
