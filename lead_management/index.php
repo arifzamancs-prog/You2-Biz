@@ -6,6 +6,8 @@ require_once '../includes/lead_management_helper.php';
 
 ensure_lead_management_table($conn);
 require_lead_management_access();
+// Older customers added directly with a Ref. also appear in the Successful List.
+lead_backfill_direct_customers($conn, (int)$_SESSION['user_id']);
 
 $user_id = (int)$_SESSION['user_id'];
 $lead_owner_id = (int)($_SESSION['login_user_id'] ?? 0);

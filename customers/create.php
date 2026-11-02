@@ -326,6 +326,13 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     $user_id
                 );
                 mysqli_stmt_execute($convert_stmt);
+            }elseif($ref_staff_id > 0){
+                // Added directly with a Ref.: the staff member's Successful List shows it as converted.
+                try {
+                    lead_record_direct_customer($conn, $user_id, $customer_id, $customer_name, $phone, $email, $ref_staff_id);
+                } catch(Throwable $lead_error) {
+                    error_log('Direct customer lead: ' . $lead_error->getMessage());
+                }
             }
 
             header("Location: index.php");
