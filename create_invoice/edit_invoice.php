@@ -160,7 +160,26 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
 $customers = mysqli_query($conn, "SELECT id, customer_name, customer_code FROM customers WHERE user_id={$user_id} AND status='active' ORDER BY customer_name");
 $projects = mysqli_query($conn, "SELECT id, project_name FROM projects WHERE user_id={$user_id} AND status='active' ORDER BY project_name");
 $packages = mysqli_query($conn, "SELECT id, project_id, package_name, price FROM packages WHERE user_id={$user_id} AND status='active' ORDER BY package_name");
-$wallets = mysqli_query($conn, "SELECT id, wallet_name FROM wallets WHERE user_id={$user_id} AND status='active' ORDER BY is_system DESC, wallet_name");
+// Same wallets as Create Invoice: the current branch only, so each branch's
+// "Cash" wallet is not listed several times. The invoice's own wallet stays
+// selectable even when it belongs to another branch.
+$wallets = [];
+$wallet_result = active_wallets_result($conn, $user_id);
+while($wallet_result && $wallet_row = mysqli_fetch_assoc($wallet_result)){
+    $wallets[(int)$wallet_row['id']] = $wallet_row;
+}
+$current_wallet_id = (int)($invoice['wallet_id'] ?? 0);
+if($current_wallet_id > 0 && !isset($wallets[$current_wallet_id])){
+    $current_wallet_stmt = mysqli_prepare($conn, "SELECT w.id, w.wallet_name, b.branch_name FROM wallets w LEFT JOIN branches b ON b.id=w.branch_id AND b.user_id=w.user_id WHERE w.id=? AND w.user_id=? LIMIT 1");
+    mysqli_stmt_bind_param($current_wallet_stmt, 'ii', $current_wallet_id, $user_id);
+    mysqli_stmt_execute($current_wallet_stmt);
+    $current_wallet = mysqli_fetch_assoc(mysqli_stmt_get_result($current_wallet_stmt));
+    if($current_wallet){
+        // Name where it lives, so it is not mistaken for this branch's wallet of the same name.
+        $current_wallet['wallet_name'] .= ' (' . (trim((string)($current_wallet['branch_name'] ?? '')) !== '' ? $current_wallet['branch_name'] : 'old wallet') . ')';
+        $wallets = [$current_wallet_id => $current_wallet] + $wallets;
+    }
+}
 $invoice_charges = booking_invoice_active_charges($conn, $user_id);
 $property_options = $is_housing_company ? booking_invoice_property_options($conn, $user_id) : [];
 $file_property_map = [];
@@ -197,7 +216,7 @@ require_once '../includes/sidebar.php';
             <?php foreach(['block_name' => 'Block', 'road_no' => 'Road No.', 'plot_no' => 'Plot No.'] as $property_field => $property_label){ ?><div class="col-md-<?= $property_field === 'block_name' ? '3' : '4'; ?> form-group<?= !$is_housing_company ? ' d-none' : ''; ?>"><label><?= htmlspecialchars($property_label); ?></label><select id="<?= htmlspecialchars($property_field); ?>_select" name="<?= htmlspecialchars($property_field); ?>_select" class="form-control housing-property-select" data-property-field="<?= htmlspecialchars($property_field); ?>" <?= $is_housing_company ? 'required' : ''; ?>><option value="">Select <?= htmlspecialchars($property_label); ?></option><?php foreach(($property_options[$property_field] ?? []) as $property_option){ ?><option value="<?= htmlspecialchars($property_option); ?>" <?= (string)($invoice[$property_field] ?? '') === (string)$property_option ? 'selected' : ''; ?>><?= htmlspecialchars($property_option); ?></option><?php } ?></select><input type="hidden" id="<?= htmlspecialchars($property_field); ?>" name="<?= htmlspecialchars($property_field); ?>" value="<?= htmlspecialchars((string)($invoice[$property_field] ?? '')); ?>"></div><?php } ?>
             <div class="col-md-4 form-group" id="total-price-group" style="display:none;"><label>Total Price (BDT)</label><input id="total_price" type="number" min="0.01" step="0.01" name="total_price" class="form-control" value="<?= htmlspecialchars(($invoice['total_price'] ?? 0) > 0 ? $invoice['total_price'] : $invoice['amount']); ?>"></div>
             <div class="col-md-4 form-group"><label>Pay Amount (BDT)</label><input id="amount" type="number" min="0.01" step="0.01" name="amount" class="form-control" value="<?= htmlspecialchars($invoice['amount']); ?>" required><small id="file-balance-info" class="form-text text-muted"></small></div>
-            <div class="col-md-4 form-group"><label>Wallet</label><select name="wallet_id" class="form-control" required><?php while($wallet = mysqli_fetch_assoc($wallets)){ ?><option value="<?= (int)$wallet['id']; ?>" <?= (int)$invoice['wallet_id'] === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option><?php } ?></select></div>
+            <div class="col-md-4 form-group"><label>Wallet</label><select name="wallet_id" class="form-control" required><?php foreach($wallets as $wallet){ ?><option value="<?= (int)$wallet['id']; ?>" <?= (int)$invoice['wallet_id'] === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option><?php } ?></select></div>
             <?php while($charge=mysqli_fetch_assoc($invoice_charges)){ ?><div class="col-md-4 form-group"><label><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?><?= $charge['charge_value_type']==='percent'?', %':'' ?>)</label><input type="number" min="0" step="0.01" class="form-control" name="charge_value[<?= (int)$charge['id'] ?>]" value="<?=htmlspecialchars($saved_charge_values[$charge['id']] ?? '')?>"></div><?php } ?>
             <?php foreach($inactive_invoice_charges as $inactive_charge){ ?><div class="col-md-4 form-group"><label><?= htmlspecialchars($inactive_charge['charge_name']) ?> <span class="badge badge-secondary">Inactive</span></label><input type="number" class="form-control" value="<?= htmlspecialchars($inactive_charge['input_value']) ?>" readonly><small class="text-muted">Historical charge — retained on update.</small></div><?php } ?>
             <div class="col-md-12 form-group"><label>Note</label><textarea name="notes" rows="3" class="form-control"><?= htmlspecialchars($invoice['notes'] ?? ''); ?></textarea></div>

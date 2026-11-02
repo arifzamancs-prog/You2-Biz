@@ -142,6 +142,8 @@ $body = '<p>Dear ' . htmlspecialchars($customer_name, ENT_QUOTES, 'UTF-8') . ',<
 ]], ['from_name' => $company_name]);
 
 if($sent){
+    // The address is shown in the success message; it is kept out of the URL.
+    $_SESSION['invoice_email_sent_to'] = $customer_email;
     header('Location: invoice_list.php?email_sent=1');
 }else{
     header('Location: invoice_list.php?error=' . urlencode($error ?: 'Invoice email could not be sent.'));

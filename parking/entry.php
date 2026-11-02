@@ -252,7 +252,8 @@ $vehicles = mysqli_query($conn, "SELECT id, vehicle_name FROM parking_vehicle_ty
 $rates = mysqli_query($conn, "SELECT r.id, r.vehicle_type_id, r.plan_name, r.rate_mode, r.fixed_fee, r.initial_fee, v.vehicle_name FROM parking_rate_plans r INNER JOIN parking_vehicle_types v ON v.id=r.vehicle_type_id WHERE r.company_id={$company_id} AND r.status='active' AND v.status='active' ORDER BY v.vehicle_name ASC, r.plan_name ASC");
 $entry_gate_filter = parking_operator_gate_filter($conn, $company_id, 'entry', 'id');
 $gates = mysqli_query($conn, "SELECT id, gate_name, gate_code FROM parking_gates WHERE company_id={$company_id} AND status='active' AND gate_type IN ('entry','both'){$entry_gate_filter} ORDER BY gate_name ASC");
-$entry_wallets = $prepaid_entry_enabled ? mysqli_query($conn, "SELECT id, wallet_name FROM wallets WHERE user_id={$company_id} AND status='active' ORDER BY is_system DESC, wallet_name ASC") : null;
+// Current branch wallets only, so each branch's "Cash" wallet is not listed several times.
+$entry_wallets = $prepaid_entry_enabled ? active_wallets_result($conn, $company_id) : null;
 $zones = $slot_management_enabled ? mysqli_query($conn, "SELECT id, zone_name, zone_code FROM parking_zones WHERE company_id={$company_id} AND status='active' ORDER BY zone_name ASC") : null;
 $slots = $slot_management_enabled ? mysqli_query($conn, "SELECT s.id, s.zone_id, s.slot_code, s.vehicle_type_id FROM parking_slots s INNER JOIN parking_zones z ON z.id=s.zone_id WHERE s.company_id={$company_id} AND s.status='available' AND z.status='active' ORDER BY s.slot_code ASC") : null;
 $recent_entries = parking_entry_recent_entries($conn, $company_id);
