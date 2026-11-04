@@ -3,6 +3,9 @@
 if(PHP_SAPI !== 'cli') exit;
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 require_once __DIR__ . '/../includes/company_backup_helper.php';
+// import.php's own require_once lines are stripped below, so load what it calls.
+require_once __DIR__ . '/../includes/schema_cache_helper.php';
+require_once __DIR__ . '/../includes/customer_form_helper.php';
 function is_super_admin_user(){ return false; }
 define('SUPER_ADMIN_PROFILE_AVATAR','test.png');
 function branding_company_default_avatar_filename($conn){ return 'test.png'; }
@@ -235,7 +238,7 @@ try{
         }
     }
     echo "PASS: all exported table counts preserved; branch IDs changed and remapped\n";
-    $controller=substr($source,strpos($source,"if(\$_SERVER['REQUEST_METHOD']=='POST')"));
+    $controller=substr($source,strpos($source,"\$is_import_post = "));
     $bad=$backup;
     $bad['data']['invoices'][0]['not_a_real_column']=1;
     file_put_contents($backup_file,json_encode($bad));

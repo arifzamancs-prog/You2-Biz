@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/schema_cache_helper.php';
 require_once '../includes/super_admin_config.php';
 require_once '../includes/company_backup_helper.php';
+require_once '../includes/customer_form_helper.php';
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
 $target_company_name = '';
@@ -231,6 +232,78 @@ function import_preflight($conn, $backup)
     }
 }
 
+// Columns that are unique across ALL companies. A backup restored into another
+// company can carry values the source company still uses, so those get a new value.
+function import_global_unique_columns()
+{
+    return [
+        'transactions' => 'txn_no',
+        'expenses' => 'txn_no',
+        'money_ins' => 'txn_no',
+        'transfers' => 'txn_no',
+        'profit_cash_outs' => 'txn_no',
+        'staff_ledger_entries' => 'txn_no',
+        'booking_invoices' => 'invoice_no',
+    ];
+}
+
+function import_taken_unique_values($conn, $values)
+{
+    $taken = [];
+    $values = array_values(array_unique(array_filter(array_map('strval', $values), 'strlen')));
+    if(!$values) return $taken;
+
+    foreach(import_global_unique_columns() as $table => $column){
+        if(!import_table_has_column($conn, $table, $column)) continue;
+        foreach(array_chunk($values, 500) as $chunk){
+            $stmt = mysqli_prepare($conn, "SELECT `{$column}` AS v FROM `{$table}` WHERE `{$column}` IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")");
+            mysqli_stmt_bind_param($stmt, str_repeat('s', count($chunk)), ...$chunk);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+            while($found = mysqli_fetch_assoc($result)) $taken[(string)$found['v']] = true;
+            mysqli_stmt_close($stmt);
+        }
+    }
+
+    return $taken;
+}
+
+// old value => new value, the same for every table, so rows that share a txn_no stay linked.
+function import_build_unique_value_map($conn, $data, $user_id)
+{
+    $values = [];
+    foreach(import_global_unique_columns() as $table => $column){
+        foreach(($data[$table] ?? []) as $row){
+            $value = trim((string)($row[$column] ?? ''));
+            if($value !== '') $values[$value] = true;
+        }
+    }
+
+    $map = [];
+    $taken = import_taken_unique_values($conn, array_keys($values));
+    foreach(array_keys($taken) as $old_value){
+        if(!isset($values[$old_value])) continue;
+        for($attempt = 0; $attempt < 100; $attempt++){
+            $new_value = mb_substr($old_value, 0, 38) . '-C' . (int)$user_id . ($attempt > 0 ? '-' . $attempt : '');
+            if(isset($values[$new_value]) || in_array($new_value, $map, true)) continue;
+            if(!import_taken_unique_values($conn, [$new_value])) break;
+        }
+        $map[$old_value] = $new_value;
+    }
+
+    return $map;
+}
+
+function import_apply_unique_value_map($table, $row, $map)
+{
+    $column = import_global_unique_columns()[$table] ?? null;
+    if($column !== null && is_array($row) && isset($row[$column], $map[(string)$row[$column]])){
+        $row[$column] = $map[(string)$row[$column]];
+    }
+
+    return $row;
+}
+
 function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_id_map, $id_maps = [])
 {
     if(!is_array($row) || !import_valid_table_name($table)){
@@ -428,6 +501,8 @@ if($is_import_post && import_upload_ok($message, $message_type)){
 
                 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
                 try {
+                    // Schema change (implicit commit), so it runs before the import transaction.
+                    customer_form_ensure_phone_unique_per_company($conn);
                     import_preflight($conn, $backup);
                 } catch (Throwable $e) {
                     $message = $e->getMessage();
@@ -591,6 +666,14 @@ if($is_import_post && import_upload_ok($message, $message_type)){
                         $profile_values = [];
 
                         foreach($allowed_profile_columns as $column){
+                            // Login email/phone are unique per user: keep ours if another account uses the backup's value.
+                            if(in_array($column, ['email', 'phone'], true) && array_key_exists($column, $company_profile)){
+                                $owner_stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE `{$column}`=? AND id<>? LIMIT 1");
+                                $owner_value = (string)$company_profile[$column];
+                                mysqli_stmt_bind_param($owner_stmt, 'si', $owner_value, $user_id);
+                                mysqli_stmt_execute($owner_stmt);
+                                if(mysqli_fetch_assoc(mysqli_stmt_get_result($owner_stmt))) continue;
+                            }
                             if(array_key_exists($column, $company_profile) && import_table_has_column($conn, 'users', $column)){
                                 $profile_fields[] = "`{$column}`=?";
                                 $profile_values[] = $company_profile[$column];
@@ -703,6 +786,7 @@ if($is_import_post && import_upload_ok($message, $message_type)){
 
                     $id_maps = [];
                     $restored_rows = [];
+                    $unique_value_map = import_build_unique_value_map($conn, $restore_data, $user_id);
 
                     foreach(
                         $restore_data
@@ -738,6 +822,7 @@ if($is_import_post && import_upload_ok($message, $message_type)){
                             if($prepared_row === null || empty($prepared_row)){
                                 continue;
                             }
+                            $prepared_row = import_apply_unique_value_map($table, $prepared_row, $unique_value_map);
 
                             $new_id = import_insert_row($conn, $table, $prepared_row);
                             if($new_id > 0 && array_key_exists('id', $row)){
@@ -879,7 +964,7 @@ if($is_import_post && import_upload_ok($message, $message_type)){
 
 // Post/Redirect/Get: show the result after a redirect so a page refresh
 // does not ask to resubmit the form (and never re-runs the import).
-if($is_import_post){
+if($is_import_post && PHP_SAPI !== 'cli'){
     $_SESSION['import_flash'] = [$message, $message_type];
     header('Location: import.php' . (is_super_admin_user() ? '?company_id=' . (int)$user_id : ''));
     exit;

@@ -246,6 +246,23 @@ function customer_form_ensure_customer_columns($conn)
     if($lead_ref_column && mysqli_num_rows($lead_ref_column) === 0){
         mysqli_query($conn, "ALTER TABLE customers ADD COLUMN lead_ref_name VARCHAR(150) NULL AFTER lead_id");
     }
+
+    customer_form_ensure_phone_unique_per_company($conn);
+}
+
+// A customer phone is unique inside one company (as the duplicate checks assume),
+// not across companies: the same person can buy from two companies.
+function customer_form_ensure_phone_unique_per_company($conn)
+{
+    $global_index = mysqli_query($conn, "SHOW INDEX FROM customers WHERE Key_name='phone' AND Non_unique=0");
+    if($global_index && mysqli_num_rows($global_index) > 0){
+        mysqli_query($conn, "ALTER TABLE customers DROP INDEX `phone`");
+    }
+
+    $company_index = mysqli_query($conn, "SHOW INDEX FROM customers WHERE Key_name='uniq_customers_user_phone'");
+    if($company_index && mysqli_num_rows($company_index) === 0){
+        mysqli_query($conn, "ALTER TABLE customers ADD UNIQUE KEY uniq_customers_user_phone (user_id, phone)");
+    }
 }
 
 function customer_form_system_fields()
