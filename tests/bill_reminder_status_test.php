@@ -52,16 +52,17 @@ check('legacy start is this month',array_column($legacy['bills'],'bill_cycle_dat
 check('legacy not locked',$legacy['mode'],'countdown');
 check('legacy start saved',$conn->query('SELECT bill_reminder_start_date FROM users WHERE id=12')->fetch_row()[0],'2026-10-01');
 
-// Start date when Super Admin saves settings.
-$resolve=function($company,$enabled,$day,$date) use ($conn){ return bill_reminder_resolve_start_date($conn,$company,$enabled,$day,new DateTimeImmutable($date)); };
-check('unchanged settings keep start',$resolve(10,1,10,'2026-11-12'),'2026-08-10');
-check('disabling keeps start',$resolve(10,0,10,'2026-11-12'),'2026-08-10');
-check('day still ahead bills this month',$resolve(13,1,15,'2026-11-12'),'2026-11-15');
-check('selected day is today',$resolve(13,1,15,'2026-11-15'),'2026-11-15');
-check('day already passed bills next month',$resolve(13,1,15,'2026-11-25'),'2026-12-15');
-check('day 31 in a short month',$resolve(13,1,31,'2026-02-10'),'2026-02-28');
-check('day 31 after a short month end',$resolve(13,1,31,'2027-02-28'),'2027-02-28');
+// First bill date picked on the Super Admin calendar.
+$resolve=function($company,$date) use ($conn){ return bill_reminder_resolve_start($conn,$company,$date); };
+check('unchanged date keeps start',$resolve(10,'2026-08-10'),[10,'2026-08-10']);
+check('empty date keeps start',$resolve(10,''),[10,'2026-08-10']);
+check('invalid date keeps start',$resolve(10,'2026-02-30'),[10,'2026-08-10']);
+check('picked date is the first bill',$resolve(13,'2026-11-15'),[15,'2026-11-15']);
+check('picked month in the past starts there',$resolve(13,'2026-09-05'),[5,'2026-09-05']);
+check('day 31 kept as bill day',$resolve(13,'2026-01-31'),[31,'2026-01-31']);
 $ref('2026-11-01','approved',13);
-check('paid month restarts next month',$resolve(13,1,20,'2026-11-12'),'2026-12-20');
+check('paid month starts next month',$resolve(13,'2026-11-20'),[20,'2026-12-20']);
+$ref('2027-01-05','approved',13);
+check('paid month moves day 31 into a short month',$resolve(13,'2027-01-31'),[31,'2027-02-28']);
 $conn->close();
-echo "PASS: grace days, countdown, pending/rejected/approved states, lock on next bill with total, short months, legacy start and start-date resolution.\n";
+echo "PASS: grace days, countdown, pending/rejected/approved states, lock on next bill with total, short months, legacy start and calendar start-date resolution.\n";

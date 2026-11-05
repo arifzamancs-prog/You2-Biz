@@ -139,43 +139,41 @@ function bill_reminder_cycle_date(DateTimeImmutable $month, $day)
     return $month->setDate((int)$month->format('Y'), (int)$month->format('m'), min((int)$day, (int)$month->format('t')));
 }
 
-// Where billing begins after Super Admin enables it or changes the bill day:
-// the selected day this month if it has not passed yet, otherwise next month.
-// A month that is already paid is not billed again under the new day.
-function bill_reminder_resolve_start_date($conn, $company_id, $enabled, $day, $today = null)
+// Super Admin picks the first bill date on a calendar: billing starts in that month
+// and repeats every month on the same day. A month that is already paid is not
+// billed again, so a start inside a paid month moves to the same day next month.
+// Returns [bill day, first bill date]; an empty or invalid date keeps the saved ones.
+function bill_reminder_resolve_start($conn, $company_id, $start_date)
 {
     $company_id = (int)$company_id;
-    $stmt = mysqli_prepare($conn, "SELECT bill_reminder_enabled, bill_reminder_day, bill_reminder_start_date FROM users WHERE id = ? LIMIT 1");
+    $stmt = mysqli_prepare($conn, "SELECT bill_reminder_day, bill_reminder_start_date FROM users WHERE id = ? LIMIT 1");
     mysqli_stmt_bind_param($stmt, 'i', $company_id);
     mysqli_stmt_execute($stmt);
     $current = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)) ?: [];
     mysqli_stmt_close($stmt);
+    $old_day = isset($current['bill_reminder_day']) ? (int)$current['bill_reminder_day'] : null;
     $old_start = $current['bill_reminder_start_date'] ?? null;
+    $start_date = trim((string)$start_date);
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $start_date);
 
-    if(!$enabled || $day < 1 || $day > 31){
-        return $old_start;
+    if(!$date || $date->format('Y-m-d') !== $start_date || $start_date === $old_start){
+        return [$old_day, $old_start];
     }
 
-    if((int)($current['bill_reminder_enabled'] ?? 0) === 1 && (int)($current['bill_reminder_day'] ?? 0) === (int)$day && $old_start){
-        return $old_start;
-    }
-
-    $today = $today instanceof DateTimeImmutable ? $today->setTime(0, 0) : new DateTimeImmutable('today');
-    $month_start = $today->modify('first day of this month')->format('Y-m-d');
-    $month_end = $today->modify('last day of this month')->format('Y-m-d');
+    $day = (int)$date->format('j');
+    $month_start = $date->modify('first day of this month')->format('Y-m-d');
+    $month_end = $date->modify('last day of this month')->format('Y-m-d');
     $paid = mysqli_prepare($conn, "SELECT 1 FROM company_bill_payment_references WHERE company_id = ? AND status = 'approved' AND bill_reminder_date BETWEEN ? AND ? LIMIT 1");
     mysqli_stmt_bind_param($paid, 'iss', $company_id, $month_start, $month_end);
     mysqli_stmt_execute($paid);
-    $paid_this_month = (bool)mysqli_fetch_row(mysqli_stmt_get_result($paid));
+    $month_paid = (bool)mysqli_fetch_row(mysqli_stmt_get_result($paid));
     mysqli_stmt_close($paid);
 
-    $this_month_bill = bill_reminder_cycle_date($today, $day);
-
-    if($paid_this_month || $this_month_bill < $today){
-        return bill_reminder_cycle_date($today->modify('first day of next month'), $day)->format('Y-m-d');
+    if($month_paid){
+        $date = bill_reminder_cycle_date($date->modify('first day of next month'), $day);
     }
 
-    return $this_month_bill->format('Y-m-d');
+    return [$day, $date->format('Y-m-d')];
 }
 
 // Every unpaid bill of a company and how the reminder must behave:
