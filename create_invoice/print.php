@@ -182,7 +182,8 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <table class="summary">
                 <tr>
                     <th><?= ($show_installment_ledger_total || $is_monthly_service_charge) ? 'Total Paid' : 'Paid Amount' ?></th>
-                    <td>BDT <?= htmlspecialchars(number_format($show_installment_ledger_total ? $package_paid_amount : (float)$invoice['amount'], 2)); ?></td>
+                    <?php // A pending invoice's money has not been received yet, so it counts as unpaid (Due already excludes it). ?>
+                    <td>BDT <?= htmlspecialchars(number_format($show_installment_ledger_total ? $package_paid_amount : ($invoice_is_confirmed ? (float)$invoice['amount'] : 0), 2)); ?></td>
                 </tr>
                 <?php if($show_due_amount){ ?><tr><th>Due Amount</th><td>BDT <?= htmlspecialchars(number_format($package_due_amount, 2)); ?></td></tr><?php } ?>
             </table>

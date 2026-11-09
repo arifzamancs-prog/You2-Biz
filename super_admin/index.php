@@ -584,19 +584,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($form_action === 'update_bill_reminder') {
         $bill_reminder_enabled = isset($_POST['bill_reminder_enabled']) ? 1 : 0;
-        $bill_reminder_day = (int)($_POST['bill_reminder_day'] ?? 0);
+        $bill_reminder_date_input = trim((string)($_POST['bill_reminder_start_date'] ?? ''));
         $service_charge_amount = max(0, (float)($_POST['service_charge_amount'] ?? 0));
 
         if ($company_id <= 0) {
             super_admin_flash_and_redirect('Invalid company selected.', 'danger');
         }
 
-        if ($bill_reminder_enabled && ($bill_reminder_day < 1 || $bill_reminder_day > 31)) {
-            super_admin_flash_and_redirect('Please select a monthly bill day between 1 and 31.', 'danger');
+        if ($bill_reminder_date_input !== '' && !DateTimeImmutable::createFromFormat('!Y-m-d', $bill_reminder_date_input)) {
+            super_admin_flash_and_redirect('Please select a valid bill date.', 'danger');
         }
 
-        // Enabling billing or changing the bill day starts counting bills from now.
-        $bill_reminder_start_date = bill_reminder_resolve_start_date($conn, $company_id, $bill_reminder_enabled, $bill_reminder_day);
+        // The calendar date is the first bill; its day repeats every month.
+        [$bill_reminder_day, $bill_reminder_start_date] = bill_reminder_resolve_start($conn, $company_id, $bill_reminder_date_input);
+
+        if ($bill_reminder_enabled && !$bill_reminder_start_date) {
+            super_admin_flash_and_redirect('Please select the bill date.', 'danger');
+        }
         $stmt = mysqli_prepare(
             $conn,
             "UPDATE users
@@ -614,7 +618,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Bill reminder settings could not be updated.', 'danger');
         }
 
-        super_admin_flash_and_redirect('Bill reminder settings updated successfully.');
+        $saved_message = 'Bill reminder settings updated successfully.';
+
+        if ($bill_reminder_date_input !== '' && $bill_reminder_start_date !== $bill_reminder_date_input) {
+            $saved_message .= ' That month is already paid, so the first bill is ' . date('d-m-Y', strtotime($bill_reminder_start_date)) . '.';
+        }
+
+        super_admin_flash_and_redirect($saved_message);
     }
 
     if($form_action === 'update_company_type'){
@@ -1284,6 +1294,7 @@ $sql = "SELECT
             u.email_verified,
             u.bill_reminder_enabled,
             u.bill_reminder_day,
+            u.bill_reminder_start_date,
             u.service_charge_amount,
             u.status,
             u.subscription_plan,
@@ -1323,6 +1334,7 @@ $sql = "SELECT
             u.email_verified,
             u.bill_reminder_enabled,
             u.bill_reminder_day,
+            u.bill_reminder_start_date,
             u.service_charge_amount,
             u.status,
             u.subscription_plan,
@@ -1704,13 +1716,13 @@ require_once '../includes/sidebar.php';
                                 </div>
                                 <div class="form-row">
                                     <div class="form-group col-6">
-                                        <label>Bill Day</label>
-                                        <select name="bill_reminder_day" class="form-control form-control-sm">
-                                            <option value="">Select day</option>
-                                            <?php for($bill_day = 1; $bill_day <= 31; $bill_day++): ?>
-                                                <option value="<?= $bill_day; ?>" <?= (int)($row['bill_reminder_day'] ?? 0) === $bill_day ? 'selected' : ''; ?>><?= $bill_day; ?></option>
-                                            <?php endfor; ?>
-                                        </select>
+                                        <label>Bill Start Date</label>
+                                        <input
+                                            type="date"
+                                            name="bill_reminder_start_date"
+                                            class="form-control form-control-sm"
+                                            title="Billing starts on this date and repeats every month on the same day."
+                                            value="<?= htmlspecialchars((string)($row['bill_reminder_start_date'] ?? '')); ?>">
                                     </div>
                                     <div class="form-group col-6">
                                         <label>Service Charge</label>

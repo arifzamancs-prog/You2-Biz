@@ -107,7 +107,8 @@ $pdf->SetFont('Arial', 'B', 12);
 $pdf->SetFillColor(242, 246, 251);
 $pdf->Cell(151, 11, 'TOTAL PAID', 0, 0, 'R', true);
 $pdf->SetTextColor(20, 121, 232);
-$pdf->Cell(39, 11, 'BDT ' . number_format((float)$invoice['amount'], 2), 0, 1, 'R');
+// A pending invoice's money has not been received yet, so nothing is paid.
+$pdf->Cell(39, 11, 'BDT ' . number_format($invoice_status === 'CONFIRMED' ? (float)$invoice['amount'] : 0, 2), 0, 1, 'R');
 $pdf->SetTextColor(123, 135, 153);
 $paid_seal_path = should_print_paid_seal($conn) && $invoice_status === 'CONFIRMED'
     ? printing_upload_dir_path() . '/' . current_paid_seal_file($conn)
