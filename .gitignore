@@ -3,3 +3,5 @@ backup_data/*.json
 uploads/brands/
 uploads/customer_form/
 uploads/invoice_requests/
+# Dummy Air Ticket: optional local Duffel / Airhex secrets
+includes/air_ticket_config.local.php

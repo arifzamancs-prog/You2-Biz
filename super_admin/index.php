@@ -19,6 +19,7 @@ require_once '../includes/printing_helper.php';
 require_once '../includes/pricing_plan_visibility_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/multi_branch_helper.php';
+require_once '../includes/air_ticket_helper.php';
 require_once '../includes/stock_module_helper.php';
 require_once '../includes/lead_management_helper.php';
 require_once '../includes/bill_reminder_helper.php';
@@ -30,9 +31,13 @@ require_once '../includes/eshop_helper.php';
 ensure_eshop_table($conn);
 if(empty($_SESSION['eshop_csrf'])) $_SESSION['eshop_csrf'] = bin2hex(random_bytes(32));
 ensure_multi_branch_column($conn);
+ensure_air_ticket_column($conn);
 ensure_stock_module_feature_column($conn);
 if (empty($_SESSION['multi_branch_csrf'])) {
     $_SESSION['multi_branch_csrf'] = bin2hex(random_bytes(32));
+}
+if (empty($_SESSION['air_ticket_csrf'])) {
+    $_SESSION['air_ticket_csrf'] = bin2hex(random_bytes(32));
 }
 ensure_all_admin_invoice_charges($conn);
 ensure_company_setting_columns($conn);
@@ -580,6 +585,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Unable to update Multi Branch.', 'danger');
         }
         super_admin_flash_and_redirect('Multi Branch is now ' . ($enabled ? 'Active.' : 'Inactive.'));
+    }
+
+    if ($form_action === 'update_air_ticket') {
+        if (!hash_equals($_SESSION['air_ticket_csrf'], (string)($_POST['csrf_token'] ?? ''))) {
+            super_admin_flash_and_redirect('Invalid request. Please try again.', 'danger');
+        }
+        $enabled = (string)($_POST['air_ticket_enabled'] ?? '');
+        if ($company_id <= 0 || !in_array($enabled, ['0', '1'], true)) {
+            super_admin_flash_and_redirect('Invalid company or Dummy Air Ticket status.', 'danger');
+        }
+        $enabled = (int)$enabled;
+        $stmt = mysqli_prepare($conn, "UPDATE users SET air_ticket_enabled=? WHERE id=? AND role='admin' LIMIT 1");
+        mysqli_stmt_bind_param($stmt, 'ii', $enabled, $company_id);
+        if (!mysqli_stmt_execute($stmt)) {
+            super_admin_flash_and_redirect('Unable to update Dummy Air Ticket.', 'danger');
+        }
+        super_admin_flash_and_redirect('Dummy Air Ticket is now ' . ($enabled ? 'On.' : 'Off.'));
     }
 
     if ($form_action === 'update_bill_reminder') {
@@ -1289,6 +1311,7 @@ $sql = "SELECT
             u.name,
             u.company_type,
             u.multi_branch_enabled,
+            u.air_ticket_enabled,
             u.email,
             u.phone,
             u.email_verified,
@@ -1329,6 +1352,7 @@ $sql = "SELECT
             u.name,
             u.company_type,
             u.multi_branch_enabled,
+            u.air_ticket_enabled,
             u.email,
             u.phone,
             u.email_verified,
@@ -1616,6 +1640,21 @@ require_once '../includes/sidebar.php';
                                         </select>
                                         <div class="input-group-append">
                                             <button type="submit" class="btn btn-outline-primary" title="Update multi branch"><i class="fas fa-check"></i></button>
+                                        </div>
+                                    </div>
+                                </form>
+                                <form method="post" class="form-group mb-0 mt-3">
+                                    <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
+                                    <input type="hidden" name="form_action" value="update_air_ticket">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['air_ticket_csrf']) ?>">
+                                    <label>Dummy Air Ticket</label>
+                                    <div class="input-group input-group-sm">
+                                        <select name="air_ticket_enabled" class="form-control">
+                                            <option value="1" <?= !empty($row['air_ticket_enabled']) ? 'selected' : '' ?>>On</option>
+                                            <option value="0" <?= empty($row['air_ticket_enabled']) ? 'selected' : '' ?>>Off</option>
+                                        </select>
+                                        <div class="input-group-append">
+                                            <button type="submit" class="btn btn-outline-primary" title="Update Dummy Air Ticket"><i class="fas fa-check"></i></button>
                                         </div>
                                     </div>
                                 </form>

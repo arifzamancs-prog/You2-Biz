@@ -9,6 +9,7 @@ require_once __DIR__ . '/pricing_plan_visibility_helper.php';
 require_once __DIR__ . '/sidebar_settings_helper.php';
 require_once __DIR__ . '/multi_branch_helper.php';
 require_once __DIR__ . '/eshop_helper.php';
+require_once __DIR__ . '/air_ticket_helper.php';
 require_once __DIR__ . '/restaurant_module_helper.php';
 require_once __DIR__ . '/product_category_helper.php';
 
@@ -611,6 +612,10 @@ if(
                     $sidebar_eshop = eshop_company_settings($conn, (int)$_SESSION['user_id']);
                     if($sidebar_eshop && (int)$sidebar_eshop['enabled']){
                         sidebar_item(app_path('eshop/index.php'), 'E-shop', 'fas fa-store');
+                    }
+                    // Turned on per company by Super Admin; company administrator only.
+                    if(company_air_ticket_enabled($conn, (int)$_SESSION['user_id'])){
+                        sidebar_item(app_path('air_ticket/index.php'), 'Dummy Air Ticket', 'fas fa-plane-departure');
                     }
                 }
                 ?>

@@ -6,6 +6,7 @@ require_once '../includes/system_settings_helper.php';
 require_once '../includes/branding_helper.php';
 require_once '../includes/smtp_mailer.php';
 require_once '../includes/sms_helper.php';
+require_once '../includes/air_ticket_helper.php';
 
 require_super_admin_user();
 
@@ -16,11 +17,56 @@ $sms_account_info = null;
 ensure_system_settings_table($conn);
 ensure_branding_upload_dir();
 $settings = system_settings_all($conn);
+if(empty($_SESSION['air_ticket_settings_csrf'])){
+    $_SESSION['air_ticket_settings_csrf'] = bin2hex(random_bytes(32));
+}
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $action = $_POST['action'] ?? 'save_settings';
 
-    if($action === 'test_email'){
+    if(in_array($action, ['save_air_ticket', 'test_air_ticket'], true)
+        && !hash_equals($_SESSION['air_ticket_settings_csrf'], (string)($_POST['csrf_token'] ?? ''))){
+        $message = 'Invalid request. Please reload the page and try again.';
+        $message_type = 'danger';
+    }elseif($action === 'save_air_ticket'){
+        // Blank fields keep the saved value; the checkboxes remove it.
+        $new_token = trim((string)($_POST['air_ticket_duffel_token'] ?? ''));
+        $new_airhex = trim((string)($_POST['air_ticket_airhex_key'] ?? ''));
+        $save = [];
+        if(!empty($_POST['remove_air_ticket_duffel_token'])){
+            $save[AIR_TICKET_SETTING_TOKEN] = '';
+        }elseif($new_token !== ''){
+            $save[AIR_TICKET_SETTING_TOKEN] = $new_token;
+        }
+        if(!empty($_POST['remove_air_ticket_airhex_key'])){
+            $save[AIR_TICKET_SETTING_AIRHEX] = '';
+        }elseif($new_airhex !== ''){
+            $save[AIR_TICKET_SETTING_AIRHEX] = $new_airhex;
+        }
+
+        if($new_token !== '' && empty($_POST['remove_air_ticket_duffel_token']) && !preg_match('/\Aduffel_(test|live)_[A-Za-z0-9_\-]{8,}\z/', $new_token)){
+            $message = 'This does not look like a Duffel access token. It should start with duffel_test_ or duffel_live_.';
+            $message_type = 'danger';
+        }elseif(!$save){
+            $message = 'Nothing changed. Enter a new token or tick "Remove".';
+            $message_type = 'info';
+        }elseif(system_settings_save_many($conn, $save)){
+            $message = 'Dummy Air Ticket settings saved.';
+            $message_type = 'success';
+            if(!empty($save[AIR_TICKET_SETTING_TOKEN])){
+                [$ok, $test_message] = air_ticket_test_duffel_token($save[AIR_TICKET_SETTING_TOKEN]);
+                $message .= ' ' . $test_message;
+                $message_type = $ok ? 'success' : 'warning';
+            }
+            $settings = system_settings_all($conn);
+        }else{
+            $message = 'Dummy Air Ticket settings could not be saved.';
+            $message_type = 'danger';
+        }
+    }elseif($action === 'test_air_ticket'){
+        [$ok, $message] = air_ticket_test_duffel_token(air_ticket_duffel_token());
+        $message_type = $ok ? 'success' : 'danger';
+    }elseif($action === 'test_email'){
         $test_email = trim($_POST['test_email'] ?? '');
 
         if($test_email === ''){
@@ -555,6 +601,80 @@ require_once '../includes/sidebar.php';
                         <textarea class="form-control mt-2" rows="4" readonly><?= htmlspecialchars($sms_account_info['raw']); ?></textarea>
                     </details>
                 <?php } ?>
+            </div>
+        </div>
+
+        <?php
+        $air_saved_token = trim((string)($settings[AIR_TICKET_SETTING_TOKEN] ?? ''));
+        $air_saved_airhex = trim((string)($settings[AIR_TICKET_SETTING_AIRHEX] ?? ''));
+        $air_active_token = air_ticket_duffel_token();
+        $air_mode = air_ticket_token_mode($air_active_token);
+        ?>
+        <div class="card border-primary mt-4" id="demo-air-ticket">
+            <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-plane-departure mr-2"></i>Dummy Air Ticket – Duffel API</h3>
+                <div class="card-tools">
+                    <?php if($air_active_token === ''){ ?>
+                        <span class="badge badge-warning">Not connected – demo flights only</span>
+                    <?php }elseif($air_mode === 'live'){ ?>
+                        <span class="badge badge-success">Live token</span>
+                    <?php }else{ ?>
+                        <span class="badge badge-info">Test token</span>
+                    <?php } ?>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Used for live flight search in <strong>Dummy Air Ticket</strong> for every company where it is turned on.
+                    The token stays on the server and is never sent to the browser.
+                    A <code>duffel_test_</code> token returns Duffel test data; a <code>duffel_live_</code> token returns real airline offers.
+                </p>
+                <form method="post" autocomplete="off">
+                    <input type="hidden" name="action" value="save_air_ticket">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['air_ticket_settings_csrf']); ?>">
+                    <div class="row">
+                        <div class="form-group col-md-7">
+                            <label>Duffel Access Token</label>
+                            <input type="password" name="air_ticket_duffel_token" class="form-control" autocomplete="new-password"
+                                   placeholder="<?= $air_saved_token !== '' ? 'Blank রাখলে আগের token থাকবে' : 'duffel_live_… or duffel_test_…'; ?>">
+                            <small class="form-text text-muted">
+                                <?php if($air_saved_token !== ''){ ?>
+                                    Saved: <code><?= htmlspecialchars(air_ticket_mask_secret($air_saved_token)); ?></code>
+                                    <label class="ml-3 mb-0 font-weight-normal text-danger"><input type="checkbox" name="remove_air_ticket_duffel_token" value="1"> Remove</label>
+                                <?php }elseif($air_active_token !== ''){ ?>
+                                    Using the token from the server environment / config file.
+                                <?php }else{ ?>
+                                    Not set. Get it from Duffel dashboard → Developers → Access tokens.
+                                <?php } ?>
+                            </small>
+                        </div>
+                        <div class="form-group col-md-5">
+                            <label>Airhex API Key <span class="text-muted font-weight-normal">(optional)</span></label>
+                            <input type="password" name="air_ticket_airhex_key" class="form-control" autocomplete="new-password"
+                                   placeholder="<?= $air_saved_airhex !== '' ? 'Blank রাখলে আগের key থাকবে' : 'For licensed airline logos'; ?>">
+                            <small class="form-text text-muted">
+                                <?php if($air_saved_airhex !== ''){ ?>
+                                    Saved: <code><?= htmlspecialchars(air_ticket_mask_secret($air_saved_airhex)); ?></code>
+                                    <label class="ml-3 mb-0 font-weight-normal text-danger"><input type="checkbox" name="remove_air_ticket_airhex_key" value="1"> Remove</label>
+                                <?php }else{ ?>
+                                    Without it, logos come from the bundled files and free public sources.
+                                <?php } ?>
+                            </small>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i>
+                        Save Air Ticket Settings
+                    </button>
+                </form>
+                <form method="post" class="d-inline-block mt-2">
+                    <input type="hidden" name="action" value="test_air_ticket">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['air_ticket_settings_csrf']); ?>">
+                    <button type="submit" class="btn btn-outline-primary" <?= $air_active_token === '' ? 'disabled' : ''; ?>>
+                        <i class="fas fa-plug"></i>
+                        Test Duffel Connection
+                    </button>
+                </form>
             </div>
         </div>
     </div>
