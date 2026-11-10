@@ -22,6 +22,8 @@ function icon($name,$class='icon'){
         'bolt'=>'<path d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z"/>',
         'filter'=>'<path d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"/>',
         'shield'=>'<path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>',
+        'arrow'=>'<path d="M7 17 17 7M8 7h9v9"/>',
+        'bag'=>'<path d="M15.75 10.5V6a3.75 3.75 0 1 0-7.5 0v4.5m11.356-1.993 1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 0 1-1.12-1.243l1.264-12A1.125 1.125 0 0 1 5.513 7.5h12.974c.576 0 1.059.435 1.119 1.007Z"/>',
         'phone'=>'<path d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/>',
     ];
     return '<svg class="'.h($class).'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">'.($paths[$name]??'').'</svg>';
@@ -32,24 +34,23 @@ function whatsapp_icon(){
 }
 
 function product_card($p){
-    global $wishlist,$compare;
+    global $wishlist;
     $url=product_url($p);
-    $inWishlist=in_array((int)$p['id'],$wishlist,true); $inCompare=in_array((int)$p['id'],$compare,true);
+    $inWishlist=in_array((int)$p['id'],$wishlist,true);
     ob_start(); ?>
 <article class="card">
-    <?php if($p['save']>0){ ?><span class="save-badge">Save: <?= money($p['save']) ?></span><?php } ?>
-    <a class="card-photo" href="<?= h($url) ?>"><?php if($p['photo_url']!==''){ ?><img loading="lazy" src="<?= h($p['photo_url']) ?>" alt="<?= h($p['product_name']) ?>"><?php }else{ ?><span class="no-photo">No photo</span><?php } ?></a>
+    <div class="card-media">
+        <?php if($p['save']>0){ ?><span class="sale-badge">SALE</span><?php } ?>
+        <a class="card-photo" href="<?= h($url) ?>"><?php if($p['photo_url']!==''){ ?><img loading="lazy" src="<?= h($p['photo_url']) ?>" alt="<?= h($p['product_name']) ?>"><?php }else{ ?><span class="no-photo">No photo</span><?php } ?></a>
+        <form method="post" class="card-wish"><?= csrf_field().return_field() ?><input type="hidden" name="action" value="wishlist"><input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>"><button class="<?= $inWishlist?'is-active':'' ?>" title="<?= $inWishlist?'Remove from wishlist':'Add to wishlist' ?>" aria-label="<?= $inWishlist?'Remove from wishlist':'Add to wishlist' ?>"><?= icon('heart','icon-sm') ?></button></form>
+        <?php if($p['available_quantity']<1){ ?><span class="card-cta is-muted">Sold out</span>
+        <?php }elseif($p['has_variants']){ ?><a class="card-cta" href="<?= h($url) ?>">View details</a>
+        <?php }else{ ?><form method="post" class="card-cta-form"><?= csrf_field().return_field() ?><input type="hidden" name="action" value="add"><input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>"><input type="hidden" name="variant_name" value=""><input type="hidden" name="quantity" value="1"><button class="card-cta">+ Cart</button></form><?php } ?>
+    </div>
     <div class="card-body">
+        <span class="card-meta"><?= h($p['category_name']) ?></span>
         <h3 class="card-title"><a href="<?= h($url) ?>"><?= h($p['product_name']) ?></a></h3>
-        <?php if($p['features'] || $p['brand']!==''){ ?><ul class="card-features"><?php if($p['brand']!==''){ ?><li>Brand: <?= h($p['brand']) ?></li><?php } ?><?php foreach(array_slice($p['features'],0,$p['brand']!==''?2:3) as $feature){ ?><li><?= h($feature) ?></li><?php } ?></ul><?php } ?>
-        <div class="card-price"><span class="price"><?= money($p['price']) ?></span><?php if($p['save']>0){ ?><del><?= money($p['regular_price']) ?></del><?php } ?></div>
-        <div class="card-actions">
-            <?php if($p['available_quantity']<1){ ?><span class="btn btn-disabled">Out of Stock</span>
-            <?php }elseif($p['has_variants']){ ?><a class="btn btn-outline" href="<?= h($url) ?>">Choose Option</a>
-            <?php }else{ ?><form method="post"><?= csrf_field().return_field() ?><input type="hidden" name="action" value="add"><input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>"><input type="hidden" name="variant_name" value=""><input type="hidden" name="quantity" value="1"><button class="btn btn-outline">Add to Cart</button></form><?php } ?>
-            <form method="post"><?= csrf_field().return_field() ?><input type="hidden" name="action" value="wishlist"><input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>"><button class="icon-btn<?= $inWishlist?' is-active':'' ?>" title="<?= $inWishlist?'Remove from wishlist':'Add to wishlist' ?>" aria-label="<?= $inWishlist?'Remove from wishlist':'Add to wishlist' ?>"><?= icon('heart') ?></button></form>
-            <form method="post"><?= csrf_field().return_field() ?><input type="hidden" name="action" value="compare"><input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>"><button class="icon-btn<?= $inCompare?' is-active':'' ?>" title="<?= $inCompare?'Remove from compare':'Add to compare' ?>" aria-label="<?= $inCompare?'Remove from compare':'Add to compare' ?>"><?= icon('compare') ?></button></form>
-        </div>
+        <div class="card-price"><?php if($p['save']>0){ ?><del><?= money($p['regular_price']) ?></del><ins><?= money($p['price']) ?></ins><?php }else{ ?><span class="price"><?= money($p['price']) ?></span><?php } ?></div>
     </div>
 </article>
 <?php return ob_get_clean();

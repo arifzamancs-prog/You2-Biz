@@ -17,7 +17,7 @@ function eshop_storefront_schema($conn)
     // The banner table and last profile column are created last; when both exist the upgrade already ran.
     try{
         $banners=mysqli_query($conn,"SHOW TABLES LIKE 'eshop_banners'");
-        $headerColor=$banners && mysqli_num_rows($banners)>0 ? mysqli_query($conn,"SHOW COLUMNS FROM eshop_profiles LIKE 'header_color'") : false;
+        $headerColor=$banners && mysqli_num_rows($banners)>0 ? mysqli_query($conn,"SHOW COLUMNS FROM eshop_profiles LIKE 'store_theme'") : false;
         if($headerColor && mysqli_num_rows($headerColor)>0) return;
     }catch(mysqli_sql_exception $e){
         // Missing profile table: continue and create what can be created.
@@ -39,6 +39,7 @@ function eshop_storefront_schema($conn)
         eshop_storefront_add_column($conn,'eshop_profiles','youtube_url',"VARCHAR(255) NOT NULL DEFAULT ''");
         eshop_storefront_add_column($conn,'eshop_profiles','theme_color',"VARCHAR(7) NOT NULL DEFAULT '#e4002b'");
         eshop_storefront_add_column($conn,'eshop_profiles','header_color',"VARCHAR(7) NOT NULL DEFAULT '#081621'");
+        eshop_storefront_add_column($conn,'eshop_profiles','store_theme',"VARCHAR(20) NOT NULL DEFAULT 'classic'");
     }
     mysqli_query($conn,"CREATE TABLE IF NOT EXISTS eshop_product_images (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -126,10 +127,24 @@ function eshop_storefront_images($conn,$companyId,$product)
     return $urls;
 }
 
+// Storefront looks the shop admin can pick in Shop Settings.
+function eshop_storefront_themes()
+{
+    return [
+        'classic'=>['name'=>'Classic Navy','hint'=>'Premium dark hero with warm gold accents. Uses the Header color.'],
+        'minimal'=>['name'=>'Clean Minimal','hint'=>'Bright, airy white layout with rounded cards. Uses the Brand color.'],
+        'bold'=>['name'=>'Bold Color','hint'=>'Energetic layout filled with your Brand color.'],
+        'sky'=>['name'=>'Sky Blue','hint'=>'Fresh light-blue hero with cool blue buttons.'],
+        'emerald'=>['name'=>'Emerald Fresh','hint'=>'Deep green with mint accents; natural and premium.'],
+        'rose'=>['name'=>'Rose Blush','hint'=>'Soft pink with rounded buttons; great for fashion and beauty.'],
+    ];
+}
+
 function eshop_storefront_profile($conn,$shop)
 {
     $shop['theme_color']=eshop_storefront_valid_color($shop['theme_color']??'','#e4002b');
     $shop['header_color']=eshop_storefront_valid_color($shop['header_color']??'','#081621');
+    $shop['store_theme']=array_key_exists((string)($shop['store_theme']??''),eshop_storefront_themes()) ? $shop['store_theme'] : 'classic';
     foreach(['whatsapp','facebook_url','youtube_url'] as $key) $shop[$key]=trim((string)($shop[$key]??''));
     return $shop;
 }

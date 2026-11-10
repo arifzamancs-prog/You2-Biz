@@ -3,7 +3,7 @@
         <h1>Track Your Order</h1>
         <p class="muted">Enter the order reference from your confirmation and the phone number used at checkout.</p>
         <form method="post"><?= csrf_field() ?><input type="hidden" name="action" value="track">
-            <label>Order reference<input name="order_no" maxlength="50" required value="<?= h($_POST['order_no']??'') ?>" placeholder="ESH-..."></label>
+            <label>Order reference<input name="order_no" maxlength="50" required value="<?= h($_POST['order_no']??'') ?>" placeholder="ESH-261110061505"></label>
             <label>Phone number<input name="phone" type="tel" maxlength="30" required value="<?= h($_POST['phone']??'') ?>"></label>
             <button class="btn btn-primary btn-block">Track Order</button>
         </form>
@@ -22,7 +22,7 @@
         <div class="track-grid">
             <div><small>Delivery</small><strong><?= h(ucfirst($tracked_order['delivery_status'])) ?></strong><?php if($tracked_order['tracking']!==''){ ?><span>Tracking: <?= h($tracked_order['tracking']) ?></span><?php } ?></div>
             <div><small>Payment</small><strong><?= h($tracked_order['accounting_status']==='posted'?'Confirmed':'Pending confirmation') ?></strong><span><?= h(ucfirst($tracked_order['payment_status']??'due')) ?></span></div>
-            <div><small>Refund</small><strong><?= h($tracked_order['refund']['label']) ?></strong><?php if($tracked_order['refund']['count']>0){ ?><span><?= money($tracked_order['refund']['amount']) ?> refunded</span><?php } ?></div>
+            <div><small>Refund</small><strong><?= h($tracked_order['refund']['label']) ?></strong><?php if($tracked_order['refund']['amount']>0){ ?><span><?= money($tracked_order['refund']['amount']) ?> refunded</span><?php }elseif(($tracked_order['refund']['return_value']??0)>0){ ?><span>Returned items: <?= money($tracked_order['refund']['return_value']) ?></span><?php } ?></div>
         </div>
         <h3>Order items</h3>
         <?php if($tracked_order['items']){ ?>

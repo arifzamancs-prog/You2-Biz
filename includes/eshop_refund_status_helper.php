@@ -10,11 +10,17 @@ function eshop_order_refund_status($conn,$companyId,$orderId,$includeHistory=fal
     try { $hasRefunds=mysqli_query($conn,'SELECT 1 FROM sales_refunds LIMIT 1')!==false; }
     catch(Throwable $e) { $hasRefunds=false; }
     if (!$hasRefunds) return $summary;
-    $s=$conn->prepare('SELECT COUNT(*) count,COALESCE(SUM(amount),0) amount FROM sales_refunds WHERE user_id=? AND invoice_id=?');
+    // Product returns may record goods value with no money paid back; those are not refunds.
+    $returnColumn=mysqli_query($conn,"SHOW COLUMNS FROM sales_refunds LIKE 'return_value'");
+    $returnSql=$returnColumn && mysqli_num_rows($returnColumn)>0 ? 'COALESCE(SUM(return_value),0)' : '0';
+    $s=$conn->prepare("SELECT COUNT(*) count,COALESCE(SUM(amount),0) amount,$returnSql return_value FROM sales_refunds WHERE user_id=? AND invoice_id=?");
     $s->bind_param('ii',$companyId,$order['invoice_id']); $s->execute();
     $totals=$s->get_result()->fetch_assoc();
-    $summary['amount']=(float)$totals['amount']; $summary['count']=(int)$totals['count'];
-    if ($summary['count']>0) {
+    $summary['amount']=(float)$totals['amount']; $summary['count']=(int)$totals['count']; $summary['return_value']=(float)$totals['return_value'];
+    if ($summary['count']>0 && $summary['amount']<=0.009) {
+        $summary['status']='returned';
+        $summary['label']='Product returned — no money refunded';
+    } elseif ($summary['count']>0) {
         $fullyRefunded=$order['total_amount']!==null && (float)$order['total_amount']>0 && round($summary['amount'],2)>=round((float)$order['total_amount'],2);
         $summary['status']=$fullyRefunded?'full':'partial';
         $summary['label']=$fullyRefunded?'Fully refunded':'Partially refunded';

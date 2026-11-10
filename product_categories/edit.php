@@ -42,6 +42,21 @@ if(!$category){
 
 $message = '';
 $message_type = '';
+$category_in_use = product_category_has_usage($conn, $id, $user_id);
+
+// Variants already attached to this category's products hold stock and history, so they stay.
+$locked_variants = [];
+$locked_stmt = mysqli_prepare($conn, "SELECT DISTINCT TRIM(pv.variant_name) AS variant_name FROM product_variants pv JOIN products p ON p.id=pv.product_id AND p.user_id=pv.user_id WHERE p.category_id=? AND p.user_id=? AND TRIM(pv.variant_name)<>''
+    UNION SELECT DISTINCT TRIM(sb.variant_name) FROM stock_batches sb JOIN products p ON p.id=sb.product_id AND p.user_id=sb.user_id WHERE p.category_id=? AND p.user_id=? AND TRIM(sb.variant_name)<>''");
+if($locked_stmt){
+    mysqli_stmt_bind_param($locked_stmt, 'iiii', $id, $user_id, $id, $user_id);
+    mysqli_stmt_execute($locked_stmt);
+    $locked_result = mysqli_stmt_get_result($locked_stmt);
+    while($locked_row = mysqli_fetch_assoc($locked_result)){
+        if(!in_array(mb_strtolower($locked_row['variant_name']), array_map('mb_strtolower', $locked_variants), true)) $locked_variants[] = $locked_row['variant_name'];
+    }
+    mysqli_stmt_close($locked_stmt);
+}
 
 if($_SERVER['REQUEST_METHOD']=='POST'){
 
@@ -58,8 +73,16 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         ? implode(', ', product_variant_options_from_text($_POST['variant_options'] ?? ''))
         : (string)($category['variant_options'] ?? '');
 
-    if ($category_type !== $category['category_type'] && product_category_has_usage($conn, $id, $user_id)) {
+    $new_variants_lower = array_map('mb_strtolower', product_variant_options_from_text($variant_options));
+    $removed_locked_variants = $variants_enabled
+        ? array_values(array_filter($locked_variants, function($variant) use ($new_variants_lower){ return !in_array(mb_strtolower($variant), $new_variants_lower, true); }))
+        : [];
+
+    if ($category_type !== $category['category_type'] && $category_in_use) {
         $message = 'This category is in use. Create a new category to use a different product type.';
+        $message_type = 'danger';
+    }elseif($removed_locked_variants){
+        $message = 'These variants are used by products and cannot be removed: ' . implode(', ', $removed_locked_variants) . '.';
         $message_type = 'danger';
     }elseif($category_name === ''){
         $message = 'Category name is required.';
@@ -150,7 +173,8 @@ require_once '../includes/sidebar.php';
             <?php if (restaurant_catalog_enabled($conn, $user_id)) { ?>
             <div class="form-group">
                 <label for="category_type">Product Type</label>
-                <select id="category_type" name="category_type" class="form-control">
+                <?php if($category_in_use){ ?><input type="hidden" name="category_type" value="<?= htmlspecialchars($category['category_type']) ?>"><small class="d-block text-muted mb-1">Locked: this category already has products.</small><?php } ?>
+                <select id="category_type" <?= $category_in_use ? 'disabled' : 'name="category_type"' ?> class="form-control">
                     <option value="non_stock" <?= $category['category_type'] === 'non_stock' ? 'selected' : '' ?>>Non Stock</option>
                     <option value="stock_product" <?= $category['category_type'] === 'stock_product' ? 'selected' : '' ?>>Stock Product</option>
                 </select>
@@ -184,7 +208,7 @@ require_once '../includes/sidebar.php';
             </div>
 
             <?php if ($variants_enabled) { ?><div class="form-group">
-                <label>Variants <small class="text-muted">(Optional)</small></label>
+                <label>Variants <small class="text-muted">(Optional<?= $locked_variants ? '; 🔒 variants are used by products and cannot be removed' : '' ?>)</small></label>
                 <input type="hidden" name="variant_options" id="variant_options" value="<?= htmlspecialchars($category['variant_options'] ?? ''); ?>">
                 <div class="input-group">
                     <input type="text" id="variant_value" class="form-control" list="common_variants" placeholder="Select or type a variant">
@@ -262,7 +286,9 @@ require_once '../includes/sidebar.php';
 (function(){
     const source=document.getElementById('variant_value'), hidden=document.getElementById('variant_options'), list=document.getElementById('variant_list'), add=document.getElementById('add_variant');
     let variants=hidden.value.split(/[,\r\n]+/).map(value=>value.trim()).filter(Boolean);
-    function render(){ hidden.value=variants.join(', '); list.innerHTML=''; variants.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{variants.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
+    const locked=<?= json_encode(array_map('mb_strtolower', $locked_variants), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    locked.forEach(name=>{ if(!variants.some(item=>item.toLowerCase()===name)){ const original=<?= json_encode($locked_variants, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>.find(item=>item.toLowerCase()===name); variants.push(original); } });
+    function render(){ hidden.value=variants.join(', '); list.innerHTML=''; variants.forEach((name,index)=>{const tag=document.createElement('span'); tag.className='badge badge-info mr-2 mb-2 p-2'; if(locked.includes(name.toLowerCase())){tag.className='badge badge-secondary mr-2 mb-2 p-2';tag.title='Used by products, cannot be removed';tag.textContent='🔒 '+name;list.appendChild(tag);return;} tag.textContent=name+' '; const remove=document.createElement('button'); remove.type='button'; remove.className='btn btn-link btn-sm p-0 ml-1 text-white'; remove.setAttribute('aria-label','Remove '+name); remove.innerHTML='<i class="fas fa-times"></i>'; remove.onclick=()=>{variants.splice(index,1);render();}; tag.appendChild(remove);list.appendChild(tag);}); }
     function addVariant(){let added=false; source.value.split(/[,;]/).map(item=>item.trim()).filter(Boolean).forEach(name=>{if(!variants.some(item=>item.toLowerCase()===name.toLowerCase())){variants.push(name);added=true;}}); if(added)render(); source.value='';source.focus();}
     add.addEventListener('click',addVariant);source.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addVariant();}});render();
 })();

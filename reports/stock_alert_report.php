@@ -98,7 +98,7 @@ class="table table-bordered table-striped">
 
 <th>Product</th>
 <th>Category</th>
-<th>SKU</th>
+<th>Code</th>
 <th>Current Stock</th>
 <th>Minimum Stock</th>
 <th>Status</th>

@@ -16,6 +16,10 @@ if(restaurant_catalog_enabled($conn, (int)$_SESSION['user_id'])){
 }
 
 $user_id = $_SESSION['user_id'];
+// Inventory & Sales and Fashion retail: Edit stays open; the edit page itself locks
+// only the fields that cannot change after transactions.
+require_once '../includes/company_settings_helper.php';
+$product_edit_always = in_array(normalize_company_type($_SESSION['company_type'] ?? ''), ['Stock Product', 'Fashion house'], true);
 $variants_enabled = product_variants_enabled($conn, $user_id);
 $product_photos_enabled = product_photos_enabled($conn, $user_id);
 ensure_product_management_columns($conn);
@@ -308,11 +312,11 @@ require_once '../includes/sidebar.php';
                 <?php if(manager_can_modify() && stock_can_manage_warehouse($conn)){ ?>
                 <td class="product-action-column">
 
-                    <?php if(!$product_has_transactions){ ?>
+                    <?php if(!$product_has_transactions || $product_edit_always){ ?>
                         <a
                             href="edit.php?id=<?= $row['id']; ?>"
                             class="btn btn-warning btn-sm"
-                            title="Edit Product">
+                            title="<?= $product_has_transactions ? 'Edit Product (category, purchase price and opening stock are locked)' : 'Edit Product' ?>">
 
                             <i class="fas fa-edit"></i>
 

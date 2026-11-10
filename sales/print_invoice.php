@@ -69,9 +69,28 @@ if(invoice_is_pending($invoice)){
 
 $sale_amount = (float)$invoice['total_amount'];
 $cash_paid_amount = (float)$invoice['paid_amount'];
+// An exchange invoice is paid partly by the returned goods' credit, not by cash: that part
+// already shows as the customer's credit, so it must not be counted again as Paid.
+$exchange_credit_amount = 0.0;
+try{
+    $exchange_column = mysqli_query($conn, "SHOW COLUMNS FROM sales_refunds LIKE 'exchange_invoice_id'");
+    if($exchange_column && mysqli_num_rows($exchange_column) > 0){
+        $exchange_stmt = mysqli_prepare($conn, 'SELECT COALESCE(SUM(exchange_amount),0) FROM sales_refunds WHERE user_id=? AND exchange_invoice_id=?');
+        mysqli_stmt_bind_param($exchange_stmt, 'ii', $user_id, $invoice_id);
+        mysqli_stmt_execute($exchange_stmt);
+        $exchange_credit_amount = round((float)(mysqli_fetch_row(mysqli_stmt_get_result($exchange_stmt))[0] ?? 0), 2);
+    }
+}catch(Throwable $e){
+    $exchange_credit_amount = 0.0;
+}
+if($exchange_credit_amount > 0.009){
+    $cash_paid_amount = max(0.0, round($cash_paid_amount - $exchange_credit_amount, 2));
+}
 $customer_balance_before_invoice = 0.0;
 $customer_balance_display_base = 0.0;
-$is_existing_customer_invoice = (int)($invoice['customer_id'] ?? 0) > 0;
+// E-shop orders are standalone online orders: never carry the customer's earlier balance.
+$is_eshop_invoice = trim((string)($invoice['created_by_type'] ?? '')) === 'eshop';
+$is_existing_customer_invoice = (int)($invoice['customer_id'] ?? 0) > 0 && !$is_eshop_invoice;
 $source_previous_due_payment_total = 0.0;
 $source_invoice_payment_total = 0.0;
 
@@ -114,7 +133,7 @@ $applied_outstanding_to_invoice = min(
     max($sale_amount - $cash_paid_amount, 0)
 );
 $balance_context_label = $has_outstanding_context
-    ? 'Outstanding Amount'
+    ? ($exchange_credit_amount > 0.009 ? 'Return Credit (Exchange)' : 'Outstanding Amount')
     : 'Previous Due';
 $balance_context_amount = $has_outstanding_context
     ? $outstanding_available_amount
@@ -713,8 +732,8 @@ window.addEventListener('load', preparePosPrintPage);
     <?php } ?>
 
     <table class="summary">
-        <tr>
-            <td>Net Amount</td>
+        <tr<?= $is_eshop_invoice ? ' class="grand"' : ''; ?>>
+            <td><?= $is_eshop_invoice ? 'Total' : 'Net Amount'; ?></td>
             <td class="text-right">BDT <?= number_format($sale_amount,2); ?></td>
         </tr>
         <?php if($show_balance_context_line){ ?>
@@ -729,7 +748,7 @@ window.addEventListener('load', preparePosPrintPage);
         </tr>
         <?php } ?>
         <?php } ?>
-        <tr>
+        <?php if(!$is_eshop_invoice){ ?><tr>
             <td>Paid</td>
             <td class="text-right">BDT <?= number_format($cash_paid_amount,2); ?></td>
         </tr>
@@ -738,7 +757,7 @@ window.addEventListener('load', preparePosPrintPage);
             <td><?= htmlspecialchars($total_balance_label); ?></td>
             <td class="text-right">BDT <?= number_format($total_balance_display,2); ?></td>
         </tr>
-        <?php } ?>
+        <?php } ?><?php } ?>
     </table>
 
     <?php if(!$hide_invoice_notes && !empty($invoice['notes'])){ ?>
@@ -1156,10 +1175,12 @@ window.addEventListener('load', function () {
         <div class="invoice-meta">
             <div class="muted">Date</div>
             <strong><?= htmlspecialchars(app_date($invoice['invoice_date'] ?? '')); ?></strong>
+            <?php if(!$is_eshop_invoice){ ?>
             <br>
             <span class="status <?= $status_class[$invoice['payment_status']] ?? 'status-due'; ?>">
                 <?= $status_label[$invoice['payment_status']] ?? 'Due'; ?>
             </span>
+            <?php } ?>
         </div>
 
     </section>
@@ -1219,8 +1240,8 @@ window.addEventListener('load', function () {
 
     <section class="summary">
         <table>
-            <tr>
-                <td>Net Amount</td>
+            <tr<?= $is_eshop_invoice ? ' class="grand"' : ''; ?>>
+                <td><?= $is_eshop_invoice ? 'Total' : 'Net Amount'; ?></td>
                 <td class="text-right">BDT <?= number_format($sale_amount,2); ?></td>
             </tr>
             <?php if($show_balance_context_line){ ?>
@@ -1235,7 +1256,7 @@ window.addEventListener('load', function () {
             </tr>
             <?php } ?>
             <?php } ?>
-            <tr>
+            <?php if(!$is_eshop_invoice){ ?><tr>
                 <td>Paid</td>
                 <td class="text-right">BDT <?= number_format($cash_paid_amount,2); ?></td>
             </tr>
@@ -1244,7 +1265,7 @@ window.addEventListener('load', function () {
                 <td><?= htmlspecialchars($total_balance_label); ?></td>
                 <td class="text-right">BDT <?= number_format($total_balance_display,2); ?></td>
             </tr>
-            <?php } ?>
+            <?php } ?><?php } ?>
         </table>
     </section>
 

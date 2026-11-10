@@ -5,6 +5,12 @@ require_once '../includes/eshop_order_helper.php';
 require_once '../includes/eshop_catalog_helper.php';
 eshop_order_schema($conn);
 $error = '';
+$is_ajax = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+$published_total = function() use ($conn, $company_id){
+    $s = mysqli_prepare($conn, 'SELECT COUNT(*) FROM eshop_products e JOIN products p ON p.id=e.product_id AND p.user_id=e.company_id WHERE e.company_id=? AND e.published=1');
+    mysqli_stmt_bind_param($s,'i',$company_id); mysqli_stmt_execute($s);
+    return (int)(mysqli_fetch_row(mysqli_stmt_get_result($s))[0] ?? 0);
+};
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     eshop_check_csrf();
     $product_id = (int)($_POST['product_id'] ?? 0);
@@ -22,10 +28,16 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     else{
         $price = $price === '' ? null : $price;
         $save = mysqli_prepare($conn, 'INSERT INTO eshop_products (company_id,product_id,published,online_price,description) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE published=VALUES(published),online_price=VALUES(online_price),description=VALUES(description)');
-        mysqli_stmt_bind_param($save,'iiiss',$company_id,$product_id,$published,$price,$description); mysqli_stmt_execute($save);
+        mysqli_stmt_bind_param($save,'iiiss',$company_id,$product_id,$published,$price,$description); $saved = mysqli_stmt_execute($save);
+        if($is_ajax){
+            header('Content-Type: application/json');
+            echo json_encode($saved ? ['ok'=>true,'message'=>'Product saved.','published'=>$published,'published_total'=>$published_total()] : ['ok'=>false,'message'=>'Product could not be saved.']);
+            exit;
+        }
         $_SESSION['eshop_saved'] = 'Shop product settings saved.';
         header('Location: products.php'); exit;
     }
+    if($is_ajax){ header('Content-Type: application/json'); echo json_encode(['ok'=>false,'message'=>$error]); exit; }
 }
 $q = mb_substr(trim((string)($_GET['q'] ?? '')),0,100);
 $page = max(1,(int)($_GET['page'] ?? 1)); $offset = ($page-1)*24;
@@ -41,17 +53,40 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
 <?php if($error){ ?><div class="alert alert-danger" role="alert"><?= eshop_escape($error) ?></div><?php } ?>
 <?php if(isset($_SESSION['eshop_saved'])){ ?><div class="alert alert-success" role="status"><?= eshop_escape($_SESSION['eshop_saved']) ?></div><?php unset($_SESSION['eshop_saved']); } ?>
 <p class="text-muted">Select products for your storefront. Leave online price empty to use the product sale price. Published, active products appear in your shop.</p>
-<div class="row mb-3"><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4><?= (int)$productSummary['published_products'] ?></h4><p>Published</p></div></div></div><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4><?= (int)$productSummary['publishable_products'] ?></h4><p>Physical & active</p></div></div></div><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4><?= (int)$productSummary['total_products'] ?></h4><p>All products</p></div></div></div></div>
-<form method="get" class="input-group mb-3"><input name="q" class="form-control" placeholder="Search product name or SKU" aria-label="Search products" value="<?= eshop_escape($q) ?>"><div class="input-group-append"><button class="btn btn-primary">Search</button><?php if($q!==''){ ?><a class="btn btn-outline-secondary" href="products.php">Clear</a><?php } ?></div></form>
+<div class="row mb-3"><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4 id="published-total"><?= (int)$productSummary['published_products'] ?></h4><p>Published</p></div></div></div><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4><?= (int)$productSummary['publishable_products'] ?></h4><p>Physical & active</p></div></div></div><div class="col-4"><div class="small-box bg-light border"><div class="inner"><h4><?= (int)$productSummary['total_products'] ?></h4><p>All products</p></div></div></div></div>
+<form method="get" class="input-group mb-3"><input name="q" class="form-control" placeholder="Search product name or Code" aria-label="Search products" value="<?= eshop_escape($q) ?>"><div class="input-group-append"><button class="btn btn-primary">Search</button><?php if($q!==''){ ?><a class="btn btn-outline-secondary" href="products.php">Clear</a><?php } ?></div></form>
 <?php if(!$rows){ ?><p>No products found. Add physical products in the Products module first.</p><?php } ?>
 <div class="row"><?php foreach($rows as $item){ ?>
-<div class="col-12 col-md-6 col-xl-4"><form method="post" class="card h-100"><div class="card-body">
-<?php $isPhysical=$item['category_type']==='stock_product'; $photoFile=basename((string)($item['photo_path']??'')); $hasPhoto=$photoFile!=='' && is_file(__DIR__.'/../uploads/products/'.$photoFile); $variantNames=(int)$item['variant_count']>0?product_variant_names($conn,(int)$item['id'],$company_id):[]; $onlineVariants=$isPhysical && $checkoutBranch>0?eshop_catalog_variant_options($conn,$company_id,(int)$item['id']):[]; $onlineStock=array_sum(array_column($onlineVariants,'available')); $stockBreakdown=[]; foreach($onlineVariants as $onlineVariant){ if($onlineVariant['name']!=='') $stockBreakdown[]=$onlineVariant['name'].': '.(int)$onlineVariant['available']; } ?><?php if($hasPhoto){ ?><img class="img-fluid rounded border mb-2" style="height:150px;width:100%;object-fit:contain;background:#f8f9fa" src="<?= eshop_escape(app_path('uploads/products/'.rawurlencode($photoFile))) ?>" alt="<?= eshop_escape($item['product_name']) ?>"><?php }else{ ?><div class="border rounded bg-light text-muted d-flex align-items-center justify-content-center mb-2" style="height:90px">No product photo</div><?php } ?><h5><?= eshop_escape($item['product_name']) ?></h5><p class="small text-muted">SKU: <?= eshop_escape($item['sku']) ?> · <?= eshop_escape($item['status']) ?><br>Sale price: BDT <?= number_format((float)$item['sale_price'],2) ?><br><?= $isPhysical?'Physical stock product':'Not a physical stock product' ?><?php if($variantNames){ ?><br>Variants: <?= eshop_escape(implode(', ',$variantNames)) ?><?php } ?><?php if($isPhysical && $checkoutBranch>0){ ?><br><span class="<?= $onlineStock>0?'text-success':'text-danger' ?>">Central online stock: <?= (int)$onlineStock ?></span><?php if($stockBreakdown){ ?><br><span>Stock by variant: <?= eshop_escape(implode(' · ',$stockBreakdown)) ?><?php } ?><?php }elseif($isPhysical){ ?><br><span class="text-warning">Central stock is not available yet.</span><?php } ?></p>
+<div class="col-12 col-md-6 col-xl-4"><form method="post" class="card h-100" data-eshop-product><div class="card-body">
+<?php $isPhysical=$item['category_type']==='stock_product'; $photoFile=basename((string)($item['photo_path']??'')); $hasPhoto=$photoFile!=='' && is_file(__DIR__.'/../uploads/products/'.$photoFile); $variantNames=(int)$item['variant_count']>0?product_variant_names($conn,(int)$item['id'],$company_id):[]; $onlineVariants=$isPhysical && $checkoutBranch>0?eshop_catalog_variant_options($conn,$company_id,(int)$item['id']):[]; $onlineStock=array_sum(array_column($onlineVariants,'available')); $stockBreakdown=[]; foreach($onlineVariants as $onlineVariant){ if($onlineVariant['name']!=='') $stockBreakdown[]=$onlineVariant['name'].': '.(int)$onlineVariant['available']; } ?><?php if($hasPhoto){ ?><img class="img-fluid rounded border mb-2" style="height:150px;width:100%;object-fit:contain;background:#f8f9fa" src="<?= eshop_escape(app_path('uploads/products/'.rawurlencode($photoFile))) ?>" alt="<?= eshop_escape($item['product_name']) ?>"><?php }else{ ?><div class="border rounded bg-light text-muted d-flex align-items-center justify-content-center mb-2" style="height:90px">No product photo</div><?php } ?><h5><?= eshop_escape($item['product_name']) ?></h5><p class="small text-muted">Code: <?= eshop_escape($item['sku']) ?> · <?= eshop_escape($item['status']) ?><br>Sale price: BDT <?= number_format((float)$item['sale_price'],2) ?><br><?= $isPhysical?'Physical stock product':'Not a physical stock product' ?><?php if($variantNames){ ?><br>Variants: <?= eshop_escape(implode(', ',$variantNames)) ?><?php } ?><?php if($isPhysical && $checkoutBranch>0){ ?><br><span class="<?= $onlineStock>0?'text-success':'text-danger' ?>">Central online stock: <?= (int)$onlineStock ?></span><?php if($stockBreakdown){ ?><br><span>Stock by variant: <?= eshop_escape(implode(' · ',$stockBreakdown)) ?><?php } ?><?php }elseif($isPhysical){ ?><br><span class="text-warning">Central stock is not available yet.</span><?php } ?></p>
 <input type="hidden" name="csrf" value="<?= eshop_escape($_SESSION['eshop_editor_csrf']) ?>"><input type="hidden" name="product_id" value="<?= (int)$item['id'] ?>">
 <div class="form-group"><label for="price-<?= (int)$item['id'] ?>">Online price (optional)</label><input id="price-<?= (int)$item['id'] ?>" name="online_price" class="form-control" type="number" min="0" max="9999999999.99" step="0.01" value="<?= eshop_escape($item['online_price'] ?? '') ?>"></div>
 <div class="form-group"><label for="desc-<?= (int)$item['id'] ?>">Product description</label><textarea id="desc-<?= (int)$item['id'] ?>" name="description" class="form-control" rows="3" maxlength="10000" aria-describedby="desc-help-<?= (int)$item['id'] ?>"><?= eshop_escape($item['description'] ?? '') ?></textarea><small id="desc-help-<?= (int)$item['id'] ?>" class="form-text text-muted">This description appears on this product's E-shop listing and details page.</small></div>
 <label class="d-block"><input type="checkbox" name="published" value="1" <?= !empty($item['published'])?'checked':'' ?> <?= (!$isPhysical || $item['status']!=='active')?'disabled':'' ?>> Publish in E-shop</label><?php if(!$isPhysical){ ?><p class="small text-warning">Only physical stock products can be published.</p><?php }elseif($item['status']!=='active'){ ?><p class="small text-warning">Activate this product before publishing.</p><?php } ?>
-<button class="btn btn-primary btn-sm">Save Product</button> <a class="btn btn-outline-primary btn-sm" href="product_details.php?id=<?= (int)$item['id'] ?>"><i class="fas fa-images mr-1"></i>Details, Gallery &amp; SEO</a>
+<button class="btn btn-primary btn-sm" data-save-label="Save Product">Save Product</button> <a class="btn btn-outline-primary btn-sm" href="product_details.php?id=<?= (int)$item['id'] ?>"><i class="fas fa-images mr-1"></i>Details, Gallery &amp; SEO</a>
+<div class="small mt-2" role="status" aria-live="polite" data-save-status></div>
 </div></form></div><?php } ?></div>
 <nav class="mt-3" aria-label="Product pages"><?php if($page>1){ ?><a class="btn btn-outline-secondary" href="?<?= eshop_escape(http_build_query(['q'=>$q,'page'=>$page-1])) ?>">Previous</a><?php } ?> <?php if($more){ ?><a class="btn btn-outline-primary" href="?<?= eshop_escape(http_build_query(['q'=>$q,'page'=>$page+1])) ?>">Next</a><?php } ?></nav>
-</div></div><?php require_once '../includes/footer.php'; ?>
+</div></div>
+<script>
+// Save each product card in place; the page is not reloaded.
+document.querySelectorAll('[data-eshop-product]').forEach(function(form){
+    form.addEventListener('submit', function(event){
+        event.preventDefault();
+        var button = form.querySelector('[data-save-label]'), status = form.querySelector('[data-save-status]');
+        button.disabled = true; button.textContent = 'Saving...';
+        status.className = 'small mt-2 text-muted'; status.textContent = '';
+        fetch('products.php', {method:'POST', body:new FormData(form), headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, credentials:'same-origin'})
+            .then(function(response){ return response.json().catch(function(){ return {ok:false,message:'Session expired. Please refresh the page and try again.'}; }); })
+            .then(function(data){
+                status.className = 'small mt-2 font-weight-bold ' + (data.ok ? 'text-success' : 'text-danger');
+                status.textContent = (data.ok ? '✓ ' : '') + (data.message || 'Could not save.');
+                if(data.ok && typeof data.published_total === 'number') document.getElementById('published-total').textContent = data.published_total;
+                if(data.ok) setTimeout(function(){ if(status.textContent.indexOf('✓')===0) status.textContent=''; }, 3000);
+            })
+            .catch(function(){ status.className = 'small mt-2 font-weight-bold text-danger'; status.textContent = 'Network error. Please try again.'; })
+            .finally(function(){ button.disabled = false; button.textContent = button.dataset.saveLabel; });
+    });
+});
+</script>
+<?php require_once '../includes/footer.php'; ?>

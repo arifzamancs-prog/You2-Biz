@@ -38,6 +38,19 @@ if($invoice_search !== ''){
 }
 // Sales Return keeps its credit notes (REF-...) on the Sales Return page, not in the invoice list.
 $return_module_list = sales_return_enabled($conn, (int)$user_id);
+// E-shop invoices whose order was cancelled (money never received) show as Cancelled.
+$cancelled_eshop_invoices = [];
+try{
+    $eshop_tables = mysqli_query($conn, "SHOW TABLES LIKE 'eshop_delivery'");
+    if($eshop_tables && mysqli_num_rows($eshop_tables) > 0){
+        $cancel_stmt = mysqli_prepare($conn, "SELECT o.invoice_id FROM eshop_orders o JOIN eshop_delivery d ON d.order_id=o.id WHERE o.company_id=? AND d.status='cancelled'");
+        mysqli_stmt_bind_param($cancel_stmt, 'i', $user_id);
+        mysqli_stmt_execute($cancel_stmt);
+        foreach(mysqli_fetch_all(mysqli_stmt_get_result($cancel_stmt)) as $cancel_row){ $cancelled_eshop_invoices[(int)$cancel_row[0]] = true; }
+    }
+}catch(Throwable $e){
+    $cancelled_eshop_invoices = [];
+}
 if($return_module_list){
     sales_return_schema($conn);
     $date_scope .= " AND COALESCE(created_by_type,'')<>'sales_refund'";
@@ -121,7 +134,7 @@ $result = mysqli_stmt_get_result($stmt);
             <?php if(isset($_GET['success'])){ ?>
 
                 <div class="alert alert-success">
-                    Invoice Created Successfully.
+                    <?= isset($_GET['received']) ? 'Payment received for ' . htmlspecialchars((string)$_GET['received']) . ' and added to the wallet.' : (isset($_GET['cancelled']) ? 'E-shop order ' . htmlspecialchars((string)$_GET['cancelled']) . ' cancelled: products are back in stock and the due is cleared.' : 'Invoice Created Successfully.') ?>
                 </div>
 
             <?php } ?>
@@ -236,7 +249,7 @@ $result = mysqli_stmt_get_result($stmt);
 
                             <td>
                                 <?php echo number_format(
-                                    $row['paid_amount'],
+                                    isset($cancelled_eshop_invoices[(int)$row['id']]) ? 0 : $row['paid_amount'],
                                     2
                                 ); ?>
                             </td>
@@ -252,7 +265,14 @@ $result = mysqli_stmt_get_result($stmt);
 
                                 <?php
 
-                                if(($row['accounting_status'] ?? 'posted') === 'pending'){
+                                $is_cancelled_row = isset($cancelled_eshop_invoices[(int)$row['id']]);
+                                if($is_cancelled_row){
+
+                                    echo '<span class="badge badge-danger" title="E-shop order cancelled: payment not received, products returned to stock.">
+                                            Cancelled
+                                          </span>';
+
+                                }elseif(($row['accounting_status'] ?? 'posted') === 'pending'){
 
                                     echo '<span class="badge badge-secondary">
                                             Pending
@@ -280,8 +300,10 @@ $result = mysqli_stmt_get_result($stmt);
 
                                 }
 
-                                if($return_module_list && (float)$row['total_amount'] > 0 && ($row['created_by_type'] ?? '') !== 'sales_refund'){
-                                    $return_badge = sales_return_state_badge(sales_return_invoice_state($conn, $row));
+                                $row_return_state = '';
+                                if(!$is_cancelled_row && $return_module_list && (float)$row['total_amount'] > 0 && ($row['created_by_type'] ?? '') !== 'sales_refund'){
+                                    $row_return_state = sales_return_invoice_state($conn, $row);
+                                    $return_badge = sales_return_state_badge($row_return_state);
 
                                     if($return_badge !== ''){
                                         echo '<br>' . $return_badge;
@@ -331,12 +353,14 @@ $result = mysqli_stmt_get_result($stmt);
                                 </button>
                                 <?php } ?>
                                 <?php } ?>
+                                <?php $is_eshop_row = ($row['created_by_type'] ?? '') === 'eshop'; ?>
                                 <?php if(($row['accounting_status'] ?? 'posted') === 'pending'){ ?>
                                     <a href="post_invoice.php?id=<?php echo $row['id']; ?>&reload_parent=invoice_list"
                                        target="invoicePrintWindow"
                                        onclick="setTimeout(function(){ window.location.href='invoice_list.php'; }, 250);"
-                                       class="btn btn-success btn-sm">
-                                        Pay & Print
+                                       class="btn btn-success btn-sm"
+                                       <?= $is_eshop_row ? 'title="Confirm the online order: stock is deducted, money stays due (cash on delivery)."' : '' ?>>
+                                        <?= $is_eshop_row ? 'Create Invoice' : 'Pay & Print' ?>
                                     </a>
                                 <?php }else{ ?>
                                     <a href="print_invoice.php?id=<?php echo $row['id']; ?>"
@@ -344,6 +368,21 @@ $result = mysqli_stmt_get_result($stmt);
                                        class="btn btn-success btn-sm">
                                         Print
                                     </a>
+                                    <?php if($is_eshop_row && (float)($row['due_amount'] ?? 0) > 0.009 && ($row_return_state ?? '') !== 'returned' && manager_can_modify()){ ?>
+                                    <a href="payment_entry.php?id=<?= (int)$row['id']; ?>&return=invoice_list"
+                                       class="btn btn-primary btn-sm"
+                                       title="Cash received from the courier/customer: record it into a wallet.">
+                                        Received
+                                    </a>
+                                    <?php if((float)($row['paid_amount'] ?? 0) <= 0.009){ ?>
+                                    <form method="post" action="eshop_cancel_invoice.php" class="d-inline"
+                                          onsubmit="var r=prompt('Cancel this E-shop order? Products go back to stock and the full due (with delivery charge) is cleared.\n\nReason (optional):',''); if(r===null) return false; this.reason.value=r; return true;">
+                                        <input type="hidden" name="invoice_id" value="<?= (int)$row['id']; ?>">
+                                        <input type="hidden" name="reason" value="">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm" title="Money was not received: cancel the order and return the products to stock.">Cancel</button>
+                                    </form>
+                                    <?php } ?>
+                                    <?php } ?>
                                 <?php } ?>
 
                             </td>

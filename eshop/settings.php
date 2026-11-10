@@ -3,10 +3,11 @@ require_once 'bootstrap.php';
 $error = '';
 $stmt = mysqli_prepare($conn, 'SELECT * FROM eshop_profiles WHERE company_id=?');
 mysqli_stmt_bind_param($stmt, 'i', $company_id); mysqli_stmt_execute($stmt);
+$storeThemes = eshop_storefront_themes();
 $profile = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)) ?: [
     'shop_name'=>$_SESSION['user_name'] ?? '', 'logo_path'=>'', 'phone'=>'', 'email'=>'', 'address'=>'',
     'description'=>'', 'delivery_charge'=>'0.00', 'return_policy'=>'',
-    'whatsapp'=>'', 'facebook_url'=>'', 'youtube_url'=>'', 'theme_color'=>'#e4002b', 'header_color'=>'#081621'
+    'whatsapp'=>'', 'facebook_url'=>'', 'youtube_url'=>'', 'theme_color'=>'#e4002b', 'header_color'=>'#081621', 'store_theme'=>'classic'
 ];
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     eshop_check_csrf();
@@ -32,12 +33,14 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $error = 'Facebook and YouTube links must start with https://.';
     }elseif(!preg_match('/\A#[0-9a-fA-F]{6}\z/', $profile['theme_color']) || !preg_match('/\A#[0-9a-fA-F]{6}\z/', $profile['header_color'])){
         $error = 'Choose valid theme colors.';
+    }elseif(!isset($storeThemes[$profile['store_theme']])){
+        $error = 'Choose a store theme.';
     }else{
         $save = mysqli_prepare($conn, 'INSERT INTO eshop_profiles (company_id,shop_name,logo_path,phone,email,address,description,delivery_charge,return_policy) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE shop_name=VALUES(shop_name),logo_path=VALUES(logo_path),phone=VALUES(phone),email=VALUES(email),address=VALUES(address),description=VALUES(description),delivery_charge=VALUES(delivery_charge),return_policy=VALUES(return_policy)');
         mysqli_stmt_bind_param($save,'issssssss',$company_id,$profile['shop_name'],$profile['logo_path'],$profile['phone'],$profile['email'],$profile['address'],$profile['description'],$profile['delivery_charge'],$profile['return_policy']);
         mysqli_stmt_execute($save);
-        $storefront = mysqli_prepare($conn, 'UPDATE eshop_profiles SET whatsapp=?,facebook_url=?,youtube_url=?,theme_color=?,header_color=? WHERE company_id=?');
-        mysqli_stmt_bind_param($storefront,'sssssi',$profile['whatsapp'],$profile['facebook_url'],$profile['youtube_url'],$profile['theme_color'],$profile['header_color'],$company_id);
+        $storefront = mysqli_prepare($conn, 'UPDATE eshop_profiles SET whatsapp=?,facebook_url=?,youtube_url=?,theme_color=?,header_color=?,store_theme=? WHERE company_id=?');
+        mysqli_stmt_bind_param($storefront,'ssssssi',$profile['whatsapp'],$profile['facebook_url'],$profile['youtube_url'],$profile['theme_color'],$profile['header_color'],$profile['store_theme'],$company_id);
         mysqli_stmt_execute($storefront);
         if(($profile['logo_path']??'')!==$oldLogo && $oldLogo!=='' && is_file(__DIR__.'/../uploads/eshop_logos/'.$oldLogo)) @unlink(__DIR__.'/../uploads/eshop_logos/'.$oldLogo);
         $_SESSION['eshop_saved'] = 'Shop settings saved.';
@@ -64,5 +67,14 @@ require_once '../includes/header.php'; require_once '../includes/navbar.php'; re
 <div class="col-12 col-md-4 form-group"><label for="youtube_url">YouTube channel link</label><input id="youtube_url" name="youtube_url" class="form-control" type="url" maxlength="255" placeholder="https://youtube.com/@..." value="<?= eshop_escape($profile['youtube_url']) ?>"></div>
 <div class="col-6 col-md-3 form-group"><label for="theme_color">Brand color</label><input id="theme_color" name="theme_color" class="form-control" type="color" value="<?= eshop_escape($profile['theme_color']) ?>"><small class="form-text text-muted">Buttons, prices and badges.</small></div>
 <div class="col-6 col-md-3 form-group"><label for="header_color">Header color</label><input id="header_color" name="header_color" class="form-control" type="color" value="<?= eshop_escape($profile['header_color']) ?>"><small class="form-text text-muted">Top bar and footer.</small></div>
+<div class="col-12 form-group"><label class="d-block">Store theme</label><div class="row">
+<?php $themePreview=['classic'=>['#0d1b2d','#e2b65d','#f7f3eb'],'minimal'=>['#ffffff','#111827','#f3f4f6'],'bold'=>[$profile['theme_color'],'#ffffff','#111827'],'sky'=>['#dff1fc','#0ea5e9','#0b3b60'],'emerald'=>['#064e3b','#10b981','#ecfdf5'],'rose'=>['#fce7f3','#be185d','#3f1d2b']];
+foreach($storeThemes as $themeKey=>$theme){ $checked=($profile['store_theme']??'classic')===$themeKey; ?>
+<div class="col-12 col-md-4 mb-2"><label class="d-flex h-100 border rounded p-3 mb-0<?= $checked?' border-primary':'' ?>" style="cursor:pointer;gap:12px;font-weight:400">
+<input type="radio" name="store_theme" value="<?= eshop_escape($themeKey) ?>" <?= $checked?'checked':'' ?> required class="mt-1">
+<span><span class="d-flex mb-2" style="gap:4px"><?php foreach($themePreview[$themeKey] as $swatch){ ?><span style="width:28px;height:18px;border-radius:4px;border:1px solid #ccc;background:<?= eshop_escape($swatch) ?>"></span><?php } ?></span><strong class="d-block"><?= eshop_escape($theme['name']) ?></strong><small class="text-muted"><?= eshop_escape($theme['hint']) ?></small></span>
+</label></div>
+<?php } ?>
+</div></div>
 </div><button class="btn btn-primary">Save Settings</button></form></div></div>
 <?php require_once '../includes/footer.php'; ?>

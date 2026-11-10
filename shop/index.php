@@ -87,6 +87,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $tracked_order=eshop_public_order_tracking($conn,$cid,(string)($_POST['order_no']??''),(string)($_POST['phone']??''));
         if(!$tracked_order) $tracking_error='We could not find an order with that reference and phone number.';
     }elseif($action==='auth_send'){
+        if(isset($_POST['delivery_zone_id'])) $_SESSION['shop_zone'][$cid]=(int)$_POST['delivery_zone_id'];
         try{ eshop_customer_auth_start($conn,$cid,$shop,$_POST); header('Location: '.shop_url('verify')); exit; }
         catch(RuntimeException $e){ $auth_error=$e->getMessage(); $route='checkout'; }
     }elseif($action==='auth_verify'){
@@ -96,7 +97,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             header('Location: '.($cart?shop_url('checkout'):shop_url())); exit;
         }catch(RuntimeException $e){ $auth_error=$e->getMessage(); $route='verify'; }
     }elseif($action==='auth_logout'){
-        eshop_customer_logout($cid); header('Location: '.shop_url()); exit;
+        eshop_customer_logout($cid); header('Location: '.shop_safe_return($_POST['return_to']??'',shop_url())); exit;
     }elseif($action==='auth_login_send'){
         try{ eshop_customer_auth_login_start($conn,$cid,$shop,$_POST); header('Location: '.shop_url('verify')); exit; }
         catch(RuntimeException $e){ $auth_error=$e->getMessage(); $route='signin'; }
@@ -155,6 +156,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                 elseif($adding) shop_toast('Added to cart.');
             }
         }
+        // Cart page quantity changes save in the background and return the stored quantity.
+        if($action==='update' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')==='XMLHttpRequest'){
+            header('Content-Type: application/json');
+            echo json_encode(['ok'=>true,'quantity'=>(int)($cart[$cartKey] ?? 0)]);
+            exit;
+        }
         if($action==='buy_now') $back=shop_url('checkout');
         elseif($action!=='add') $back=shop_url('cart');
         header('Location: '.$back); exit;
@@ -184,12 +191,12 @@ $perPage=20;
 if($route===''){
     $view='home';
     $banners=eshop_storefront_banners($conn,$cid);
-    [$featured]=eshop_storefront_products($conn,$cid,['featured'=>1],10);
-    [$offers]=eshop_storefront_products($conn,$cid,['offers'=>1,'sort'=>'featured'],10);
-    [$newest]=eshop_storefront_products($conn,$cid,['sort'=>'newest'],10);
+    [$featured]=eshop_storefront_products($conn,$cid,['featured'=>1],12);
+    [$offers]=eshop_storefront_products($conn,$cid,['offers'=>1,'sort'=>'featured'],12);
+    [$newest]=eshop_storefront_products($conn,$cid,['sort'=>'newest'],12);
     $categorySections=[];
-    foreach(array_slice($categories,0,4,true) as $category){
-        [$rows]=eshop_storefront_products($conn,$cid,['category'=>$category['id']],5);
+    foreach(array_slice($categories,0,6,true) as $category){
+        [$rows]=eshop_storefront_products($conn,$cid,['category'=>$category['id']],6);
         if($rows) $categorySections[]=['category'=>$category,'products'=>$rows];
     }
     $meta['jsonld'][]=['@context'=>'https://schema.org','@type'=>'Store','name'=>$shop['shop_name'],'url'=>$absoluteRoot.'/','telephone'=>$shop['phone'],'address'=>$shop['address'],'image'=>shop_logo($shop)!==''?shop_absolute(shop_logo($shop)):null];

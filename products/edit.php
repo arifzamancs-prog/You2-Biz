@@ -94,8 +94,15 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if($sub_category !== '' && !in_array($sub_category, $sub_category_options, true) && !$keeping_current_sub_category){
         $sub_category = '';
     }
+    // Variant stock and history belong to the current category, so it is fixed after any transaction.
+    if($product_has_transactions && $category_id !== (int)$product['category_id']){
+        $_SESSION['error'] = 'Category cannot be changed because this product already has transactions. Other information can still be updated.';
+        header('Location: edit.php?id=' . $id);
+        exit;
+    }
     $is_stock_product = product_category_is_stock($conn, $category_id, $user_id);
-    if(!product_category_allows_creation($conn, $category_id, $user_id)){
+    // Keeping the product's own category is allowed even if that category was made inactive later.
+    if($category_id !== (int)$product['category_id'] && !product_category_allows_creation($conn, $category_id, $user_id)){
         $_SESSION['error'] = 'Please select an active product category.';
         header("Location: edit.php?id=" . $id);
         exit;
@@ -270,7 +277,11 @@ require_once '../includes/sidebar.php';
             <?php unset($_SESSION['error']); ?>
         <?php } ?>
 
-        <?php if($opening_round_trip_location){ ?>
+        <?php if($product_has_transactions){ ?>
+            <div class="alert alert-warning">
+                This product already has transactions, so <strong>Category</strong><?= !$product_fifo_editable ? ', <strong>Purchase Price</strong>' : '' ?><?= !$opening_stock_editable ? ' and <strong>Opening Stock</strong>' : '' ?> cannot be changed. Name, code, sub category, sale price, minimum stock, status and photo can still be updated.
+            </div>
+        <?php }elseif($opening_round_trip_location){ ?>
             <div class="alert alert-info">
                 This product was only transferred and all of its stock is back, with no sale or purchase. As admin you can still correct the opening stock. Purchase price stays read-only.
             </div>
@@ -286,10 +297,11 @@ require_once '../includes/sidebar.php';
 
             <div class="form-group">
 
-                <label>Category</label>
+                <label>Category<?= $product_has_transactions ? ' <small class="text-muted">(Locked: product has transactions)</small>' : '' ?></label>
 
+                <?php if($product_has_transactions){ ?><input type="hidden" name="category_id" value="<?= (int)$product['category_id']; ?>"><?php } ?>
                 <select
-                    name="category_id"
+                    <?= $product_has_transactions ? 'disabled' : 'name="category_id"' ?>
                     id="category_id"
                     class="form-control">
 

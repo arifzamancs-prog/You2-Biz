@@ -16,6 +16,9 @@ $receive_wallet_id = (int)($_POST['receive_wallet_id'] ?? 0);
 $payment_date = date('Y-m-d');
 $extra_note = trim(mb_substr((string)($_POST['note'] ?? ''), 0, 255));
 $print_receipt = !empty($_POST['print_receipt']);
+// E-shop "Received" opens this from the invoice list and returns there.
+$return_to_list = ($_POST['return_to'] ?? '') === 'invoice_list';
+$received_invoice_no = '';
 // A registered customer's due is company-wide: it can be cleared from any branch.
 $customer_due_scope = '';
 $collect_branch_id = (int)stock_customer_branch($conn);
@@ -395,6 +398,7 @@ try{
 
         $wallet_note = $note;
         $wallet_reference_id = $payment_id > 0 ? $payment_id : $invoice_id;
+        $received_invoice_no = (string)$invoice['invoice_no'];
     }
 
     if(abs($remaining_amount) > 0.01 && $payment_mode === 'customer'){
@@ -434,6 +438,11 @@ try{
 
     mysqli_commit($conn);
 
+    if($return_to_list && !$print_receipt){
+        header('Location: invoice_list.php?success=1&received=' . urlencode($received_invoice_no));
+        exit;
+    }
+
     header("Location:" . ($print_receipt
         ? "print_money_receipt.php?no=" . urlencode($receipt_no) . "&back=1"
         : "receive_payment.php?success=1&receipt=" . urlencode($receipt_no)));
@@ -445,6 +454,6 @@ try{
 
     $_SESSION['error'] = $e->getMessage();
 
-    header("Location:receive_payment.php");
+    header($return_to_list ? 'Location: invoice_list.php?error=' . urlencode($e->getMessage()) : "Location:receive_payment.php");
     exit;
 }

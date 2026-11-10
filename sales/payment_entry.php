@@ -175,6 +175,8 @@ type="hidden"
 name="payment_mode"
 value="<?= htmlspecialchars($mode); ?>">
 
+<?php $return_to_list = ($_GET['return'] ?? '') === 'invoice_list'; ?>
+<?php if($return_to_list){ ?><input type="hidden" name="return_to" value="invoice_list"><?php } ?>
 <?php if($mode === 'customer'){ ?>
 <input
 type="hidden"
@@ -317,7 +319,7 @@ class="btn btn-primary">
 </button>
 
 <a
-href="receive_payment.php"
+href="<?= $return_to_list ? 'invoice_list.php' : 'receive_payment.php' ?>"
 class="btn btn-secondary">
 
 Back

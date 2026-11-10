@@ -95,7 +95,14 @@ function eshop_place_order($conn,$cid,$cart,$input,$key){
         if(!$customer){
             $s=mysqli_prepare($conn,"INSERT INTO customers(user_id,customer_name,phone,email,address,status) VALUES(?,?,?,?,?,'active')"); mysqli_stmt_bind_param($s,'issss',$cid,$name,$phone,$email,$address); mysqli_stmt_execute($s); $customer=mysqli_insert_id($conn);
         }
-        $no='ESH-'.date('ymdHis').'-'.bin2hex(random_bytes(4));
+        // Short order reference, e.g. ESH-261110061505; a suffix is added only if that second is already taken.
+        $base='ESH-'.date('ymdHis'); $no=$base;
+        for($n=2;;$n++){
+            $s=mysqli_prepare($conn,'SELECT (SELECT COUNT(*) FROM eshop_orders WHERE order_no=?)+(SELECT COUNT(*) FROM invoices WHERE user_id=? AND invoice_no=?) AS taken');
+            mysqli_stmt_bind_param($s,'sis',$no,$cid,$no); mysqli_stmt_execute($s);
+            if(!(int)mysqli_fetch_assoc(mysqli_stmt_get_result($s))['taken']) break;
+            $no=$base.'-'.$n;
+        }
         $notes='E-shop order '.$no."\nCash on delivery\n".($zoneName!==''?'Delivery area: '.$zoneName."\n":'').$name."\n".$phone."\n".$email."\n".$address;
         $s=mysqli_prepare($conn,"INSERT INTO invoices(user_id,branch_id,invoice_no,customer_id,customer_name,invoice_date,total_amount,notes,paid_amount,due_amount,payment_status,accounting_status,created_by_name,created_by_type) VALUES(?,?,?,?,?,CURDATE(),?,?,0,?,'due','pending','E-shop','eshop')");
         mysqli_stmt_bind_param($s,'iisisdsd',$cid,$branch,$no,$customer,$name,$total,$notes,$total); mysqli_stmt_execute($s); $invoice=mysqli_insert_id($conn);
