@@ -265,6 +265,7 @@ require_once '../includes/sidebar.php';
                         'transfer_out' => 'Transfer Out',
                         'sales_invoice' => 'Sales Invoice',
                         'receive_payment' => 'Receive Due Payment',
+                        'purchase_return' => 'Vendor Return Refund',
                         'purchase' => 'Purchase',
                         'supplier_payment' => 'Supplier Due Payment'
                     ];
@@ -298,7 +299,8 @@ require_once '../includes/sidebar.php';
                         'money_in',
                         'transfer_in',
                         'sales_invoice',
-                        'receive_payment'
+                        'receive_payment',
+                        'purchase_return'
                     ];
 
                     $is_income = in_array(

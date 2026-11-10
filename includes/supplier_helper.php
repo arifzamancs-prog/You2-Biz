@@ -132,15 +132,44 @@ function supplier_code_list($conn, $user_id, $exclude_id = 0)
     return $codes;
 }
 
+// The ID of the supplier created last ('' when none has an ID yet).
+function supplier_code_last($conn, $user_id)
+{
+    $stmt = mysqli_prepare($conn, "SELECT supplier_code FROM suppliers WHERE user_id=? AND supplier_code IS NOT NULL AND TRIM(supplier_code)<>'' ORDER BY id DESC LIMIT 1");
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
+    mysqli_stmt_execute($stmt);
+    $code = trim((string)(mysqli_fetch_row(mysqli_stmt_get_result($stmt))[0] ?? ''));
+    mysqli_stmt_close($stmt);
+
+    return $code;
+}
+
+// Suggested ID for a new supplier: the last created ID plus one, or the first ID when there is none.
+function supplier_code_suggest($conn, $user_id)
+{
+    require_once __DIR__ . '/code_sequence_helper.php';
+    $last = supplier_code_last($conn, $user_id);
+    $next = $last !== '' ? code_sequence_next($last, function($code) use ($conn, $user_id){ return supplier_code_exists($conn, $user_id, $code); }) : '';
+
+    return $next !== '' ? $next : supplier_code_next($conn, $user_id);
+}
+
 // The required Vendor/Supplier ID input with the live availability check.
-function supplier_code_field_html($value, $existing_codes)
+// $last_code (create form only) is shown under the box as the last created ID.
+function supplier_code_field_html($value, $existing_codes, $last_code = null)
 {
     $label = supplier_code_label();
+    $last_hint = $last_code === null ? '' : '<small id="supplier_code_last" class="form-text text-muted">'
+        . (trim((string)$last_code) !== ''
+            ? 'Last created ' . htmlspecialchars($label) . ': <strong>' . htmlspecialchars((string)$last_code) . '</strong>'
+            : 'No ' . htmlspecialchars($label) . ' created yet.')
+        . '</small>';
 
     return '<div class="form-group">'
         . '<label for="supplier_code">' . htmlspecialchars($label) . ' <span class="text-danger">*</span></label>'
         . '<input type="text" name="supplier_code" id="supplier_code" class="form-control" maxlength="60" required value="' . htmlspecialchars((string)$value) . '">'
-        . '<small id="supplier_code_status" class="form-text text-muted">The next free ID is filled in; you can change it.</small>'
+        . $last_hint
+        . '<small id="supplier_code_status" class="form-text text-muted">The next ID is filled in; you can change it.</small>'
         . '</div>'
         . '<script>(function(){'
         . 'var input = document.getElementById("supplier_code"), status = document.getElementById("supplier_code_status");'

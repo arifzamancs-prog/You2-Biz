@@ -8,7 +8,8 @@ require_once '../includes/project_package_helper.php';
 
 // Every company type, Restaurant & Cafe included, uses this form with a required, suggested ID.
 ensure_supplier_code_column($conn);
-$next_supplier_code = supplier_code_next($conn, (int)$_SESSION['user_id']);
+$next_supplier_code = supplier_code_suggest($conn, (int)$_SESSION['user_id']);
+$last_supplier_code = supplier_code_last($conn, (int)$_SESSION['user_id']);
 
 $recent_vendors = [];
 $recent_stmt = mysqli_prepare($conn, 'SELECT supplier_code, supplier_name, phone, email FROM suppliers WHERE user_id=?' . restaurant_catalog_scope_sql($conn) . ' ORDER BY id DESC LIMIT 5');
@@ -57,7 +58,7 @@ require_once '../includes/sidebar.php';
             action="save.php"
             id="vendor-create-form">
 
-            <?= supplier_code_field_html($next_supplier_code, supplier_code_list($conn, (int)$_SESSION['user_id'])); ?>
+            <?= supplier_code_field_html($next_supplier_code, supplier_code_list($conn, (int)$_SESSION['user_id']), $last_supplier_code); ?>
 
             <div class="form-group">
 
@@ -214,7 +215,9 @@ require_once '../includes/footer.php';
                     if (window.supplierCodeExisting && result.supplier_code) window.supplierCodeExisting.push(result.supplier_code.toLowerCase());
                     codeInput.value = result.next_supplier_code;
                     const codeStatus = document.getElementById('supplier_code_status');
-                    if (codeStatus) { codeStatus.className = 'form-text text-muted'; codeStatus.textContent = 'The next free ID is filled in; you can change it.'; }
+                    if (codeStatus) { codeStatus.className = 'form-text text-muted'; codeStatus.textContent = 'The next ID is filled in; you can change it.'; }
+                    const codeLast = document.getElementById('supplier_code_last');
+                    if (codeLast && result.supplier_code) { codeLast.innerHTML = 'Last created ID: <strong></strong>'; codeLast.querySelector('strong').textContent = result.supplier_code; }
                 }
                 form.querySelector('[name="supplier_code"], [name="supplier_name"]').focus();
             }

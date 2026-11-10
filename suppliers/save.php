@@ -126,7 +126,7 @@ if(mysqli_stmt_execute($stmt)){
     if ($is_ajax_save) {
         supplier_save_response(true, supplier_display_text('Supplier saved successfully.'), [
             'supplier_code' => $supplier_code,
-            'next_supplier_code' => $supplier_ids_enabled ? supplier_code_next($conn, $user_id) : '',
+            'next_supplier_code' => $supplier_ids_enabled ? supplier_code_suggest($conn, $user_id) : '',
             'supplier' => [
                 'code' => $supplier_code,
                 'name' => $supplier_name,

@@ -18,7 +18,69 @@ if (!company_multi_branch_enabled($conn, $user_id)) {
     exit;
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+// Every active location of the company, and how each one is named on this page.
+$warehouse_location_id = (int)stock_warehouse_id($conn, $user_id);
+$locations = [];
+$location_result = mysqli_query($conn, "SELECT id,branch_name,branch_code,is_head_office FROM branches WHERE user_id={$user_id} AND status='active' ORDER BY CASE WHEN id={$warehouse_location_id} THEN 0 WHEN is_head_office=1 THEN 1 ELSE 2 END, branch_name");
+while ($location_result && ($location = mysqli_fetch_assoc($location_result))) {
+    $locations[(int)$location['id']] = $location;
+}
+$location_kind = static fn($id) => (int)$id === $warehouse_location_id ? 'Warehouse' : 'Branch';
+$location_label = static function ($id) use ($locations) {
+    $location = $locations[(int)$id] ?? null;
+    if (!$location) return 'Location #' . (int)$id;
+    return ($location['is_head_office'] ? 'Head Office' : $location['branch_name']) . (!empty($location['branch_code']) ? ' [' . $location['branch_code'] . ']' : '');
+};
+$direction_badge = static fn($from, $to) => '<span class="badge badge-light border">' . $location_kind($from) . ' &rarr; ' . $location_kind($to) . '</span>';
+
+// Send stock from this location: Warehouse > Branch, Branch > Warehouse or Branch > Branch.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'send_stock') {
+    $send_transaction = false;
+    try {
+        $base_request_key = (string)($_POST['request_key'] ?? '');
+        $to_branch_id = (int)($_POST['to_branch_id'] ?? 0);
+        $product_ids = $_POST['product_id'] ?? [];
+        $quantities = $_POST['quantity'] ?? [];
+        $variant_quantities = $_POST['variant_quantity'] ?? [];
+        $variant_names = $_POST['variant_name'] ?? [];
+        if (!is_array($product_ids) || !preg_match('/^[a-f0-9]{32,64}$/', $base_request_key)) throw new RuntimeException('Invalid send request. Reload the page and try again.');
+        if (!isset($locations[$to_branch_id]) || $to_branch_id === $branch_id) throw new RuntimeException('Select where the stock goes.');
+        $note = (string)($_POST['note'] ?? '');
+        $distribution_ids = [];
+        mysqli_begin_transaction($conn);
+        $send_transaction = true;
+        foreach ($product_ids as $line_index => $product_id) {
+            $product_id = (int)$product_id;
+            if ($product_id <= 0) continue;
+            $line_variants = $variant_quantities[$line_index] ?? [];
+            if (is_array($line_variants) && $line_variants) {
+                foreach ($line_variants as $variant_index => $quantity) {
+                    $quantity = (float)$quantity;
+                    if ($quantity <= 0) continue;
+                    $variant_name = (string)($variant_names[$line_index][$variant_index] ?? '');
+                    $request_key = substr(hash('sha256', $base_request_key . '|' . $line_index . '|' . $variant_name), 0, 48);
+                    $distribution_ids[] = fifo_inventory_distribute($conn, $user_id, $to_branch_id, $product_id, $quantity, $request_key, $note, $branch_id, $variant_name, $base_request_key, false);
+                }
+            } else {
+                $quantity = (float)($quantities[$line_index] ?? 0);
+                if ($quantity <= 0) continue;
+                $request_key = substr(hash('sha256', $base_request_key . '|' . $line_index), 0, 48);
+                $distribution_ids[] = fifo_inventory_distribute($conn, $user_id, $to_branch_id, $product_id, $quantity, $request_key, $note, $branch_id, '', $base_request_key, false);
+            }
+        }
+        if (!$distribution_ids) throw new RuntimeException('Add a product and enter at least one quantity.');
+        mysqli_commit($conn);
+        $send_transaction = false;
+        $_SESSION['stock_receive_message'] = 'Stock sent to ' . $location_label($to_branch_id) . '. It will be added there once they receive it.';
+        header('Location: receive_stock.php');
+        exit;
+    } catch (Throwable $e) {
+        if ($send_transaction) mysqli_rollback($conn);
+        $error = $e->getMessage();
+    }
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') !== 'send_stock') {
     try {
         $receipts = $_POST['distribution_received'] ?? [];
         if(!is_array($receipts) || empty($receipts)){ throw new RuntimeException('Reload this page and select a stock receipt.'); }
@@ -150,18 +212,53 @@ require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 ?>
-<section class="content"><div class="container-fluid"><div class="card card-outline card-primary">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck-loading mr-2"></i>Product Receive Request</h3></div>
+<section class="content"><div class="container-fluid"><div class="card card-outline card-success">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-shipping-fast mr-2"></i>Send Product</h3></div>
     <div class="card-body">
         <?php if ($message !== '') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
         <?php if ($error !== '') { ?><div class="alert alert-danger"><?= htmlspecialchars($error); ?></div><?php } ?>
+        <p class="text-muted mb-3">Send stock from <strong><?= htmlspecialchars($location_label($branch_id)); ?></strong> (<?= $location_kind($branch_id); ?>) to the warehouse or another branch. It leaves this location now and is added there when they receive it.</p>
+        <form method="post" id="send-stock-form">
+            <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>">
+            <input type="hidden" name="action" value="send_stock">
+            <input type="hidden" name="request_key" value="<?= bin2hex(random_bytes(24)); ?>">
+            <div class="form-row">
+                <div class="form-group col-md-4"><label>From</label><input class="form-control" value="<?= htmlspecialchars($location_label($branch_id) . ' (' . $location_kind($branch_id) . ')'); ?>" readonly></div>
+                <div class="form-group col-md-4"><label for="send-to">To</label>
+                    <select id="send-to" name="to_branch_id" class="form-control" required>
+                        <option value="">Select location</option>
+                        <?php foreach (['Warehouse', 'Branch'] as $kind) { $group = array_filter($locations, fn($location) => $location_kind($location['id']) === $kind && (int)$location['id'] !== $branch_id); if (!$group) continue; ?>
+                            <optgroup label="<?= $kind === 'Warehouse' ? 'Main Warehouse' : 'Branches'; ?>">
+                                <?php foreach ($group as $location) { ?><option value="<?= (int)$location['id']; ?>" data-direction="<?= $location_kind($branch_id) . ' → ' . $kind; ?>"><?= htmlspecialchars($location_label($location['id'])); ?></option><?php } ?>
+                            </optgroup>
+                        <?php } ?>
+                    </select>
+                </div>
+                <div class="form-group col-md-4 d-flex align-items-end"><span id="send-direction" class="badge badge-info p-2" hidden></span></div>
+            </div>
+            <div id="send-lines">
+                <div class="form-row send-line">
+                    <div class="form-group col-md-6"><label>Product / Available</label><select name="product_id[]" class="form-control send-product"><option value="">Loading products…</option></select></div>
+                    <div class="form-group col-md-6"><label>Quantity</label><div class="send-quantity-wrap"><input class="form-control" type="number" disabled></div></div>
+                </div>
+            </div>
+            <button class="btn btn-outline-success btn-sm mb-3" type="button" id="send-add-line"><i class="fas fa-plus mr-1"></i>Add more</button>
+            <div class="form-row"><div class="form-group col-md-6"><label for="send-note">Note</label><input id="send-note" class="form-control" name="note" maxlength="500" placeholder="Optional"></div></div>
+            <button class="btn btn-success" type="submit"><i class="fas fa-paper-plane mr-1"></i>Send Product</button>
+        </form>
+    </div>
+</div></div></section>
+
+<section class="content"><div class="container-fluid"><div class="card card-outline card-primary">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck-loading mr-2"></i>Product Receive Request</h3></div>
+    <div class="card-body">
         <?php if ($warehouse_receipt_mode) { ?><a href="index.php" class="btn btn-outline-secondary mb-3">Back to Main Warehouse</a><?php } ?>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
     <thead><tr><th>Photo</th><th>Reference</th><th>From</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Good Received Qty</th><th>Action</th></tr></thead>
             <tbody>
             <?php if (!empty($pending_groups)) { foreach ($pending_groups as $group_key => $group) { $row = $group['row']; $is_selected_request = $group_key === $selected_group_key; ?>
                 <tr id="receive-request-<?= (int)$row['id']; ?>" class="<?= $is_selected_request ? 'table-primary' : ''; ?>"><td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
-                    <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?></td>
+                    <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?><div class="mt-1"><?= $direction_badge($row['from_branch_id'], $row['to_branch_id']); ?></div></td>
                     <td><?= distribution_product_blocks($group['product_summary']); ?></td><td><?= htmlspecialchars($group['code_summary']); ?></td><td><?= number_format($group['quantity'], 0); ?></td>
                     <td>
                         <?php $form_id = 'receipt-' . (int)$row['id']; ?>
@@ -191,7 +288,7 @@ require_once '../includes/sidebar.php';
 </div></div></section>
 
 <section class="content"><div class="container-fluid"><div class="card">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck mr-2"></i>Product Sent Request</h3></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck mr-2"></i>Product Sent</h3></div>
     <div class="card-body"><div class="table-responsive"><table class="table table-bordered table-striped mb-0">
         <thead><tr><th>Photo</th><th>Reference</th><th>Date</th><th>To</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
@@ -200,7 +297,7 @@ require_once '../includes/sidebar.php';
                 <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
                 <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td>
                 <td><?= htmlspecialchars(app_date($row['created_at'])); ?></td>
-                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?></td>
+                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?><div class="mt-1"><?= $direction_badge($row['from_branch_id'], $row['to_branch_id']); ?></div></td>
                 <td><?= distribution_product_blocks($group['product_summary']); ?></td>
                 <td><?= htmlspecialchars($group['code_summary']); ?></td>
                 <td><?= number_format($group['quantity'], 0); ?></td>
@@ -300,6 +397,66 @@ document.querySelectorAll('form[id^="receipt-"]').forEach(function(form){
         }
     });
 });
+// Send Product: products and variants available at this location.
+(function () {
+    const form = document.getElementById('send-stock-form');
+    if (!form) return;
+    const lines = document.getElementById('send-lines');
+    const template = lines.querySelector('.send-line').cloneNode(true);
+    const to = document.getElementById('send-to');
+    const direction = document.getElementById('send-direction');
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let products = [];
+    to.addEventListener('change', function () {
+        const option = to.selectedOptions[0];
+        direction.hidden = !option || !option.value;
+        direction.textContent = option && option.value ? option.dataset.direction : '';
+    });
+    function fillSelect(select) {
+        select.innerHTML = '';
+        select.add(new Option(products.length ? 'Select product' : 'No stock available here', ''));
+        products.forEach(product => {
+            const option = new Option(product.name + ' — Available: ' + Number(product.available).toLocaleString(), product.id);
+            option.dataset.available = product.available;
+            option.dataset.variants = JSON.stringify(product.variants || []);
+            select.add(option);
+        });
+        select.addEventListener('change', () => renderQuantity(select));
+    }
+    function renderQuantity(select) {
+        const row = select.closest('.send-line');
+        const wrap = row.querySelector('.send-quantity-wrap');
+        const index = [...lines.querySelectorAll('.send-line')].indexOf(row);
+        const option = select.selectedOptions[0];
+        if (!option || !option.value) { wrap.innerHTML = '<input class="form-control" type="number" disabled>'; return; }
+        let variants = [];
+        try { variants = JSON.parse(option.dataset.variants || '[]'); } catch (e) {}
+        if (!variants.length) {
+            const available = Number(option.dataset.available || 0);
+            wrap.innerHTML = '<div class="input-group"><div class="input-group-prepend"><span class="input-group-text">Available: ' + available + '</span></div><input class="form-control" type="number" name="quantity[' + index + ']" min="1" max="' + available + '" step="1" required></div>';
+            return;
+        }
+        wrap.innerHTML = variants.map((variant, v) =>
+            '<div class="input-group mb-1"><div class="input-group-prepend"><span class="input-group-text">' + escapeHtml(variant.name) + ' (Available: ' + Number(variant.available) + ')</span></div>'
+            + '<input type="hidden" name="variant_name[' + index + '][' + v + ']" value="' + escapeHtml(variant.name) + '">'
+            + '<input class="form-control" type="number" name="variant_quantity[' + index + '][' + v + ']" min="0" max="' + Number(variant.available) + '" step="1"></div>'
+        ).join('');
+    }
+    document.getElementById('send-add-line').addEventListener('click', function () {
+        const row = template.cloneNode(true);
+        lines.appendChild(row);
+        fillSelect(row.querySelector('.send-product'));
+    });
+    fetch('../sales/send_stock_products.php<?= $warehouse_receipt_mode ? '?warehouse=1' : ''; ?>', {cache: 'no-store', credentials: 'same-origin'})
+        .then(response => response.ok ? response.json() : [])
+        .then(list => { products = Array.isArray(list) ? list : []; lines.querySelectorAll('.send-product').forEach(fillSelect); })
+        .catch(() => { lines.querySelectorAll('.send-product').forEach(select => { select.innerHTML = '<option value="">Products could not be loaded</option>'; }); });
+    form.addEventListener('submit', function (event) {
+        const filled = [...form.querySelectorAll('input[name^="quantity"], input[name^="variant_quantity"]')].some(input => Number(input.value) > 0);
+        if (!filled) { event.preventDefault(); alert('Add a product and enter at least one quantity.'); return; }
+        if (!confirm('Send this stock to ' + (to.selectedOptions[0] ? to.selectedOptions[0].text : '') + '?')) event.preventDefault();
+    });
+})();
 const selectedRequest = document.querySelector('tr.table-primary[id^="receive-request-"]');
 if (selectedRequest) {
     selectedRequest.scrollIntoView({ behavior: 'smooth', block: 'center' });

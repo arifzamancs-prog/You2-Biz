@@ -327,6 +327,15 @@ Due
 
     <?php if(manager_can_modify()){ ?>
 
+    <?php if(($_SESSION['company_type'] ?? '') !== 'Housing'){ ?>
+    <a href="purchase_return_create.php?purchase_id=<?= (int)$row['id']; ?>"
+    class="btn btn-outline-secondary btn-sm"
+    title="Return products to <?= htmlspecialchars(supplier_display_text('supplier')); ?>"
+    aria-label="Return products">
+        <i class="fas fa-undo"></i>
+    </a>
+    <?php } ?>
+
     <a href="edit.php?id=<?= $row['id']; ?>"
     class="btn btn-warning btn-sm"
     title="Edit Purchase"

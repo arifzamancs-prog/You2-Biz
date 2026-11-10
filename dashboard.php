@@ -83,6 +83,7 @@ function dashboard_resolve_transaction_type_label($conn, $transaction, $user_id)
         'transfer_out' => 'Transfer Out',
         'sales_invoice' => 'Sales Invoice',
         'receive_payment' => 'Receive Due Payment',
+        'purchase_return' => 'Vendor Return Refund',
         'purchase' => 'Purchase',
         'supplier_payment' => 'Supplier Due Payment',
         'invoice_income' => 'Booking Invoice',
@@ -755,6 +756,7 @@ require_once 'includes/sidebar.php';
                         'transfer_in',
                         'sales_invoice',
                         'receive_payment',
+                        'purchase_return',
                         'invoice_income'
                     ];
 

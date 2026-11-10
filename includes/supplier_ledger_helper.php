@@ -131,6 +131,34 @@ function supplier_ledger_data($conn, $user_id, $supplier_id)
         ];
     }
 
+    /* Purchase returns: the returned goods lower what we owe; cash the vendor refunded raises it back */
+
+    $returns_table = mysqli_query($conn, "SHOW TABLES LIKE 'purchase_returns'");
+    if($returns_table && mysqli_num_rows($returns_table) > 0){
+        $stmt = mysqli_prepare(
+            $conn,
+            "SELECT r.id, r.return_date, r.return_no, r.total_amount, r.cash_refund, p.purchase_no
+             FROM purchase_returns r
+             LEFT JOIN purchases p ON p.id = r.purchase_id
+             WHERE r.supplier_id=? AND r.user_id=?"
+        );
+        mysqli_stmt_bind_param($stmt, "ii", $supplier_id, $user_id);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+
+        while($row = mysqli_fetch_assoc($result)){
+            $ledger[] = [
+                'trx_date' => $row['return_date'],
+                'type' => 'Return',
+                'reference' => $row['return_no'] . (trim((string)$row['purchase_no']) !== '' ? ' (' . $row['purchase_no'] . ')' : ''),
+                'sort_order' => 3,
+                'reference_id' => (int)$row['id'],
+                'debit' => (float)$row['cash_refund'],
+                'credit' => (float)$row['total_amount'],
+            ];
+        }
+    }
+
     usort($ledger, function($a, $b){
         $date_compare = strtotime($a['trx_date']) - strtotime($b['trx_date']);
 
@@ -151,8 +179,13 @@ function supplier_ledger_data($conn, $user_id, $supplier_id)
     $total_paid = 0;
 
     foreach($ledger as $index => $row){
-        $total_purchase += $row['debit'];
-        $total_paid += $row['credit'];
+        if($row['type'] === 'Return'){
+            // A return is not a purchase: only its net effect lowers what is owed.
+            $total_paid += $row['credit'] - $row['debit'];
+        }else{
+            $total_purchase += $row['debit'];
+            $total_paid += $row['credit'];
+        }
         $ledger[$index]['running_balance'] = $total_purchase - $total_paid;
     }
 

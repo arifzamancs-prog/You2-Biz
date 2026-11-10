@@ -78,12 +78,22 @@ if (isset($conn) && $conn instanceof mysqli && !is_super_admin_user()) {
             WHERE d.user_id=? AND d.to_branch_id=? AND d.status='pending'
             GROUP BY p.id,p.product_name,p.sku
             ORDER BY MAX(d.created_at) ASC";
-        $stock_notification_stmt = mysqli_prepare($conn, $stock_notification_sql);
-        if ($stock_notification_stmt) {
-            mysqli_stmt_bind_param($stock_notification_stmt, 'ii', $stock_notification_company_id, $stock_notification_branch_id);
+        // Requests for the selected branch, plus the warehouse's own for warehouse managers.
+        $stock_notification_targets = [[$stock_notification_branch_id, false]];
+        $stock_notification_warehouse_id = stock_can_manage_warehouse($conn) ? (int)stock_warehouse_id($conn, $stock_notification_company_id) : 0;
+        if ($stock_notification_warehouse_id > 0 && $stock_notification_warehouse_id !== (int)$stock_notification_branch_id) {
+            $stock_notification_targets[] = [$stock_notification_warehouse_id, true];
+        }
+        foreach ($stock_notification_targets as [$stock_notification_target_id, $stock_notification_is_warehouse]) {
+            $stock_notification_stmt = mysqli_prepare($conn, $stock_notification_sql);
+            if (!$stock_notification_stmt) continue;
+            mysqli_stmt_bind_param($stock_notification_stmt, 'ii', $stock_notification_company_id, $stock_notification_target_id);
             mysqli_stmt_execute($stock_notification_stmt);
             $stock_notification_result = mysqli_stmt_get_result($stock_notification_stmt);
-            while ($stock_notification_result && ($stock_notification = mysqli_fetch_assoc($stock_notification_result))) $stock_receive_notifications[] = $stock_notification;
+            while ($stock_notification_result && ($stock_notification = mysqli_fetch_assoc($stock_notification_result))) {
+                $stock_notification['warehouse'] = $stock_notification_is_warehouse;
+                $stock_receive_notifications[] = $stock_notification;
+            }
             mysqli_stmt_close($stock_notification_stmt);
         }
     }
@@ -230,9 +240,9 @@ if (
                 <?php } ?>
                 <?php if($stock_receive_notifications){ ?>
                     <?php foreach($stock_receive_notifications as $notification){ ?>
-                        <a href="<?= htmlspecialchars(app_path('sales/receive_stock.php?distribution_id=' . (int)$notification['id'] . '#receive-request-' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
+                        <a href="<?= htmlspecialchars(app_path((!empty($notification['warehouse']) ? 'warehouse' : 'sales') . '/receive_stock.php?distribution_id=' . (int)$notification['id'] . '#receive-request-' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
                             <span class="lead-followup-icon bg-success"><i class="fas fa-truck-loading"></i></span>
-                            <span class="lead-followup-content"><span class="lead-followup-title"><?= htmlspecialchars($notification['product_name']); ?><?= trim((string)($notification['sku'] ?? '')) !== '' ? ' [Code: ' . htmlspecialchars($notification['sku']) . ']' : ''; ?> · <?= number_format((float)$notification['quantity'], 0); ?> pcs</span><span class="lead-followup-meta">Stock receive request<?= (int)$notification['request_count'] > 1 ? ' · ' . (int)$notification['request_count'] . ' items' : ' · ' . htmlspecialchars($notification['reference_no']); ?></span><span class="lead-followup-due">Date: <?= htmlspecialchars(app_date($notification['created_at'])); ?></span></span>
+                            <span class="lead-followup-content"><span class="lead-followup-title"><?= !empty($notification['warehouse']) ? '[Warehouse] ' : ''; ?><?= htmlspecialchars($notification['product_name']); ?><?= trim((string)($notification['sku'] ?? '')) !== '' ? ' [Code: ' . htmlspecialchars($notification['sku']) . ']' : ''; ?> · <?= number_format((float)$notification['quantity'], 0); ?> pcs</span><span class="lead-followup-meta">Stock receive request<?= (int)$notification['request_count'] > 1 ? ' · ' . (int)$notification['request_count'] . ' items' : ' · ' . htmlspecialchars($notification['reference_no']); ?></span><span class="lead-followup-due">Date: <?= htmlspecialchars(app_date($notification['created_at'])); ?></span></span>
                         </a>
                     <?php } ?>
                 <?php } ?>

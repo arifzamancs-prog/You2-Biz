@@ -74,13 +74,16 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
     $product_id = (int)$product_id;
     $quantity = (float)$quantity;
     $variant_name = trim((string)$variant_name);
-    if ($user_id !== (int)($_SESSION['user_id'] ?? 0) || !stock_can_manage_warehouse($conn)
-        || (is_manager_user() && !manager_has_permission('warehouse'))) throw new RuntimeException('Warehouse distribution permission is required.');
+    $head_id = stock_head_office_id($conn, $user_id);
+    $from_branch = $from_branch === null ? $head_id : (int)$from_branch;
+    // Warehouse managers may move stock between any locations; anyone else may only send
+    // from the branch they are working in (Branch > Warehouse, Branch > Branch).
+    $warehouse_manager = stock_can_manage_warehouse($conn) && (!is_manager_user() || manager_has_permission('warehouse'));
+    $own_location = !is_agent_user() && $from_branch > 0 && $from_branch === (int)selected_branch_id($conn, true);
+    if ($user_id !== (int)($_SESSION['user_id'] ?? 0) || (!$warehouse_manager && !$own_location)) throw new RuntimeException('You can only send stock from your own branch.');
     if (!company_multi_branch_enabled($conn, $user_id)) throw new RuntimeException('Multi Branch must be active to distribute stock.');
     if (!is_finite($quantity) || $quantity <= 0 || floor($quantity) !== $quantity) throw new RuntimeException('Enter a positive whole quantity.');
     if (!preg_match('/^[a-f0-9]{32,64}$/', $request_key)) throw new RuntimeException('Invalid distribution request.');
-    $head_id = stock_head_office_id($conn, $user_id);
-    $from_branch = $from_branch === null ? $head_id : (int)$from_branch;
     $source = mysqli_fetch_assoc(mysqli_query($conn, "SELECT id FROM branches WHERE id={$from_branch} AND user_id={$user_id} AND status='active'"));
     if (!$source) throw new RuntimeException('Select an active source location of this company.');
     $target = mysqli_fetch_assoc(mysqli_query($conn, "SELECT id FROM branches WHERE id={$to_branch} AND user_id={$user_id} AND status='active'"));

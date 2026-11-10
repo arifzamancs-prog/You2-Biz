@@ -3,12 +3,14 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/variant_split_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $variants_enabled = product_variants_enabled($conn, $user_id);
 ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_variant_schema($conn);
 ensure_product_subcategory_schema($conn);
+variant_split_schema($conn);
 
 $id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -118,7 +120,30 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         $user_id
     );
 
-    if(mysqli_stmt_execute($stmt)){
+    // Variants added to a category that had none: its products move onto the first variant,
+    // and each branch/warehouse can split that stock by variant once from My Stock.
+    $first_variants_added = $variants_enabled
+        && trim((string)($category['variant_options'] ?? '')) === ''
+        && product_variant_options_from_text($variant_options);
+
+    mysqli_begin_transaction($conn);
+    try{
+        $saved = mysqli_stmt_execute($stmt);
+        if($saved && $first_variants_added){
+            variant_split_autoassign_category($conn, $user_id, $id, product_variant_options_from_text($variant_options));
+        }
+        if($saved){
+            mysqli_commit($conn);
+        }else{
+            mysqli_rollback($conn);
+        }
+    }catch(Throwable $e){
+        mysqli_rollback($conn);
+        error_log($e->getMessage());
+        $saved = false;
+    }
+
+    if($saved){
 
         header(
             "Location: index.php"

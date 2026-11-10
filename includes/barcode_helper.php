@@ -110,7 +110,12 @@ function product_barcode_lookup_map($conn, $user_id, $products, $variant_map)
     $result = mysqli_query($conn, "SELECT product_id, variant_name, barcode FROM product_barcodes WHERE user_id={$user_id}");
 
     while($row = mysqli_fetch_assoc($result)){
-        $add($row['barcode'], $row['product_id'], (string)$row['variant_name']);
+        // A product-level label of a product with variants: the variant is picked on the invoice.
+        $variant = (string)$row['variant_name'];
+        if($variant === '' && !empty($variant_map[(int)$row['product_id']])){
+            $variant = null;
+        }
+        $add($row['barcode'], $row['product_id'], $variant);
     }
 
     foreach($products as $product){

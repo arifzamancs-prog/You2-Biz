@@ -114,6 +114,12 @@ while($staff_codes_result && $code_row = mysqli_fetch_assoc($staff_codes_result)
     }
 }
 $last_staff_code = $staff_codes[0] ?? '';
+// A new form starts with the last Staff ID plus one; the admin can change it.
+if($_SERVER['REQUEST_METHOD'] !== 'POST' && $staff_code === '' && $last_staff_code !== ''){
+    require_once '../includes/code_sequence_helper.php';
+    $staff_codes_lower = array_map('mb_strtolower', $staff_codes);
+    $staff_code = code_sequence_next($last_staff_code, function($code) use ($staff_codes_lower){ return in_array(mb_strtolower($code), $staff_codes_lower, true); });
+}
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -128,10 +134,10 @@ require_once '../includes/sidebar.php';
                 <label>Staff ID <span class="text-danger">*</span></label>
                 <input class="form-control" name="staff_code" id="staff_code" value="<?= htmlspecialchars($staff_code); ?>" required>
                 <small class="text-muted d-block mt-2">
-                    Last Staff ID:
-                    <?= $last_staff_code !== '' ? htmlspecialchars($last_staff_code) : 'No staff ID created yet.'; ?>
+                    Last created Staff ID:
+                    <?= $last_staff_code !== '' ? '<strong>' . htmlspecialchars($last_staff_code) . '</strong>' : 'No staff ID created yet.'; ?>
                 </small>
-                <small id="staff_code_status" class="d-block mt-1 text-muted">Type a new Staff ID to check availability.</small>
+                <small id="staff_code_status" class="d-block mt-1 text-muted"><?= $staff_code !== '' && $last_staff_code !== '' ? 'The next ID is filled in; you can change it.' : 'Type a new Staff ID to check availability.'; ?></small>
             </div>
             <div class="form-group"><label>Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
             <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? ''); ?>" required></div>

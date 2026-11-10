@@ -8,7 +8,8 @@ require_once '../includes/contact_code_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_contact_code_columns($conn);
-$customer_code = contact_code_next($conn, 'customer', $user_id);
+$customer_code = contact_code_suggest($conn, 'customer', $user_id);
+$last_customer_code = contact_code_last($conn, 'customer', $user_id);
 
 $message = '';
 
@@ -112,7 +113,7 @@ require_once '../includes/sidebar.php';
 
         <form method="post">
 
-            <?= contact_code_field_html('customer', $customer_code, contact_code_list($conn, 'customer', $user_id)); ?>
+            <?= contact_code_field_html('customer', $customer_code, contact_code_list($conn, 'customer', $user_id), $last_customer_code); ?>
 
             <div class="form-group">
 

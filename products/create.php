@@ -8,6 +8,7 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 
 $user_id = $_SESSION['user_id'];
+require_once '../includes/code_sequence_helper.php';
 $catalog_branch_id = ($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe' ? selected_branch_id($conn, true) : 0;
 $catalog_branch_column = $catalog_branch_id > 0 ? 'branch_id,' : '';
 $catalog_branch_value = $catalog_branch_id > 0 ? $catalog_branch_id . ',' : '';
@@ -234,6 +235,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                     'ok' => true,
                     'message' => 'Product "' . $product_name . '" saved successfully.',
                     'product' => ['id' => $product_id, 'name' => $product_name, 'sku' => $sku, 'stock' => $opening_stock],
+                    // Pre-fill the next product's code from the one just saved.
+                    'last_sku' => trim((string)$sku),
+                    'next_sku' => trim((string)$sku) !== '' ? code_sequence_next($sku, function($code) use ($conn, $user_id){ return product_sku_exists($conn, $user_id, $code, 0); }) : '',
                 ]);
                 exit;
             }
@@ -272,6 +276,16 @@ if($is_ajax_save){
 if (restaurant_catalog_enabled($conn, $user_id)) {
     require_once '../restaurant/products_create.php';
     exit;
+}
+
+// The next code continues from the last product created; the admin can change it.
+require_once '../includes/code_sequence_helper.php';
+$last_code_stmt = mysqli_prepare($conn, "SELECT sku FROM products WHERE user_id=? AND sku IS NOT NULL AND TRIM(sku)<>'' ORDER BY id DESC LIMIT 1");
+mysqli_stmt_bind_param($last_code_stmt, 'i', $user_id);
+mysqli_stmt_execute($last_code_stmt);
+$last_product_code = trim((string)(mysqli_fetch_row(mysqli_stmt_get_result($last_code_stmt))[0] ?? ''));
+if($_SERVER['REQUEST_METHOD'] !== 'POST' && $last_product_code !== ''){
+    $form_data['sku'] = code_sequence_next($last_product_code, function($code) use ($conn, $user_id){ return product_sku_exists($conn, $user_id, $code, 0); });
 }
 
 require_once '../includes/header.php';
@@ -387,6 +401,7 @@ require_once '../includes/sidebar.php';
                             name="sku"
                             class="form-control"
                             value="<?= htmlspecialchars((string)($form_data['sku'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+                        <?= code_sequence_last_hint($last_product_code, 'product code'); ?>
 
                     </div>
 
@@ -614,6 +629,10 @@ category.addEventListener('change',syncVariants); syncVariants();
         recentWrap.classList.remove('d-none');
         recentList.insertAdjacentHTML('afterbegin','<li class="list-group-item d-flex justify-content-between align-items-center py-2"><span>'+esc(p.name)+(p.sku?' <small class="text-muted">('+esc(p.sku)+')</small>':'')+'</span><span class="badge badge-light">Stock: '+esc(p.stock)+'</span></li>');
         resetForNext();
+        if(result.last_sku){
+          const skuInput=form.querySelector('[name="sku"]');
+          if(skuInput){ skuInput.value=result.next_sku||''; const hint=skuInput.nextElementSibling; if(hint&&hint.tagName==='SMALL') hint.innerHTML='Last created product code: <strong>'+esc(result.last_sku)+'</strong>'; }
+        }
       }
     }catch(err){
       show(false,'Product could not be saved. Please check your connection and try again.');

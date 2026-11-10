@@ -40,12 +40,14 @@ while($stock_row = mysqli_fetch_assoc($stock_rows)){
     $stock_map[(int)$stock_row['product_id']][(string)$stock_row['variant_name']] = (float)$stock_row['available'];
 }
 
-// One label item per product, or per variant when the product has variants.
+// Every product has a product-level label; a product with variants also has one per variant.
+// The Variant switch decides which of the two lists is offered.
 $items = [];
 foreach($products as $product){
-    $variants = $variant_map[(int)$product['id']] ?? [''];
-    foreach(array_values($variants) as $position => $variant){
-        $items[] = ['product' => $product, 'variant' => (string)$variant, 'position' => $position];
+    $variants = array_values(array_filter(array_map('strval', $variant_map[(int)$product['id']] ?? []), fn($name) => $name !== ''));
+    $items[] = ['product' => $product, 'variant' => '', 'position' => 0, 'has_variants' => (bool)$variants];
+    foreach($variants as $position => $variant){
+        $items[] = ['product' => $product, 'variant' => $variant, 'position' => $position, 'has_variants' => true];
     }
 }
 $barcodes = product_barcodes_for_items($conn, $user_id, $items);
@@ -54,15 +56,27 @@ $label_items = [];
 foreach($items as $item){
     $product_id = (int)$item['product']['id'];
     $variant = $item['variant'];
+    // A product-level label of a product with variants counts the stock of all its variants.
+    $stock = $variant === '' && $item['has_variants']
+        ? array_sum($stock_map[$product_id] ?? [])
+        : ($stock_map[$product_id][$variant] ?? 0);
     $label_items[] = [
         'key' => $product_id . '|' . $variant,
         'name' => $item['product']['product_name'],
         'variant' => $variant,
+        'level' => $variant === '' ? 'product' : 'variant',
+        'has_variants' => $item['has_variants'],
         'code' => (string)($item['product']['sku'] ?? ''),
         'barcode' => $barcodes[$product_id][$variant] ?? '',
         'price' => number_format((float)$item['product']['sale_price'], 2, '.', ''),
-        'stock' => max(0, (int)floor($stock_map[$product_id][$variant] ?? 0)),
+        'stock' => max(0, (int)floor($stock)),
     ];
+}
+// The Variant switch only appears when the company uses variants at all.
+$company_has_variants = (bool)array_filter($label_items, fn($item) => $item['has_variants']);
+if(!$company_has_variants && function_exists('product_variants_enabled') && product_variants_enabled($conn, $user_id)){
+    $variant_categories = mysqli_query($conn, "SELECT 1 FROM product_categories WHERE user_id={$user_id} AND TRIM(COALESCE(variant_options,''))<>'' LIMIT 1");
+    $company_has_variants = $variant_categories && mysqli_num_rows($variant_categories) > 0;
 }
 $label_items = array_values(array_filter($label_items, fn($item) => $item['barcode'] !== ''));
 
@@ -142,7 +156,7 @@ require_once '../includes/sidebar.php';
             <label class="d-block">Show On Label</label>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-shop" data-part="shop" checked><label class="custom-control-label" for="show-shop">Shop Name</label></div>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-name" data-part="name" checked><label class="custom-control-label" for="show-name">Product Name</label></div>
-            <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-variant" data-part="variant" checked><label class="custom-control-label" for="show-variant">Variant</label></div>
+            <?php if($company_has_variants){ ?><div class="custom-control custom-checkbox custom-control-inline" title="On: each variant gets its own barcode. Off: one barcode per product."><input type="checkbox" class="custom-control-input label-part" id="show-variant" data-part="variant"><label class="custom-control-label" for="show-variant">Variant</label></div><?php } ?>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-price" data-part="price" checked><label class="custom-control-label" for="show-price">Price</label></div>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-code" data-part="code" checked><label class="custom-control-label" for="show-code">Barcode Number</label></div>
         </div>
@@ -154,11 +168,6 @@ require_once '../includes/sidebar.php';
                 <label for="barcode-product">Product</label>
                 <select id="barcode-product" class="form-control">
                     <option value="">Search product name or code</option>
-                    <?php foreach($label_items as $item){ ?>
-                        <option value="<?= htmlspecialchars($item['key'], ENT_QUOTES, 'UTF-8'); ?>">
-                            <?= htmlspecialchars($item['name'] . ($item['variant'] !== '' ? ' - ' . $item['variant'] : '') . ($item['code'] !== '' ? ' [' . $item['code'] . ']' : '') . ' (Stock: ' . $item['stock'] . ')'); ?>
-                        </option>
-                    <?php } ?>
                 </select>
             </div>
             <div class="col-md-2 form-group">
@@ -216,6 +225,26 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
     const preview = document.getElementById("barcode-preview");
     const printButton = document.getElementById("barcode-print");
 
+    // The Variant switch decides the list: one entry per product, or one per variant.
+    const variantSwitch = document.getElementById("show-variant");
+    function variantMode(){ return !!(variantSwitch && variantSwitch.checked); }
+    function offered(){
+        return items.filter(function(item){
+            return variantMode() ? (item.level === "variant" || !item.has_variants) : item.level === "product";
+        });
+    }
+    function renderOptions(){
+        const select = document.getElementById("barcode-product");
+        select.innerHTML = "";
+        select.appendChild(new Option("Search product name or code", ""));
+        offered().forEach(function(item){
+            const text = item.name + (item.variant ? " - " + item.variant : "") + (item.code ? " [" + item.code + "]" : "") + " (Stock: " + item.stock + ")";
+            select.appendChild(new Option(text, item.key));
+        });
+        $(select).val("").trigger("change");
+    }
+    renderOptions();
+    if(variantSwitch) variantSwitch.addEventListener("change", renderOptions);
     $("#barcode-product").select2({theme: "bootstrap4", width: "100%", placeholder: "Search product name or code", allowClear: true});
 
     function el(tag, cls, text){
@@ -409,7 +438,7 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
 
     $("#barcode-add-stock").on("click", function(){
         let added = 0;
-        items.forEach(function(item){ if(item.stock > 0){ addItem(item.key, item.stock); added++; } });
+        offered().forEach(function(item){ if(item.stock > 0){ addItem(item.key, item.stock); added++; } });
         if(!added) alert("No product is in stock.");
         renderTable(); render();
     });

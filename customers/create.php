@@ -379,6 +379,12 @@ while($customer_codes_result && $code_row = mysqli_fetch_assoc($customer_codes_r
 }
 
 $last_customer_code = $customer_codes[0] ?? '';
+// A new form starts with the last Customer ID plus one; the admin can change it.
+if($_SERVER['REQUEST_METHOD'] !== 'POST' && $customer_code === '' && $last_customer_code !== ''){
+    require_once '../includes/code_sequence_helper.php';
+    $customer_codes_lower = array_map('mb_strtolower', $customer_codes);
+    $customer_code = code_sequence_next($last_customer_code, function($code) use ($customer_codes_lower){ return in_array(mb_strtolower($code), $customer_codes_lower, true); });
+}
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -431,10 +437,10 @@ require_once '../includes/sidebar.php';
                             <small class="text-danger">Customer ID is required.</small>
                         <?php } ?>
                         <small class="text-muted d-block mt-2">
-                            Last Customer ID:
-                            <?= $last_customer_code !== '' ? htmlspecialchars($last_customer_code) : 'No customer ID created yet.'; ?>
+                            Last created Customer ID:
+                            <?= $last_customer_code !== '' ? '<strong>' . htmlspecialchars($last_customer_code) . '</strong>' : 'No customer ID created yet.'; ?>
                         </small>
-                        <small id="customer_code_status" class="d-block mt-1 text-muted">Type a new Customer ID to check availability.</small>
+                        <small id="customer_code_status" class="d-block mt-1 text-muted"><?= $customer_code !== '' && $last_customer_code !== '' && $_SERVER['REQUEST_METHOD'] !== 'POST' ? 'The next ID is filled in; you can change it.' : 'Type a new Customer ID to check availability.'; ?></small>
                     </div>
                 <?php } elseif($field_key === 'customer_name'){ ?>
                     <div class="form-group">

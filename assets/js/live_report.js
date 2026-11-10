@@ -130,6 +130,31 @@
         const categoryTotal = [...sizes.values()].reduce((sum, qty) => sum + qty, 0);
         return `${esc(metrics[metric])} ${[...sizes].map(([name, qty]) => `${esc(name)}: <strong>${number(qty)}</strong>`).join(' &nbsp; | &nbsp; ')} &nbsp; || &nbsp; Total: <strong>${number(categoryTotal)}</strong>`;
     }
+    // One product's quantity per size for the chosen value (On Hand, Damaged…) and branches.
+    function productSizes(p) {
+        const metric = el('metric').value;
+        const branches = selectedBranches();
+        const sizes = new Map();
+        (p.variants && p.variants.length ? p.variants : [{name: '', cells: {}}]).forEach(v => {
+            const name = v.name || 'Standard';
+            sizes.set(name, (sizes.get(name) || 0) + branches.reduce((sum, b) => sum + value(v.cells[b.id], metric), 0));
+        });
+        return sizes;
+    }
+    function productTotal(p) {
+        return [...productSizes(p).values()].reduce((sum, qty) => sum + qty, 0);
+    }
+    // A product whose total is 0 for the chosen value and branches is left out of the report.
+    function productVisible(p) {
+        return productTotal(p) !== 0;
+    }
+    // The same one-line summary as the category header, for one product's own variants.
+    function productTotalsHtml(p) {
+        const metric = el('metric').value;
+        const sizes = productSizes(p);
+        const total = [...sizes.values()].reduce((sum, qty) => sum + qty, 0);
+        return `${esc(metrics[metric])} ${[...sizes].map(([name, qty]) => `${esc(name)}: <strong>${number(qty)}</strong>`).join(' &nbsp; | &nbsp; ')} &nbsp; || &nbsp; Total: <strong>${number(total)}</strong>`;
+    }
     function categoryHeaderHtml(p) {
         return `<div class="live-category-start" data-category-id="${esc(p.category_id)}"><h4 class="live-category-title">${esc(p.category_name)}</h4><p class="small" data-category-totals="${esc(p.category_id)}">${categoryTotalsHtml(p.category_id)}</p></div>`;
     }
@@ -142,7 +167,7 @@
         const metric = el('metric').value;
         const branches = selectedBranches();
         const columns = branches.map(b => `<th class="${b.code === 'WH' ? 'wh' : ''}" title="${esc(b.branch_name)}">${esc(b.code)}</th>`).join('');
-        let html = `<section class="live-product-block" data-product-id="${esc(p.id)}"><div class="live-product-head"><button type="button" class="live-photo-preview" data-photo-src="${esc(p.photo)}" data-photo-alt="${esc(p.product_name)}" title="Click to view larger photo"><img src="${esc(p.photo)}" alt="${esc(p.product_name)}" loading="lazy"></button><div><strong>${esc(p.product_name)}</strong><div class="text-muted small">Code: ${esc(p.sku || '—')}</div></div></div><div class="live-scroll"><table class="live-matrix"><thead><tr><th>Variant</th>${columns}<th>Total Qty</th></tr></thead><tbody>`;
+        let html = `<section class="live-product-block" data-product-id="${esc(p.id)}"><div class="live-product-head"><button type="button" class="live-photo-preview" data-photo-src="${esc(p.photo)}" data-photo-alt="${esc(p.product_name)}" title="Click to view larger photo"><img src="${esc(p.photo)}" alt="${esc(p.product_name)}" loading="lazy"></button><div><strong>${esc(p.product_name)}</strong><div class="text-muted small">Code: ${esc(p.sku || '—')}</div><div class="small live-product-totals">${productTotalsHtml(p)}</div></div></div><div class="live-scroll"><table class="live-matrix"><thead><tr><th>Variant</th>${columns}<th>Total Qty</th></tr></thead><tbody>`;
         p.variants.forEach(row => {
             const cells = branches.map(b => value(row.cells[b.id], metric));
             html += `<tr><td>${esc(row.name || 'Standard')}</td>${cells.map(n => `<td class="${metric === 'damaged' ? 'damage' : ''}">${number(n)}</td>`).join('')}<td><strong>${number(cells.reduce((a, b) => a + b, 0))}</strong></td></tr>`;
@@ -166,12 +191,14 @@
         const scroll = rememberScroll(container);
         let html = '', category = null;
         products.forEach(p => {
+            if (!productVisible(p)) return;
             if (p.category_id !== category) { category = p.category_id; html += categoryHeaderHtml(p); }
             html += productHtml(p);
         });
         lastCategory = category;
         container.innerHTML = html;
         restoreScroll(container, scroll);
+        renderMore();
     }
     function appendProducts(list) {
         let html = '';
@@ -179,6 +206,7 @@
             if (productSignatures.has(p.id)) return; // already shown
             productSignatures.set(p.id, JSON.stringify(p));
             products.push(p);
+            if (!productVisible(p)) return;
             if (p.category_id !== lastCategory) { lastCategory = p.category_id; html += categoryHeaderHtml(p); }
             html += productHtml(p);
         });
@@ -186,7 +214,8 @@
     }
     function replaceProduct(p) {
         const section = el('products').querySelector(`.live-product-block[data-product-id="${CSS.escape(String(p.id))}"]`);
-        if (!section) return;
+        // A product that starts or stops having stock changes the list: redraw it in order.
+        if (!section || !productVisible(p)) { if (section || productVisible(p)) renderAllProducts(); return; }
         const left = section.querySelector('.live-scroll')?.scrollLeft || 0;
         section.insertAdjacentHTML('afterend', productHtml(p));
         const fresh = section.nextElementSibling;
@@ -195,7 +224,9 @@
     }
     // Loading happens silently in the background, so no loading text is shown.
     function renderMore() {
-        el('more').innerHTML = (meta && total === 0) ? '<div class="live-empty">No products match these filters.</div>' : '';
+        const noneShown = meta && offset >= total && !products.some(productVisible);
+        el('more').innerHTML = (meta && total === 0) ? '<div class="live-empty">No products match these filters.</div>'
+            : (noneShown ? '<div class="live-empty">No product has stock for these filters.</div>' : '');
     }
     function scheduleBackgroundLoad(delay = 150) {
         clearTimeout(backgroundTimer);

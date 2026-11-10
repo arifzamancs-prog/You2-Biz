@@ -7,6 +7,7 @@ require_once '../includes/product_image_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/pending_invoice_stock_helper.php';
+require_once '../includes/variant_split_helper.php';
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
 
@@ -20,6 +21,7 @@ if (is_manager_user() && !manager_has_permission('stock_sales')) {
     exit('Sales access is required.');
 }
 
+variant_split_schema($conn);
 $branch_id = selected_branch_id($conn, true);
 if ($branch_id <= 0) {
     http_response_code(403);
@@ -169,10 +171,10 @@ function my_stock_rows_html($conn, $user_id, $branch_id)
         $available = max(0, (float)$row['on_hand'] - (float)$row['reserved']);
     ?>
         <tr data-stock-search="<?= htmlspecialchars(strtolower($row['product_name'] . ' ' . ($row['sku'] ?? '') . ' ' . implode(' ', $variants)), ENT_QUOTES, 'UTF-8'); ?>">
-            <?php if ($show_photo) { ?><td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td><?php } ?>
+            <?php if ($show_photo) { $stock_photo_url = product_image_url($conn, $row['photo_path'] ?? ''); ?><td><button type="button" class="stock-photo-preview" data-photo-src="<?= htmlspecialchars($stock_photo_url); ?>" data-photo-alt="<?= htmlspecialchars((string)$row['product_name']); ?>" title="View photo" aria-label="View photo of <?= htmlspecialchars((string)$row['product_name']); ?>"><img src="<?= htmlspecialchars($stock_photo_url); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></button></td><?php } ?>
             <td><?= htmlspecialchars($row['product_name']); ?><?php if ($variants) { ?><small class="d-block text-muted"><?= implode(' || ', $variants); ?></small><?php } ?></td>
             <td><?= htmlspecialchars($row['sku'] ?? ''); ?></td>
-            <td><?= number_format((float)$row['on_hand'], 0); ?></td>
+            <td><?= variant_split_cell_html(variant_split_candidate($conn, $user_id, (int)$row['id'], $branch_id), number_format((float)$row['on_hand'], 0), $row['product_name'], 'branch'); ?></td>
             <td><?= number_format((float)$row['reserved'], 0); ?></td>
             <td class="text-danger"><?= number_format((float)$row['damaged'], 0); ?><?php if ($damages) { ?><small class="d-block text-muted"><?= implode(' || ', $damages); ?></small><?php } ?></td>
             <td><?= number_format($available, 0); ?></td>
@@ -576,6 +578,28 @@ require_once '../includes/sidebar.php';
         <td><button type="button" class="btn btn-danger adjust-remove-row" title="Remove row">X</button></td>
     </tr>
 </template>
+<?= variant_split_modal_html('stock_variant_split.php'); ?>
+<style>.stock-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}.stock-photo-preview img{transition:transform .15s ease}.stock-photo-preview:hover img{transform:scale(1.08)}</style>
+<div class="modal fade" id="stock-photo-preview-modal" tabindex="-1" role="dialog" aria-labelledby="stock-photo-preview-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="stock-photo-preview-title">Product Photo</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+            <div class="modal-body text-center p-3"><img id="stock-photo-preview-image" src="" alt="" style="max-width:100%;max-height:70vh;object-fit:contain"></div>
+        </div>
+    </div>
+</div>
+<script>
+// Click a stock photo to see it large (rows may be redrawn by search, so the click is delegated).
+document.addEventListener('click', function (event) {
+    var button = event.target.closest('.stock-photo-preview');
+    if (!button || !window.jQuery) return;
+    var image = document.getElementById('stock-photo-preview-image');
+    image.src = button.dataset.photoSrc;
+    image.alt = button.dataset.photoAlt || 'Product photo';
+    document.getElementById('stock-photo-preview-title').textContent = button.dataset.photoAlt || 'Product Photo';
+    jQuery('#stock-photo-preview-modal').modal('show');
+});
+</script>
 <?php if (branch_stock_can_manage_history()) { ?>
 <div class="modal fade" id="adjust-edit-modal" tabindex="-1" role="dialog" aria-labelledby="adjust-edit-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg" role="document"><div class="modal-content">
