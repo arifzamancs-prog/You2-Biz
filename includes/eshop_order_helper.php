@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__.'/pending_invoice_stock_helper.php';
 require_once __DIR__.'/stock_module_helper.php';
+require_once __DIR__.'/invoice_charge_helper.php';
 
 // E-shop is centrally managed. Branches are never selected for online orders.
 // The fallback only supports old installations/tests whose temporary branches
@@ -71,7 +72,7 @@ function eshop_place_order($conn,$cid,$cart,$input,$key){
             $delivery=(float)$zone['charge']; $zoneName=(string)$zone['zone_name'];
         }
         if($delivery>0){
-            $s=mysqli_prepare($conn,"SELECT id FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active' AND charge_type='add' AND charge_value_type='fixed'"); mysqli_stmt_bind_param($s,'ii',$charge,$cid); mysqli_stmt_execute($s);
+            ensure_invoice_charge_columns($conn); $s=mysqli_prepare($conn,"SELECT id FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active' AND charge_type='add' AND charge_value_type='fixed'" . invoice_level_charge_sql() . ""); mysqli_stmt_bind_param($s,'ii',$charge,$cid); mysqli_stmt_execute($s);
             if(!mysqli_fetch_assoc(mysqli_stmt_get_result($s))) throw new RuntimeException('Delivery is not configured. Please contact the shop.');
         }
         $lines=[]; $total=$delivery;

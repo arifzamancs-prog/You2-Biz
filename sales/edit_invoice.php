@@ -128,6 +128,10 @@ mysqli_stmt_execute($stmt);
 $items =
     mysqli_stmt_get_result($stmt);
 
+/* Product charges: current ones plus any already saved on this invoice. */
+$product_charges = invoice_product_charge_types($conn, $user_id, $invoice_id);
+$item_charge_inputs = invoice_item_charge_inputs($conn, $user_id, $invoice_id);
+
 /* Charges */
 
 $sql = "SELECT
@@ -288,6 +292,12 @@ require_once '../includes/sidebar.php';
                     <th width="15%" class="stock-column">Stock</th>
                     <th width="12%">Qty</th>
                     <th width="15%">Price</th>
+                    <?php foreach($product_charges as $product_charge){ ?>
+                    <th class="product-charge-column">
+                        <?= htmlspecialchars($product_charge['charge_name']); ?>
+                        <small class="text-muted">(<?= $product_charge['charge_type'] === 'less' ? '-' : '+'; ?><?= $product_charge['charge_value_type'] === 'percent' ? '%' : ''; ?>)</small>
+                    </th>
+                    <?php } ?>
                     <th width="15%">Total</th>
 
                 </tr>
@@ -301,6 +311,10 @@ require_once '../includes/sidebar.php';
                     $item =
                     mysqli_fetch_assoc($items)
                 ){
+                    $saved_item_charges = $item_charge_inputs[(int)$item['id']] ?? null;
+                    $edit_base_price = $saved_item_charges !== null
+                        ? (float)$saved_item_charges['base_price']
+                        : (float)$item['unit_price'];
                 ?>
 
                 <tr>
@@ -362,11 +376,26 @@ require_once '../includes/sidebar.php';
                         type="number"
                         step="0.01"
                         name="price[]"
-                        value="<?php echo $item['unit_price']; ?>"
+                        value="<?php echo htmlspecialchars(number_format($edit_base_price, 2, '.', '')); ?>"
                         class="form-control price"
                         required>
                     
                     </td>
+
+                    <?php foreach($product_charges as $product_charge_id => $product_charge){ ?>
+                    <td class="product-charge-column">
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            <?= $product_charge['charge_value_type'] === 'percent' ? 'max="100"' : ''; ?>
+                            name="item_charge[<?= (int)$product_charge_id; ?>][]"
+                            value="<?= htmlspecialchars(number_format((float)($saved_item_charges['inputs'][$product_charge_id] ?? 0), 2, '.', '')); ?>"
+                            data-charge-type="<?= htmlspecialchars($product_charge['charge_type']); ?>"
+                            data-value-type="<?= htmlspecialchars($product_charge['charge_value_type']); ?>"
+                            class="form-control item-charge">
+                    </td>
+                    <?php } ?>
 
                     <td>
 
@@ -599,7 +628,22 @@ function calculateInvoice(){
             .val()
         ) || 0;
 
-        let total = qty * price;
+        // Product charges change the unit price (same rounding as update_invoice.php).
+        let unit = price;
+        $(this).find('.item-charge').each(function(){
+            let value = parseFloat($(this).val()) || 0;
+            if(value <= 0){
+                return;
+            }
+            let perUnit = $(this).data('value-type') === 'percent'
+                ? Math.round(price * value) / 100
+                : value;
+            perUnit = Math.round(perUnit * 100) / 100;
+            unit += $(this).data('charge-type') === 'less' ? -perUnit : perUnit;
+        });
+        unit = Math.round(unit * 100) / 100;
+
+        let total = qty * unit;
 
         $(this)
         .find('input[name="line_total[]"]')
@@ -744,7 +788,7 @@ function calculateInvoice(){
 
 $(document).on(
     'keyup change',
-    'input[name="qty[]"], input[name="price[]"], .charge',
+    'input[name="qty[]"], input[name="price[]"], .item-charge, .charge',
     function(){
 
         calculateInvoice();

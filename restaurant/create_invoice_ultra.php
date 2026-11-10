@@ -40,7 +40,7 @@ if($default_wallet_id === 0 && !empty($wallet_rows)){
     $default_wallet_id = (int)$wallet_rows[0]['id'];
 }
 
-$charges_stmt = mysqli_prepare($conn, "SELECT id, charge_name, charge_type, charge_value_type, default_value FROM invoice_charge_types WHERE user_id=? AND status='active' AND show_on_invoice=1 ORDER BY charge_name");
+$charges_stmt = mysqli_prepare($conn, "SELECT id, charge_name, charge_type, charge_value_type, default_value FROM invoice_charge_types WHERE user_id=? AND status='active' AND show_on_invoice=1" . invoice_level_charge_sql() . " ORDER BY charge_name");
 mysqli_stmt_bind_param($charges_stmt, 'i', $user_id);
 mysqli_stmt_execute($charges_stmt);
 $invoice_charges = mysqli_fetch_all(mysqli_stmt_get_result($charges_stmt), MYSQLI_ASSOC);

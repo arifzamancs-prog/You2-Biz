@@ -2,6 +2,7 @@
 require_once 'bootstrap.php';
 require_once '../includes/eshop_order_helper.php';
 eshop_order_schema($conn);
+ensure_invoice_charge_columns($conn);
 $message='';
 $profileStmt=mysqli_prepare($conn,'SELECT delivery_charge FROM eshop_profiles WHERE company_id=?'); mysqli_stmt_bind_param($profileStmt,'i',$company_id); mysqli_stmt_execute($profileStmt);
 $deliveryCharge=(float)(mysqli_fetch_assoc(mysqli_stmt_get_result($profileStmt))['delivery_charge']??0);
@@ -14,14 +15,14 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     if(!in_array($verification,['sms','email'],true)) $verification='sms';
     if($branch>0){
         $valid=true;
-        if($charge){ $s=mysqli_prepare($conn,"SELECT id FROM invoice_charge_types WHERE id=? AND user_id=? AND charge_type='add' AND charge_value_type='fixed' AND status='active'"); mysqli_stmt_bind_param($s,'ii',$charge,$company_id); mysqli_stmt_execute($s); $valid=(bool)mysqli_fetch_assoc(mysqli_stmt_get_result($s)); }
+        if($charge){ $s=mysqli_prepare($conn,"SELECT id FROM invoice_charge_types WHERE id=? AND user_id=? AND charge_type='add' AND charge_value_type='fixed' AND status='active'" . invoice_level_charge_sql() . ""); mysqli_stmt_bind_param($s,'ii',$charge,$company_id); mysqli_stmt_execute($s); $valid=(bool)mysqli_fetch_assoc(mysqli_stmt_get_result($s)); }
         if($valid && $deliveryCharge>0 && !$charge){ $message='Select the invoice charge type for the configured delivery charge.'; }
         elseif($valid){ $s=mysqli_prepare($conn,'INSERT INTO eshop_checkout_settings(company_id,branch_id,charge_type_id,customer_verification_method) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE branch_id=VALUES(branch_id),charge_type_id=VALUES(charge_type_id),customer_verification_method=VALUES(customer_verification_method)'); mysqli_stmt_bind_param($s,'iiis',$company_id,$branch,$charge,$verification); mysqli_stmt_execute($s); $message='Checkout settings saved.'; }
         else $message='Select a valid delivery charge type.';
     }else $message='Central Head Office is not available.';
 }
 $s=mysqli_prepare($conn,'SELECT * FROM eshop_checkout_settings WHERE company_id=?'); mysqli_stmt_bind_param($s,'i',$company_id); mysqli_stmt_execute($s); $config=mysqli_fetch_assoc(mysqli_stmt_get_result($s))?:[];
-$charges=mysqli_query($conn,"SELECT id,charge_name FROM invoice_charge_types WHERE user_id=$company_id AND status='active' AND charge_type='add' AND charge_value_type='fixed'");
+$charges=mysqli_query($conn,"SELECT id,charge_name FROM invoice_charge_types WHERE user_id=$company_id AND status='active' AND charge_type='add' AND charge_value_type='fixed'" . invoice_level_charge_sql() . "");
 require_once '../includes/header.php'; require_once '../includes/navbar.php'; require_once '../includes/sidebar.php';
 ?>
 <div class="card"><div class="card-header">Checkout Settings</div><div class="card-body">

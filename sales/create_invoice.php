@@ -120,9 +120,12 @@ $charges = mysqli_query(
      FROM invoice_charge_types
      WHERE user_id={$user_id}
      AND status='active'
-     AND show_on_invoice=1
+     AND show_on_invoice=1" . invoice_level_charge_sql() . "
      ORDER BY charge_name"
 );
+
+/* Product charges: one column per charge between Price and Qty. */
+$product_charges = invoice_product_charge_types($conn, $user_id);
 
 /* Recent invoices: same branch/user scope as Invoice List. */
 $recent_branch_scope = branch_scope_sql($conn, 'invoices');
@@ -493,6 +496,13 @@ require_once '../includes/sidebar.php';
 
                     </th>
 
+                    <?php foreach($product_charges as $product_charge){ ?>
+                    <th class="product-charge-column">
+                        <?= htmlspecialchars($product_charge['charge_name']); ?>
+                        <small class="text-muted">(<?= $product_charge['charge_type'] === 'less' ? '-' : '+'; ?><?= $product_charge['charge_value_type'] === 'percent' ? '%' : ''; ?>)</small>
+                    </th>
+                    <?php } ?>
+
                     <th>
 
                         Qty
@@ -573,6 +583,23 @@ require_once '../includes/sidebar.php';
                             class="form-control price">
 
                     </td>
+
+                    <?php foreach($product_charges as $product_charge_id => $product_charge){ ?>
+                    <td class="product-charge-column">
+                        <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            <?= $product_charge['charge_value_type'] === 'percent' ? 'max="100"' : ''; ?>
+                            name="item_charge[<?= (int)$product_charge_id; ?>][]"
+                            value="<?= htmlspecialchars(number_format((float)$product_charge['default_value'], 2, '.', '')); ?>"
+                            data-default="<?= htmlspecialchars(number_format((float)$product_charge['default_value'], 2, '.', '')); ?>"
+                            data-charge-type="<?= htmlspecialchars($product_charge['charge_type']); ?>"
+                            data-value-type="<?= htmlspecialchars($product_charge['charge_value_type']); ?>"
+                            class="form-control item-charge"
+                            placeholder="<?= $product_charge['charge_value_type'] === 'percent' ? '%' : 'Amount'; ?>">
+                    </td>
+                    <?php } ?>
 
                     <td>
 
@@ -1111,6 +1138,7 @@ if($(this).val()=="instant"){
         firstRow.find(".variant-choice-list").empty();
         firstRow.find(".stock,.price,.line_total").val("");
         firstRow.find(".qty").val(1);
+        resetItemCharges(firstRow);
         $(".charge").val(0);
         $(".customer-select").val("").trigger("change");
         $("#customer_type").trigger("change");
@@ -1321,7 +1349,7 @@ if($(this).val()=="instant"){
 
         "keyup change",
 
-        ".qty,.price",
+        ".qty,.price,.item-charge",
 
         function(){
 
@@ -1381,6 +1409,7 @@ $(document).on(
         row.find("input").val("");
 
         row.find(".qty").val(1);
+        resetItemCharges(row);
         row.find(".product-variant")
             .html("<option value=\"\">No variant</option>")
             .prop("disabled", false)
@@ -1659,6 +1688,33 @@ function autoPaidAmountForCurrentSelection(grand){
 
 /* Row Total */
 
+// Product charges change the unit price (same rounding as save_invoice.php).
+function chargedUnitPrice(row, price){
+
+    let unit = price;
+
+    row.find(".item-charge").each(function(){
+        let value = parseFloat($(this).val()) || 0;
+        if(value <= 0){
+            return;
+        }
+        let perUnit = $(this).data("value-type") === "percent"
+            ? Math.round(price * value) / 100
+            : value;
+        perUnit = Math.round(perUnit * 100) / 100;
+        unit += $(this).data("charge-type") === "less" ? -perUnit : perUnit;
+    });
+
+    return Math.round(unit * 100) / 100;
+
+}
+
+function resetItemCharges(row){
+    row.find(".item-charge").each(function(){
+        $(this).val($(this).data("default"));
+    });
+}
+
 function calculateRow(row){
 
     let price = parseFloat(
@@ -1669,7 +1725,7 @@ function calculateRow(row){
         row.find(".qty").val()
     ) || 0;
 
-    let total = price * qty;
+    let total = chargedUnitPrice(row, price) * qty;
 
     row.find(".line_total")
        .val(total.toFixed(2));

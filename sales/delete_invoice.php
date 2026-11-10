@@ -9,6 +9,7 @@ require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/sales_refund_helper.php';
+require_once '../includes/invoice_charge_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -157,6 +158,8 @@ while($item = mysqli_fetch_assoc($items)){
 | Delete Invoice Items
 |--------------------------------------------------
 */
+
+invoice_delete_item_charges($conn, (int)$user_id, (int)$invoice_id);
 
 mysqli_query(
     $conn,

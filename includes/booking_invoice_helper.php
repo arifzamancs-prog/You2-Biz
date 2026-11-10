@@ -166,7 +166,8 @@ function booking_invoice_store_property_options($conn, $user_id, $values)
 
 function booking_invoice_active_charges($conn, $user_id)
 {
-    $stmt = mysqli_prepare($conn, "SELECT id, charge_name, charge_type, charge_value_type FROM invoice_charge_types WHERE user_id=? AND status='active' AND show_on_invoice=1 ORDER BY id ASC");
+    ensure_invoice_charge_columns($conn);
+    $stmt = mysqli_prepare($conn, "SELECT id, charge_name, charge_type, charge_value_type FROM invoice_charge_types WHERE user_id=? AND status='active' AND show_on_invoice=1" . invoice_level_charge_sql() . " ORDER BY id ASC");
     mysqli_stmt_bind_param($stmt, 'i', $user_id); mysqli_stmt_execute($stmt);
     return mysqli_stmt_get_result($stmt);
 }
@@ -176,7 +177,7 @@ function booking_invoice_charge_total($conn, $user_id, $base_amount, $charge_inp
     $base_amount = max(0, (float)$base_amount); $net = $base_amount; $rows = [];
     foreach ((array)$charge_inputs as $charge_id => $input_value) {
         $charge_id=(int)$charge_id; $input_value=(float)$input_value; if($charge_id<=0 || $input_value==0) continue;
-        $stmt=mysqli_prepare($conn,"SELECT id,charge_name,charge_type,charge_value_type FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active' LIMIT 1"); mysqli_stmt_bind_param($stmt,'ii',$charge_id,$user_id); mysqli_stmt_execute($stmt); $charge=mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)); if(!$charge) continue;
+        $stmt=mysqli_prepare($conn,"SELECT id,charge_name,charge_type,charge_value_type FROM invoice_charge_types WHERE id=? AND user_id=? AND status='active'" . invoice_level_charge_sql() . " LIMIT 1"); mysqli_stmt_bind_param($stmt,'ii',$charge_id,$user_id); mysqli_stmt_execute($stmt); $charge=mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)); if(!$charge) continue;
         $amount=round(calculate_invoice_charge_amount($input_value,$charge['charge_value_type'],$base_amount),2);
         $net += $charge['charge_type']==='less' ? -$amount : $amount;
         $rows[]=['charge'=>$charge,'input_value'=>$input_value,'amount'=>$amount];

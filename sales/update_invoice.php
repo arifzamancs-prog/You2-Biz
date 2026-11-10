@@ -41,13 +41,23 @@ try{
     $customer_id    = (int)$_POST['customer_id'];
     $invoice_date   = $_POST['invoice_date'];
 
+    // Product charges turn each posted base price into the final unit price.
+    // Charges already saved on this invoice stay usable even if hidden since.
+    $posted_prices = $_POST['price'] ?? [];
+    $item_charge_breakdown = invoice_apply_product_charges(
+        invoice_product_charge_types($conn, $user_id, $invoice_id),
+        $_POST['product_id'] ?? [],
+        $posted_prices,
+        $_POST['item_charge'] ?? []
+    );
+    $_POST['price'] = $posted_prices;
     $_POST['line_total'] = stock_line_totals($_POST['product_id'] ?? [], $_POST['qty'] ?? [], $_POST['price'] ?? []);
     $grand_total = array_sum($_POST['line_total']);
     foreach (($_POST['charge_id'] ?? []) as $key => $charge_id) {
         $amount = (float)($_POST['charge_amount'][$key] ?? 0);
         if (!is_finite($amount) || $amount < 0) throw new Exception('Invalid invoice charge.');
         if ($amount == 0) continue;
-        $charge_stmt = mysqli_prepare($conn, 'SELECT charge_type FROM invoice_charge_types WHERE id=? AND user_id=?');
+        $charge_stmt = mysqli_prepare($conn, 'SELECT charge_type FROM invoice_charge_types WHERE id=? AND user_id=?' . invoice_level_charge_sql());
         mysqli_stmt_bind_param($charge_stmt, 'ii', $charge_id, $user_id);
         mysqli_stmt_execute($charge_stmt);
         $charge = mysqli_fetch_assoc(mysqli_stmt_get_result($charge_stmt));
@@ -258,6 +268,8 @@ if($due_amount <= 0){
     "DELETE FROM customer_payments
      WHERE invoice_id={$invoice_id}"
     );
+
+    invoice_delete_item_charges($conn, $user_id, $invoice_id);
 
     mysqli_query(
         $conn,
@@ -491,6 +503,10 @@ if(!product_variant_is_valid($conn, $product_id, $user_id, $variant_name)){
 
         $invoice_item_id = mysqli_insert_id($conn);
 
+        if(isset($item_charge_breakdown[$key])){
+            invoice_save_item_charges($conn, $user_id, $invoice_item_id, $item_charge_breakdown[$key]);
+        }
+
         if($is_posted && $is_stock_product){
 
         /*
@@ -647,7 +663,7 @@ mysqli_stmt_execute($stmt);
                 "SELECT id
                  FROM invoice_charge_types
                  WHERE id=?
-                 AND user_id=?
+                 AND user_id=?" . invoice_level_charge_sql() . "
                  LIMIT 1"
             );
 

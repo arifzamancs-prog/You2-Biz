@@ -86,6 +86,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $charge_type = normalize_charge_type($_POST['charge_type'] ?? 'add');
     $charge_value_type = normalize_charge_value_type($_POST['charge_value_type'] ?? 'fixed');
     $default_value = (float)($_POST['default_value'] ?? 0);
+    $apply_on = normalize_charge_apply_on($_POST['apply_on'] ?? 'invoice');
 
     if($charge_name === ''){
         $message = 'Charge name is required.';
@@ -93,8 +94,12 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }elseif($charge_value_type === 'percent' && ($default_value < 0 || $default_value > 100)){
         $message = 'Percentage value must be between 0 and 100.';
         $message_type = 'danger';
+    }elseif(!is_finite($default_value) || $default_value < 0){
+        $message = 'Default value cannot be negative.';
+        $message_type = 'danger';
     }else{
-        if($charge_value_type !== 'percent'){
+        // A fixed invoice-total charge is typed on each invoice; a fixed product charge keeps a default per unit.
+        if($charge_value_type !== 'percent' && $apply_on !== 'product'){
             $default_value = 0;
         }
 
@@ -118,18 +123,20 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                            SET charge_name=?,
                                charge_type=?,
                                charge_value_type=?,
-                               default_value=?
+                               default_value=?,
+                               apply_on=?
                            WHERE id=?
                            AND user_id=?";
 
             $update_stmt = mysqli_prepare($conn, $update_sql);
             mysqli_stmt_bind_param(
                 $update_stmt,
-                "sssdii",
+                "sssdsii",
                 $charge_name,
                 $charge_type,
                 $charge_value_type,
                 $default_value,
+                $apply_on,
                 $charge_id,
                 $user_id
             );
@@ -149,11 +156,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
                                charge_type,
                                charge_value_type,
                                default_value,
+                               apply_on,
                                show_on_invoice,
                                status
                            )
                            VALUES
                            (
+                               ?,
                                ?,
                                ?,
                                ?,
@@ -166,12 +175,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $insert_stmt = mysqli_prepare($conn, $insert_sql);
             mysqli_stmt_bind_param(
                 $insert_stmt,
-                "isssd",
+                "isssds",
                 $user_id,
                 $charge_name,
                 $charge_type,
                 $charge_value_type,
-                $default_value
+                $default_value,
+                $apply_on
             );
 
             if(mysqli_stmt_execute($insert_stmt)){
@@ -297,6 +307,8 @@ $charges = mysqli_stmt_get_result($charges_stmt);
 
 $form_charge_type = normalize_charge_type($_POST['charge_type'] ?? ($edit_charge['charge_type'] ?? 'add'));
 $form_charge_value_type = normalize_charge_value_type($_POST['charge_value_type'] ?? ($edit_charge['charge_value_type'] ?? 'fixed'));
+$form_apply_on = normalize_charge_apply_on($_POST['apply_on'] ?? ($edit_charge['apply_on'] ?? 'invoice'));
+$form_show_default = $form_charge_value_type === 'percent' || $form_apply_on === 'product';
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -371,8 +383,17 @@ require_once '../includes/sidebar.php';
                         </select>
                     </div>
 
-                    <div class="form-group <?= $form_charge_value_type === 'percent' ? '' : 'd-none'; ?>" id="charge-default-value-group">
-                        <label for="charge_default_value">Percentage Value</label>
+                    <div class="form-group">
+                        <label for="charge_apply_on">Apply On</label>
+                        <select id="charge_apply_on" name="apply_on" class="form-control">
+                            <option value="invoice" <?= $form_apply_on === 'invoice' ? 'selected' : ''; ?>>Invoice Total (one amount)</option>
+                            <option value="product" <?= $form_apply_on === 'product' ? 'selected' : ''; ?>>Each Product (column between Price and Qty)</option>
+                        </select>
+                        <small class="form-text text-muted">Each Product: added to / less from every product's unit price.</small>
+                    </div>
+
+                    <div class="form-group <?= $form_show_default ? '' : 'd-none'; ?>" id="charge-default-value-group">
+                        <label for="charge_default_value" id="charge-default-value-label"><?= $form_charge_value_type === 'percent' ? 'Percentage Value' : 'Default Amount (per unit)'; ?></label>
                         <div class="input-group">
                             <input
                                 id="charge_default_value"
@@ -380,11 +401,11 @@ require_once '../includes/sidebar.php';
                                 name="default_value"
                                 class="form-control"
                                 min="0"
-                                max="100"
+                                <?= $form_charge_value_type === 'percent' ? 'max="100"' : ''; ?>
                                 step="0.01"
                                 value="<?= htmlspecialchars((string)($_POST['default_value'] ?? ($edit_charge['default_value'] ?? ''))); ?>"
                                 placeholder="e.g. 5">
-                            <div class="input-group-append">
+                            <div class="input-group-append <?= $form_charge_value_type === 'percent' ? '' : 'd-none'; ?>" id="charge-default-value-suffix">
                                 <span class="input-group-text">%</span>
                             </div>
                         </div>
@@ -432,9 +453,15 @@ require_once '../includes/sidebar.php';
                             <td>
                                 <?php if(($charge['charge_value_type'] ?? 'fixed') === 'percent'){ ?>
                                     Percentage (<?= number_format((float)($charge['default_value'] ?? 0), 2); ?>%)
+                                <?php }elseif(($charge['apply_on'] ?? 'invoice') === 'product'){ ?>
+                                    Fixed Amount (<?= number_format((float)($charge['default_value'] ?? 0), 2); ?>)
                                 <?php }else{ ?>
                                     Fixed Amount
                                 <?php } ?>
+                                <br>
+                                <span class="badge <?= ($charge['apply_on'] ?? 'invoice') === 'product' ? 'badge-primary' : 'badge-light'; ?>">
+                                    <?= ($charge['apply_on'] ?? 'invoice') === 'product' ? 'Each Product' : 'Invoice Total'; ?>
+                                </span>
                             </td>
                             <td>
                                 <?php if((int)($charge['show_on_invoice'] ?? 0) === 1){ ?>
@@ -492,8 +519,9 @@ function resetInvoiceChargeForm() {
     document.getElementById('charge_name').value = '';
     document.getElementById('charge_type').value = 'add';
     document.getElementById('charge_value_type').value = 'fixed';
+    document.getElementById('charge_apply_on').value = 'invoice';
     document.getElementById('charge_default_value').value = '';
-    document.getElementById('charge-default-value-group').classList.add('d-none');
+    toggleChargeDefaultValue();
     document.getElementById('invoice-charge-form-title').textContent = 'Add Invoice Charge';
     document.getElementById('invoice-charge-submit').innerHTML = '<i class="fas fa-save"></i> Add Charge';
     document.getElementById('invoice-charge-cancel').classList.add('d-none');
@@ -502,10 +530,16 @@ function resetInvoiceChargeForm() {
 
 function toggleChargeDefaultValue() {
     const isPercentage = document.getElementById('charge_value_type').value === 'percent';
-    document.getElementById('charge-default-value-group').classList.toggle('d-none', !isPercentage);
+    const isProduct = document.getElementById('charge_apply_on').value === 'product';
+    const input = document.getElementById('charge_default_value');
+    document.getElementById('charge-default-value-group').classList.toggle('d-none', !isPercentage && !isProduct);
+    document.getElementById('charge-default-value-label').textContent = isPercentage ? 'Percentage Value' : 'Default Amount (per unit)';
+    document.getElementById('charge-default-value-suffix').classList.toggle('d-none', !isPercentage);
+    if (isPercentage) input.setAttribute('max', '100'); else input.removeAttribute('max');
 }
 
 document.getElementById('charge_value_type').addEventListener('change', toggleChargeDefaultValue);
+document.getElementById('charge_apply_on').addEventListener('change', toggleChargeDefaultValue);
 
 document.addEventListener('ajax-page-action-complete', function(event) {
     const detail = event.detail;
@@ -572,6 +606,7 @@ document.addEventListener('click', async function(event) {
             document.getElementById('charge_name').value = charge.charge_name;
             document.getElementById('charge_type').value = charge.charge_type;
             document.getElementById('charge_value_type').value = charge.charge_value_type || 'fixed';
+            document.getElementById('charge_apply_on').value = charge.apply_on === 'product' ? 'product' : 'invoice';
             document.getElementById('charge_default_value').value = charge.default_value || '';
             toggleChargeDefaultValue();
             document.getElementById('invoice-charge-form-title').textContent = 'Edit Invoice Charge';

@@ -382,6 +382,13 @@ try{
     $qtys        = $_POST['qty'] ?? [];
     $variant_names = $_POST['variant_name'] ?? [];
     $prices      = $_POST['price'] ?? [];
+    // Product charges turn each posted base price into the final unit price.
+    $item_charge_breakdown = invoice_apply_product_charges(
+        invoice_product_charge_types($conn, $user_id),
+        $product_ids,
+        $prices,
+        $_POST['item_charge'] ?? []
+    );
     $totals      = stock_line_totals($product_ids, $qtys, $prices);
     $positive_qty_totals = [];
 
@@ -427,7 +434,7 @@ try{
                            WHERE id=?
                            AND user_id=?
                            AND status='active'
-                           AND show_on_invoice=1";
+                           AND show_on_invoice=1" . invoice_level_charge_sql();
 
             $charge_stmt = mysqli_prepare($conn, $charge_sql);
             mysqli_stmt_bind_param($charge_stmt, "ii", $charge_id, $user_id);
@@ -798,6 +805,10 @@ foreach($product_ids as $key => $product_id){
     }
 
     $invoice_item_id = mysqli_insert_id($conn);
+
+    if(isset($item_charge_breakdown[$key])){
+        invoice_save_item_charges($conn, $user_id, $invoice_item_id, $item_charge_breakdown[$key]);
+    }
 
     if($should_post && $is_stock_product){
 
