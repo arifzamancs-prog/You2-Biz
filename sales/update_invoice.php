@@ -39,7 +39,12 @@ try{
     $invoice_id     = (int)$_POST['invoice_id'];
     require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
     $customer_id    = (int)$_POST['customer_id'];
-    $invoice_date   = $_POST['invoice_date'];
+    // The invoice date can be corrected, but only to a real date that is not in the future.
+    $invoice_date   = trim((string)($_POST['invoice_date'] ?? ''));
+    $invoice_date_check = DateTime::createFromFormat('!Y-m-d', $invoice_date);
+    if(!$invoice_date_check || $invoice_date_check->format('Y-m-d') !== $invoice_date || $invoice_date > date('Y-m-d')){
+        throw new Exception('Enter a valid invoice date (today or earlier).');
+    }
 
     // Product charges turn each posted base price into the final unit price.
     // Charges already saved on this invoice stay usable even if hidden since.

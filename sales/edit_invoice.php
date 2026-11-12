@@ -266,13 +266,10 @@ require_once '../includes/sidebar.php';
                     <input
                         type="date"
                         class="form-control"
-                        value="<?php echo $invoice['invoice_date']; ?>"
-                        readonly>
-                    
-                    <input
-                        type="hidden"
                         name="invoice_date"
-                        value="<?= $invoice['invoice_date']; ?>">
+                        value="<?= htmlspecialchars((string)$invoice['invoice_date']); ?>"
+                        max="<?= date('Y-m-d'); ?>"
+                        required>
 
                 </div>
 
