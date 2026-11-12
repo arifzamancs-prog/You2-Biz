@@ -224,10 +224,11 @@ require_once '../includes/sidebar.php';
 </tbody>
 </table>
 
-<?php if(!$hide_purchase_product_add){ ?><button type="button" id="addRow" class="btn btn-success">
+<?php // Every company can buy several products in one purchase (like Create Invoice). ?>
+<button type="button" id="addRow" class="btn btn-success">
     <i class="fas fa-plus"></i>
     Add Product
-</button><?php } ?>
+</button>
 
 <hr>
 
@@ -515,6 +516,13 @@ $(function(){
     $(document).on("click", ".removeRow", function(){
         if($("#purchaseTable tbody tr").length > 1){
             $(this).closest("tr").remove();
+            // Variant quantity names carry the row number; keep them in step with product_id[].
+            $("#purchaseTable tbody tr").each(function(index){
+                $(this).data("line-index", index).attr("data-line-index", index);
+                $(this).find(".variant-qty").each(function(){
+                    this.name = this.name.replace(/^variant_quantity\[\d+\]/, "variant_quantity[" + index + "]");
+                });
+            });
         }
         calculateGrandTotal();
         updateVariantColumnVisibility();
