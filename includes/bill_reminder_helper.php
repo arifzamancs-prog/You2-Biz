@@ -327,6 +327,10 @@ function bill_reminder_status_for_company($conn, $company_id, $today = null)
 
 function bill_reminder_status_for_session($conn)
 {
+    // Super Admin "Admin Access" is support work: no bill notice, countdown or lock.
+    if(!empty($_SESSION['admin_access'])){
+        return null;
+    }
     $role = $_SESSION['user_role'] ?? '';
 
     if(!in_array($role, ['admin', 'manager'], true)){
