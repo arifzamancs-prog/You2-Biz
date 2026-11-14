@@ -171,6 +171,13 @@ function stock_module_bootstrap($conn)
     $_SESSION['stock_product_enabled'] = $_SESSION['company_type'] === 'Restaurant & Cafe'
         || (company_type_uses_stock_products($_SESSION['company_type']) && $_SESSION['fifo_enabled'] === 1);
 
+    // A travel company gets its starting setup once (service types, client passport fields).
+    if ($_SESSION['company_type'] === 'Travel Agency' && (int)($_SESSION['travel_setup_checked'] ?? 0) !== $company_id) {
+        require_once __DIR__ . '/travel_agency_helper.php';
+        travel_agency_setup_company($conn, $company_id);
+        $_SESSION['travel_setup_checked'] = $company_id;
+    }
+
     // Dashboards and existing financial reports can read stock tables before
     // the first visit to a Stock page on a newly deployed installation.
     if ($_SESSION['stock_product_enabled']) {
@@ -188,7 +195,8 @@ function stock_module_bootstrap($conn)
     }
     // Housing uses the ordinary supplier/purchase pages without enabling FIFO.
     // Check staff permission here before bypassing the stock-only bootstrap.
-    if ($_SESSION['company_type'] === 'Housing' && in_array($match[1], ['suppliers', 'purchases'], true)) {
+    $travel_vendor_page = $_SESSION['company_type'] === 'Travel Agency' && $match[1] === 'suppliers';
+    if (($_SESSION['company_type'] === 'Housing' && in_array($match[1], ['suppliers', 'purchases'], true)) || $travel_vendor_page) {
         if (is_manager_user() && !manager_has_permission('suppliers')) {
             http_response_code(403);
             exit('Permission denied.');

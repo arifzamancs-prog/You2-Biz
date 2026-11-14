@@ -468,6 +468,7 @@ function invoice_qty_display($quantity, $unit_price)
                         <?php if(!empty($row['variant_name'])){ ?>
                             <small class="d-block text-muted">Variant: <?php echo htmlspecialchars($row['variant_name']); ?></small>
                         <?php } ?>
+                        <?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($row, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><small class="d-block text-success"><i class="fas fa-shield-alt mr-1"></i><?php echo htmlspecialchars($iw_text); ?></small><?php } ?>
                     </td>
 
                     <td>

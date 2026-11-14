@@ -10,6 +10,8 @@ require_once __DIR__ . '/sidebar_settings_helper.php';
 require_once __DIR__ . '/multi_branch_helper.php';
 require_once __DIR__ . '/eshop_helper.php';
 require_once __DIR__ . '/air_ticket_helper.php';
+require_once __DIR__ . '/travel_agency_helper.php';
+require_once __DIR__ . '/service_warranty_helper.php';
 require_once __DIR__ . '/restaurant_module_helper.php';
 require_once __DIR__ . '/product_category_helper.php';
 
@@ -303,7 +305,7 @@ function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '', $badg
         <a href="<?= htmlspecialchars($href); ?>"
            class="nav-link<?= $active; ?> <?= htmlspecialchars($class); ?>">
             <i class="nav-icon <?= htmlspecialchars($icon); ?>"></i>
-            <p><?= htmlspecialchars($label); ?><?php if((int)$badge > 0){ ?> <span class="right badge badge-danger" style="right:1.8rem"><?= (int)$badge; ?></span><?php } ?></p>
+            <p><?= htmlspecialchars(company_menu_label($label)); ?><?php if((int)$badge > 0){ ?> <span class="right badge badge-danger" style="right:1.8rem"><?= (int)$badge; ?></span><?php } ?></p>
         </a>
     </li>
 <?php
@@ -311,6 +313,12 @@ function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '', $badg
 
 function sidebar_tree($label, $icon, $items)
 {
+    if ($label === 'Sales / Invoice' && travel_agency_active()) {
+        $items = travel_booking_menu_items();
+    }
+    if ($label === 'Reports' && travel_agency_active()) {
+        array_unshift($items, ['href' => app_path('travel/reports.php'), 'label' => 'Travel Reports']);
+    }
     $items = restaurant_module_menu($label, $items);
     $open = sidebar_group_active($items);
 ?>
@@ -319,7 +327,7 @@ function sidebar_tree($label, $icon, $items)
            class="nav-link<?= $open ? ' active' : ''; ?>">
             <i class="nav-icon <?= htmlspecialchars($icon); ?>"></i>
             <p>
-                <?= htmlspecialchars($label); ?>
+                <?= htmlspecialchars(company_menu_label($label)); ?>
                 <i class="right fas fa-angle-left"></i>
             </p>
         </a>
@@ -716,6 +724,12 @@ if(
                         }
                         sidebar_tree('Customer Manage', 'fas fa-users', $sidebar_customer_items);
                     }
+                    if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency' && manager_has_permission('suppliers')){
+                        sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', array_merge([
+                            ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Suppliers')],
+                            ['href' => app_path('suppliers/supplier_payment.php'), 'label' => supplier_display_text('Supplier Due Payment')],
+                        ], $sidebar_vendor_due_history_item));
+                    }
                     if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing' && manager_has_permission('suppliers')){
                         sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [
                             ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Add Supplier')],
@@ -747,6 +761,8 @@ if(
                             // Registered customers can clear their due from any branch.
                             $stock_sales_items[] = ['href'=>app_path('sales/receive_payment.php'),'label'=>'Due Payment'];
                             sidebar_tree('Sales', 'fas fa-cash-register', $stock_sales_items);
+                            // Inventory & Sales: Service Center and Warranty.
+                            if(function_exists('sw_sidebar_menus')) sw_sidebar_menus();
                         }
                     }
                     if(!$sidebar_is_car_parking && !restaurant_module_active() && manager_has_permission('leads')){ sidebar_tree('Lead Management', 'fas fa-filter', [['href'=>app_path('lead_management/index.php?filter=lead'),'label'=>'New Lead'],['href'=>app_path('lead_management/index.php?filter=successful'),'label'=>'Qualified List'],['href'=>app_path('lead_management/index.php?filter=not_qualified'),'label'=>'Not Qualified List'],['href'=>app_path('lead_management/index.php?filter=visited'),'label'=>'Visited List'],['href'=>app_path('lead_management/index.php?filter=indecision'),'label'=>'Indecision List'],['href'=>app_path('lead_management/index.php?filter=customer'),'label'=>'Successful List']]); }
@@ -807,6 +823,8 @@ if(
                     'fas fa-file-invoice',
                     $sidebar_sales_items
                 );
+                // Inventory & Sales: Service Center and Warranty.
+                if(function_exists('sw_sidebar_menus')) sw_sidebar_menus();
                 }
 
                 sidebar_tree(
@@ -897,6 +915,14 @@ if(
                         ],
                     ] : [])
                 );
+
+                // Travel agencies keep Vendors (airlines, consolidators, hotels, embassies) without stock purchases.
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency'){
+                    sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', array_merge([
+                        ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Add Supplier')],
+                        ['href' => app_path('suppliers/supplier_payment.php'), 'label' => supplier_display_text('Supplier Due Payment')],
+                    ], $sidebar_vendor_due_history_item));
+                }
 
                 if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Housing'){
                     sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', [
@@ -1295,10 +1321,12 @@ document.addEventListener('DOMContentLoaded', function () {
         : (project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Housing'
             ? json_encode(['Sales / Invoice', 'Wallets', $project_package_labels['module'], supplier_display_text('Suppliers'), 'Staff Manage', 'Customer Manage', 'Lead Management', 'Notice Publish'])
             : (in_array(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)), ['Stock Product', 'Fashion house'], true)
-                ? json_encode(['Sales', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Stock Live Report', 'Staff Manage', 'Customer Manage'])
+                ? json_encode(['Sales', 'Service Center', 'Warranty', 'Wallets', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Stock Live Report', 'Staff Manage', 'Customer Manage'])
                 : ($sidebar_is_car_parking
                     ? json_encode(['Action', 'Wallets', 'Parking Setup', 'Staff Manage'])
-                    : json_encode(['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))) ?>;
+                    : (travel_agency_active()
+                    ? json_encode(array_map('company_menu_label', ['Sales / Invoice', 'Wallets', $project_package_labels['module'], 'Customer Manage', supplier_display_text('Suppliers'), 'Lead Management', 'Staff Manage']))
+                    : json_encode(array_map('company_menu_label', ['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))))) ?>;
     let previousItem = operationsHeader;
 
     orderedLabels.forEach(function (label) {

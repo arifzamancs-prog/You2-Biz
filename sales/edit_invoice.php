@@ -11,6 +11,8 @@ require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/service_warranty_helper.php';
+invoice_warranty_prepare($conn);
 
 $user_id = $_SESSION['user_id'];
 ensure_invoice_charge_columns($conn);
@@ -339,6 +341,7 @@ require_once '../includes/sidebar.php';
                         <?php } ?>
 
                         </select>
+                        <?= invoice_warranty_fields_html($item['warranty_months'] ?? null, $item['serial_no'] ?? ''); ?>
 
                         </td>
 
@@ -570,6 +573,7 @@ value="<?= $wallet['id']; ?>"
     </div>
 
 </div>
+<?= invoice_warranty_script($conn, (int)$user_id); ?>
 <?php require_once '../includes/footer.php'; ?>
 <script>
 

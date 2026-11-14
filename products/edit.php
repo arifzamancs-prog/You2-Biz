@@ -17,6 +17,9 @@ ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_subcategory_schema($conn);
 ensure_product_variant_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
+require_once '../includes/service_warranty_helper.php';
+$show_warranty = product_warranty_enabled();
+if ($show_warranty) product_warranty_schema($conn);
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
@@ -199,6 +202,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     );
 
     $stock_saved = mysqli_stmt_execute($stmt);
+    if($stock_saved) product_warranty_save($conn, $user_id, $id, $_POST['warranty_months'] ?? 0);
     if($stock_saved && $product_fifo_editable){
         $stock_saved = fifo_inventory_remove_product_opening_batches($conn, $id);
         if($stock_saved){
@@ -436,6 +440,14 @@ require_once '../includes/sidebar.php';
                 value="<?= (int)$product['minimum_stock']; ?>">
 
             </div>
+
+            <?php if($show_warranty){ ?>
+            <div class="form-group">
+                <label>Warranty (months)</label>
+                <input type="number" step="1" min="0" max="600" name="warranty_months" class="form-control" value="<?= (int)($product['warranty_months'] ?? 0); ?>">
+                <small class="text-muted">0 = no warranty. Used by Warranty Receive.</small>
+            </div>
+            <?php } ?>
 
             <div class="form-group">
 

@@ -175,7 +175,7 @@ try{
         ];
         foreach($housing_checks as $label=>[$sql,$expected]){
             check_backup_test((float)$conn->query($sql)->fetch_row()[0]===$expected*1.0,$label);
-            echo 'PASS: '.($service ? 'Service Business' : 'Housing')." $label\n";
+            echo 'PASS: '.($service ? 'General Service' : 'Housing')." $label\n";
         }
     }
     if($service){
@@ -190,7 +190,7 @@ try{
         ];
         foreach($service_checks as $label=>[$sql,$expected]){
             check_backup_test((float)$conn->query($sql)->fetch_row()[0]===$expected*1.0,$label);
-            echo "PASS: Service Business $label\n";
+            echo "PASS: General Service $label\n";
         }
     }
     if($restaurant){

@@ -102,13 +102,17 @@ function project_package_company_type_read($conn, $user_id)
         return 'Service type';
     }
 
-    return in_array($company_type, ['Service type', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
+    return in_array($company_type, ['Service type', 'Travel Agency', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
         ? $company_type
         : 'Housing';
 }
 
 function project_package_labels($conn, $user_id)
 {
+    if(project_package_company_type($conn, $user_id) === 'Travel Agency'){
+        require_once __DIR__ . '/travel_agency_helper.php';
+        return travel_agency_project_package_labels();
+    }
     if(project_package_company_type($conn, $user_id) !== 'Housing'){
         return [
             'module' => 'Service & Category',

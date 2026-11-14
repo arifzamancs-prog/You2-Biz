@@ -223,6 +223,66 @@ if (
 
     <ul class="navbar-nav ml-auto">
 
+        <?php
+        // Clock (left of the branch selector and the bell): 09:20 PM || 13 Nov 2026 || শুক্রবার, ২৮ কার্তিক ১৪৩৩
+        require_once __DIR__ . '/bangla_date_helper.php';
+        $navbar_now = new DateTimeImmutable('now');
+        ?>
+        <li class="nav-item d-none d-sm-flex align-items-center mr-2 navbar-clock" data-tz="<?= htmlspecialchars(date_default_timezone_get()); ?>" data-server-ms="<?= (int)round(microtime(true) * 1000); ?>">
+            <span data-clock-time><?= $navbar_now->format('h:i A'); ?></span>
+            <span class="navbar-clock-sep d-none d-lg-inline">||</span>
+            <span class="d-none d-lg-inline" data-clock-date><?= $navbar_now->format('d M Y'); ?></span>
+            <span class="navbar-clock-sep d-none d-lg-inline">||</span>
+            <span class="d-none d-lg-inline navbar-clock-bn" data-clock-bn><?= htmlspecialchars(bangla_date_text($navbar_now)); ?></span>
+        </li>
+        <style>
+            .navbar-clock{white-space:nowrap;font-size:.875rem;font-weight:600;color:#495057;font-variant-numeric:tabular-nums}
+            .navbar-clock-sep{color:#adb5bd;margin:0 .45rem;font-weight:400}
+            .navbar-clock-bn{font-weight:500}
+            @media print{.navbar-clock{display:none!important}}
+        </style>
+        <script>
+        (function () {
+            var el = document.querySelector('.navbar-clock');
+            if (!el || !window.Intl) return;
+            var tz = el.getAttribute('data-tz') || 'Asia/Dhaka';
+            // The server clock is the source: a wrong clock on the user's computer must not change the date.
+            var offset = (+el.getAttribute('data-server-ms') || Date.now()) - Date.now();
+            var digits = '০১২৩৪৫৬৭৮৯';
+            var bn = function (v) { return String(v).replace(/[0-9]/g, function (d) { return digits[d]; }); };
+            var days = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+            var months = ['বৈশাখ', 'জ্যৈষ্ঠ', 'আষাঢ়', 'শ্রাবণ', 'ভাদ্র', 'আশ্বিন', 'কার্তিক', 'অগ্রহায়ণ', 'পৌষ', 'মাঘ', 'ফাল্গুন', 'চৈত্র'];
+            var shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            var fmt;
+            try {
+                fmt = new Intl.DateTimeFormat('en-US', {timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false});
+            } catch (e) { return; }
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            // Same rules as includes/bangla_date_helper.php (Bangladesh, revised 2019).
+            var bangla = function (y, m, d) {
+                var startYear = (m > 4 || (m === 4 && d >= 14)) ? y : y - 1;
+                var offset = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(startYear, 3, 14)) / 86400000);
+                var next = startYear + 1;
+                var leap = (next % 4 === 0 && next % 100 !== 0) || next % 400 === 0;
+                var lengths = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, leap ? 30 : 29, 30];
+                var i = 0;
+                while (i < 11 && offset >= lengths[i]) { offset -= lengths[i]; i++; }
+                return bn(offset + 1) + ' ' + months[i] + ' ' + bn(startYear - 593);
+            };
+            var tick = function () {
+                var p = {};
+                fmt.formatToParts(new Date(Date.now() + offset)).forEach(function (x) { p[x.type] = x.value; });
+                var y = +p.year, m = +p.month, d = +p.day, h = +p.hour % 24, min = +p.minute;
+                var weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                el.querySelector('[data-clock-time]').textContent = pad(h % 12 || 12) + ':' + pad(min) + ' ' + (h < 12 ? 'AM' : 'PM');
+                el.querySelector('[data-clock-date]').textContent = pad(d) + ' ' + shortMonths[m - 1] + ' ' + y;
+                el.querySelector('[data-clock-bn]').textContent = days[weekday] + ', ' + bangla(y, m, d);
+            };
+            tick();
+            setInterval(tick, 15000);
+        })();
+        </script>
+
         <?php if($navbar_branches){ ?>
         <li class="nav-item d-flex align-items-center mr-2">
             <form method="post" action="<?= htmlspecialchars(app_path('branch_context.php')); ?>" class="form-inline">

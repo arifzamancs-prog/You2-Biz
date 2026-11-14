@@ -31,6 +31,33 @@ $stmt=mysqli_prepare($conn,"SELECT m,SUM(amount) amount FROM (SELECT MONTH(e.txn
 $start_year=$year-4;$year_labels=[];$year_sales=[];$year_expenses=[];for($y=$start_year;$y<=$year;$y++){ $year_labels[]=(string)$y;$year_sales[$y]=0.0;$year_expenses[$y]=0.0; }
 $stmt=mysqli_prepare($conn,"SELECT y,SUM(amount) amount FROM (SELECT YEAR(i.invoice_date) y,i.total_amount amount FROM invoices i WHERE 1=1 {$invoice_owner_scope} {$invoice_scope} AND COALESCE(i.accounting_status,'posted')='posted' AND YEAR(i.invoice_date) BETWEEN ? AND ? UNION ALL SELECT YEAR(bi.invoice_date),bi.amount FROM booking_invoices bi LEFT JOIN booking_invoice_types bit ON bit.user_id=bi.user_id AND bit.type_key=bi.invoice_type WHERE 1=1 {$sales_owner_scope} {$sales_scope} AND bi.status='confirmed' AND COALESCE(bit.behavior,'income')='income' AND YEAR(bi.invoice_date) BETWEEN ? AND ?) sales GROUP BY y");mysqli_stmt_bind_param($stmt,'iiii',$start_year,$year,$start_year,$year);mysqli_stmt_execute($stmt);$result=mysqli_stmt_get_result($stmt);while($row=mysqli_fetch_assoc($result))$year_sales[(int)$row['y']]=(float)$row['amount'];
 $stmt=mysqli_prepare($conn,"SELECT y,SUM(amount) amount FROM (SELECT YEAR(e.txn_date) y,e.amount FROM expenses e WHERE 1=1 {$expense_owner_scope} {$expense_scope} AND e.approval_status='approved' AND YEAR(e.txn_date) BETWEEN ? AND ? UNION ALL SELECT YEAR(l.entry_date) y,l.amount FROM staff_ledger_entries l WHERE 1=1 {$ledger_owner_scope} {$ledger_scope} AND YEAR(l.entry_date) BETWEEN ? AND ?) x GROUP BY y");mysqli_stmt_bind_param($stmt,'iiii',$start_year,$year,$start_year,$year);mysqli_stmt_execute($stmt);$result=mysqli_stmt_get_result($stmt);while($row=mysqli_fetch_assoc($result))$year_expenses[(int)$row['y']]=(float)$row['amount'];
+// Travel Agency: profit = travel sales − travel purchase cost − other expenses.
+// Sales and cost count on the booking date, refunds and reissues on their own dates.
+// Vendor payments are not counted again as expenses (the purchase cost already is).
+require_once '../includes/project_package_helper.php';
+if($user_id>0 && project_package_company_type($conn,$user_id)==='Travel Agency'){
+    require_once '../includes/travel_booking_helper.php';
+    if(travel_booking_schema($conn)){
+        $month_start=sprintf('%04d-%02d-01',$year,$month); $month_end=date('Y-m-t',strtotime($month_start));
+        $vendor_paid_sql="SELECT %s AS p, COALESCE(SUM(amount),0) AS amount FROM expenses WHERE user_id=".(int)$user_id." AND approval_status='approved' AND source_type IN ('purchase_payment','supplier_payment') AND txn_date BETWEEN '%s' AND '%s' GROUP BY p";
+        $vendor_paid=mysqli_fetch_assoc(mysqli_query($conn,sprintf($vendor_paid_sql,"'1'",$month_start,$month_end)));
+        $travel_cost=travel_sales_total($conn,$user_id,$month_start,$month_end,'cost');
+        $travel_commission=travel_sales_total($conn,$user_id,$month_start,$month_end,'commission');
+        $total_sales+=travel_sales_total($conn,$user_id,$month_start,$month_end);
+        $total_expenses+=$travel_cost+$travel_commission-(float)($vendor_paid['amount']??0);
+        $net_profit=$total_sales-$total_expenses;
+        // Expense breakdown: one "Travel purchase cost" line instead of the vendor payments.
+        $breakdown=array_values(array_filter($breakdown,static fn($row)=>!preg_match('/(Supplier|Vendor) Payment$/i',(string)$row['category_name'])));
+        if($travel_commission!=0) array_unshift($breakdown,['category_name'=>'Agent commission','amount'=>$travel_commission]);
+        if($travel_cost!=0) array_unshift($breakdown,['category_name'=>'Travel purchase cost','amount'=>$travel_cost]);
+        foreach(travel_sales_by_period($conn,$user_id,$year.'-01-01',$year.'-12-31','month') as $period=>$amount){ $month_sales[(int)substr($period,5,2)]+=$amount; }
+        foreach(['cost','commission'] as $part) foreach(travel_sales_by_period($conn,$user_id,$year.'-01-01',$year.'-12-31','month',$part) as $period=>$amount){ $month_expenses[(int)substr($period,5,2)]+=$amount; }
+        $rows=mysqli_query($conn,sprintf($vendor_paid_sql,'MONTH(txn_date)',$year.'-01-01',$year.'-12-31')); while($rows&&($row=mysqli_fetch_assoc($rows))) $month_expenses[(int)$row['p']]-=(float)$row['amount'];
+        foreach(travel_sales_by_period($conn,$user_id,$start_year.'-01-01',$year.'-12-31','year') as $period=>$amount){ if(isset($year_sales[(int)$period])) $year_sales[(int)$period]+=$amount; }
+        foreach(['cost','commission'] as $part) foreach(travel_sales_by_period($conn,$user_id,$start_year.'-01-01',$year.'-12-31','year',$part) as $period=>$amount){ if(isset($year_expenses[(int)$period])) $year_expenses[(int)$period]+=$amount; }
+        $rows=mysqli_query($conn,sprintf($vendor_paid_sql,'YEAR(txn_date)',$start_year.'-01-01',$year.'-12-31')); while($rows&&($row=mysqli_fetch_assoc($rows))) if(isset($year_expenses[(int)$row['p']])) $year_expenses[(int)$row['p']]-=(float)$row['amount'];
+    }
+}
 ?>
 <section class="content"><div class="container-fluid">
 <div class="card"><div class="card-header"><h3 class="card-title"><i class="fas fa-coins mr-2"></i>Profit Report</h3></div><div class="card-body"><form method="get"><div class="row align-items-end"><div class="col-md-3"><label>Month</label><select name="month" class="form-control"><?php for($m=1;$m<=12;$m++){?><option value="<?=$m?>" <?=$month===$m?'selected':''?>><?=date('F',mktime(0,0,0,$m,1))?></option><?php }?></select></div><div class="col-md-3"><label>Year</label><select name="year" class="form-control"><?php for($y=(int)date('Y');$y>=2020;$y--){?><option value="<?=$y?>" <?=$year===$y?'selected':''?>><?=$y?></option><?php }?></select></div><div class="col-md-2"><button class="btn btn-primary btn-block"><i class="fas fa-filter"></i> Filter</button></div><div class="col-md-2"><button type="button" class="btn btn-info btn-block" onclick="window.print()"><i class="fas fa-print"></i> Print</button></div><div class="col-md-2"><a href="profit_report.php" class="btn btn-secondary btn-block"><i class="fas fa-redo"></i> This Month</a></div></div></form></div></div>

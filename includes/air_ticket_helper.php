@@ -5,6 +5,13 @@
 // company administrator sees it in the sidebar.
 
 require_once __DIR__ . '/schema_cache_helper.php';
+require_once __DIR__ . '/company_settings_helper.php';
+
+// Dummy Air Ticket exists only for these company types (Travel Agency and General Service).
+function air_ticket_type_allowed($company_type)
+{
+    return in_array(normalize_company_type((string)$company_type), ['Travel Agency', 'Service type'], true);
+}
 
 function ensure_air_ticket_column($conn)
 {
@@ -21,14 +28,14 @@ function company_air_ticket_enabled($conn, $company_id)
     if($company_id <= 0) return false;
 
     ensure_air_ticket_column($conn);
-    $stmt = mysqli_prepare($conn, "SELECT air_ticket_enabled FROM users WHERE id=? AND role='admin' LIMIT 1");
+    $stmt = mysqli_prepare($conn, "SELECT air_ticket_enabled, company_type FROM users WHERE id=? AND role='admin' LIMIT 1");
     if(!$stmt) return false;
     mysqli_stmt_bind_param($stmt, 'i', $company_id);
     mysqli_stmt_execute($stmt);
     $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
     mysqli_stmt_close($stmt);
 
-    return (int)($row['air_ticket_enabled'] ?? 0) === 1;
+    return (int)($row['air_ticket_enabled'] ?? 0) === 1 && air_ticket_type_allowed($row['company_type'] ?? '');
 }
 
 // Keys in the system_settings table (Super Admin > Settings > Dummy Air Ticket).

@@ -17,6 +17,7 @@ require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/sales_return_helper.php';
 require_once '../includes/activity_notification_helper.php';
+require_once '../includes/service_warranty_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_branch_accounting_columns($conn, $user_id);
@@ -77,6 +78,8 @@ if($_SERVER['REQUEST_METHOD']!='POST'){
     exit;
 
 }
+
+$invoice_warranty_enabled = invoice_warranty_prepare($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -806,6 +809,11 @@ foreach($product_ids as $key => $product_id){
     }
 
     $invoice_item_id = mysqli_insert_id($conn);
+
+    // Warranty and serial of this sold line (Inventory & Sales).
+    if($invoice_warranty_enabled){
+        invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $_POST['item_serial'][$key] ?? '');
+    }
 
     if(isset($item_charge_breakdown[$key])){
         invoice_save_item_charges($conn, $user_id, $invoice_item_id, $item_charge_breakdown[$key]);

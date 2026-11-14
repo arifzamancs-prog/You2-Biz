@@ -602,6 +602,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Invalid company or Dummy Air Ticket status.', 'danger');
         }
         $enabled = (int)$enabled;
+        $type_row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT company_type FROM users WHERE id=" . (int)$company_id . " AND role='admin' LIMIT 1"));
+        if ($enabled === 1 && !air_ticket_type_allowed($type_row['company_type'] ?? '')) {
+            super_admin_flash_and_redirect('Dummy Air Ticket is available only for Travel Agency and General Service companies.', 'danger');
+        }
         $stmt = mysqli_prepare($conn, "UPDATE users SET air_ticket_enabled=? WHERE id=? AND role='admin' LIMIT 1");
         mysqli_stmt_bind_param($stmt, 'ii', $enabled, $company_id);
         if (!mysqli_stmt_execute($stmt)) {
@@ -686,6 +690,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_bind_param($type_stmt, 'siii', $company_type, $stock_enabled, $table_enabled, $company_id);
 
         if(mysqli_stmt_execute($type_stmt)){
+            if($company_type === 'Travel Agency'){
+                // Service types, client passport fields and Dummy Air Ticket, once per company.
+                require_once '../includes/travel_agency_helper.php';
+                travel_agency_setup_company($conn, $company_id);
+            }
             super_admin_flash_and_redirect('Company type updated successfully.', 'success');
         }
 
@@ -924,6 +933,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ensure_default_product_categories($conn, $new_company_id);
         ensure_default_invoice_charges($conn, $new_company_id);
         ensure_default_cash_wallet($conn, $new_company_id);
+        if (normalize_company_type($company_type) === 'Travel Agency') {
+            // Default service types, packages and client passport fields.
+            require_once '../includes/travel_agency_helper.php';
+            travel_agency_setup_company($conn, $new_company_id);
+        }
 
         super_admin_flash_and_redirect('Company created and verified successfully.', 'success');
     }elseif($form_action === 'approve_request'){
@@ -1720,6 +1734,7 @@ require_once '../includes/sidebar.php';
                                         </div>
                                     </div>
                                 </form>
+                                <?php if (air_ticket_type_allowed($row['company_type'] ?? '')) { ?>
                                 <form method="post" class="form-group mb-0 mt-3">
                                     <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                     <input type="hidden" name="form_action" value="update_air_ticket">
@@ -1735,6 +1750,7 @@ require_once '../includes/sidebar.php';
                                         </div>
                                     </div>
                                 </form>
+                                <?php } ?>
                             </div>
                         </td>
                         <td class="sa-contact">

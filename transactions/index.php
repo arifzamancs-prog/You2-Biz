@@ -266,6 +266,11 @@ require_once '../includes/sidebar.php';
                         'sales_invoice' => 'Sales Invoice',
                         'receive_payment' => 'Receive Due Payment',
                         'purchase_return' => 'Vendor Return Refund',
+                        'travel_payment' => 'Client Payment',
+                        'travel_refund' => 'Client Refund',
+                        'travel_commission' => 'Agent Commission',
+                        'service_advance' => 'Service Advance',
+                        'service_refund' => 'Service Refund',
                         'purchase' => 'Purchase',
                         'supplier_payment' => 'Supplier Due Payment'
                     ];
@@ -300,7 +305,9 @@ require_once '../includes/sidebar.php';
                         'transfer_in',
                         'sales_invoice',
                         'receive_payment',
-                        'purchase_return'
+                        'purchase_return',
+                        'travel_payment',
+                        'service_advance'
                     ];
 
                     $is_income = in_array(

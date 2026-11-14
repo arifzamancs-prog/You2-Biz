@@ -287,3 +287,83 @@ body{background:#f4f7fb}
 .btn-spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:you2-spin .7s linear infinite;vertical-align:-3px}
 @keyframes you2-spin{to{transform:rotate(360deg)}}
 .offer-error{margin:0 22px 18px}
+/* Compact Travelers & class popover */
+.pax-popover{padding:14px 16px;border-radius:12px;top:calc(100% + 6px)}.pax-popover h4{font-size:15px;margin-bottom:4px}.pax-row{padding:6px 0}.pax-row strong{font-size:12px}.pax-row span{font-size:10px}.counter{gap:9px}.counter button{width:25px;height:25px;border-radius:7px}.cabin-label{margin:8px 0 9px;font-size:11px}.cabin-label select{margin-top:4px;padding:6px 8px}.pax-popover .btn{padding-top:7px;padding-bottom:7px;min-height:0}
+.pax-popover h4{line-height:1.2}.pax-row{padding:4px 0}.pax-row strong,.pax-row span{line-height:1.15}.pax-row>div:first-child{gap:1px}.cabin-label{line-height:1.2;margin:6px 0 7px}
+/* Larger text on the search page */
+.search-tab{font-size:15px}.widget-annotation{font-size:12px}.trip-option{font-size:14px}.trip-note{font-size:12px}.field-label{font-size:10.5px}.field-body,.field-body input,.field-body select{font-size:14.5px}.field-hint{font-size:11.5px}.btn-search{font-size:14.5px}.form-error{font-size:14px}.hotel-note{font-size:12px}.segment-title{font-size:13px}
+.pax-popover h4{font-size:17px}.pax-row strong{font-size:14px}.pax-row span{font-size:11.5px}.counter strong{font-size:14px}.cabin-label{font-size:12.5px}.cabin-label select{font-size:13.5px}.pax-popover .btn{font-size:14px}
+.airport-suggestion-main{font-size:13.5px}.airport-none{font-size:13px}
+@media(max-width:690px){.search-tab{font-size:13px}.trip-option{font-size:13px}.trip-note{font-size:11px}}
+/* Swap arrow sits on the gap between From and To, so it never covers the "To" label */
+@media(min-width:941px){.flight-grid .swap-button{top:calc(50% - 11.5px)}.flight-grid.round-trip .swap-button{left:calc((100% - 45px) * .1789 - 7px)}.flight-grid.one-way .swap-button{left:calc((100% - 36px) * .2163 - 7px)}}
+/* Passport scan window (passport-crop.js) */
+html.pc-open,html.pc-open body{overflow:hidden}
+.pc-backdrop{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(7,22,45,.62);backdrop-filter:blur(3px)}
+.pc-backdrop[hidden]{display:none}
+.pc-dialog{width:min(720px,100%);max-height:calc(100vh - 36px);overflow:auto;background:#fff;border-radius:18px;box-shadow:0 30px 80px rgba(6,24,52,.35);display:flex;flex-direction:column;outline:0}
+.pc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 24px 16px;background:linear-gradient(120deg,#0a2042,#14427e);color:#fff}
+.pc-head h3{margin:0;font-size:19px;letter-spacing:-.02em}
+.pc-head p{margin:4px 0 0;font-size:13px;color:#b9d2eb}
+.pc-close{border:0;background:rgba(255,255,255,.12);color:#fff;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;cursor:pointer;flex:none}
+.pc-close:hover{background:rgba(255,255,255,.22)}
+.pc-steps{display:flex;gap:6px;list-style:none;margin:0;padding:12px 24px;background:#f5f8fc;border-bottom:1px solid #e7edf4;counter-reset:none}
+.pc-steps li{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:#8796a9;padding:5px 12px 5px 5px;border-radius:30px}
+.pc-steps li span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#e3eaf3;color:#6b7b91;font-size:11.5px}
+.pc-steps li.is-current{background:#e6efff;color:#1c58bd}
+.pc-steps li.is-current span{background:#2669e9;color:#fff}
+.pc-steps li.is-done{color:#1d6f68}
+.pc-steps li.is-done span{background:#31c6bd;color:#fff}
+.pc-error{margin:14px 24px 0;padding:10px 13px;border-radius:9px;background:#fff2f1;color:#a93a31;font-size:13px}
+.pc-error[hidden]{display:none}
+.pc-view{padding:18px 24px 6px}
+.pc-view[hidden]{display:none}
+.pc-drop{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:22px 18px 18px;border:2px dashed #c9d8ec;border-radius:14px;background:#fbfdff;transition:border-color .15s,background .15s;outline:0}
+.pc-drop:focus-visible,.pc-drop.is-over{border-color:#2669e9;background:#f1f6ff}
+.pc-art{width:190px;height:auto;margin-bottom:6px}
+.pc-drop strong{font-size:15.5px;color:#102647}
+.pc-or{font-size:12.5px;color:#8796a9}
+.pc-drop small{font-size:12px;color:#8796a9;margin-top:4px}
+.pc-pick-buttons{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:8px}
+.pc-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:0 18px;border-radius:10px;border:1px solid transparent;font:inherit;font-size:14px;font-weight:800;cursor:pointer;transition:background .15s,box-shadow .15s}
+.pc-btn input{display:none}
+.pc-btn:focus-visible{outline:0;box-shadow:0 0 0 3px #aed2ff}
+.pc-primary{background:#195dc1;color:#fff}
+.pc-primary:hover{background:#0b469d}
+.pc-primary:disabled{opacity:.45;cursor:not-allowed}
+.pc-light{background:#e9f1fd;color:#195dc1}
+.pc-ghost{background:#fff;color:#4b5d74;border-color:#d8e2ee}
+.pc-ghost:hover{background:#f5f8fc}
+.pc-camera{display:none}
+@media (pointer:coarse){.pc-camera{display:inline-flex}}
+.pc-tips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;list-style:none;margin:14px 0 0;padding:0}
+.pc-tips li{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border-radius:11px;background:#f5f8fc;color:#2669e9}
+.pc-tips li svg{flex:none;margin-top:2px}
+.pc-tips span{display:flex;flex-direction:column;font-size:12px;line-height:1.35;color:#6b7b91}
+.pc-tips b{font-size:13px;color:#102647;margin-bottom:2px}
+.pc-crop{display:flex;flex-direction:column;align-items:center}
+.pc-stage{position:relative;overflow:hidden;border-radius:10px;background:#0a2042;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
+.pc-canvas{display:block}
+.pc-box{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(7,22,45,.6);cursor:move;outline:0}
+.pc-box:focus-visible{border-color:#53bcff}
+.pc-stage.is-dragging .pc-box{cursor:grabbing}
+.pc-guide{position:absolute;left:4%;right:4%;bottom:5%;height:20%;border:1.5px dashed rgba(49,198,189,.95);border-radius:6px;background:rgba(49,198,189,.12);pointer-events:none;display:flex;align-items:flex-start;justify-content:flex-end}
+.pc-guide em{font-style:normal;font-size:10.5px;font-weight:800;color:#fff;background:rgba(16,140,130,.9);padding:2px 7px;border-radius:0 4px 0 6px}
+.pc-box i{position:absolute;width:16px;height:16px;background:#fff;border:2px solid #2669e9;border-radius:50%}
+.pc-box i[data-h="nw"]{left:-9px;top:-9px;cursor:nwse-resize}
+.pc-box i[data-h="ne"]{right:-9px;top:-9px;cursor:nesw-resize}
+.pc-box i[data-h="se"]{right:-9px;bottom:-9px;cursor:nwse-resize}
+.pc-box i[data-h="sw"]{left:-9px;bottom:-9px;cursor:nesw-resize}
+.pc-box i[data-h="n"]{left:calc(50% - 8px);top:-9px;cursor:ns-resize;border-radius:5px}
+.pc-box i[data-h="s"]{left:calc(50% - 8px);bottom:-9px;cursor:ns-resize;border-radius:5px}
+.pc-box i[data-h="e"]{right:-9px;top:calc(50% - 8px);cursor:ew-resize;border-radius:5px}
+.pc-box i[data-h="w"]{left:-9px;top:calc(50% - 8px);cursor:ew-resize;border-radius:5px}
+.pc-hint{margin:10px 0 0;font-size:12.5px;color:#6b7b91;text-align:center;max-width:560px}
+.pc-tools{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
+.pc-tool{display:inline-flex;align-items:center;gap:6px;border:1px solid #d8e2ee;background:#fff;color:#2c4566;border-radius:9px;padding:7px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.pc-tool:hover{background:#f1f6ff;border-color:#b9cde8}
+.pc-tool[data-pc="rotate-left"] span,.pc-tool[data-pc="rotate-right"] span{display:none}
+.pc-foot{display:flex;justify-content:flex-end;gap:10px;padding:16px 24px 20px;margin-top:auto}
+@media(max-width:600px){.pc-backdrop{padding:0;align-items:stretch}.pc-dialog{border-radius:0;max-height:none;height:100%}.pc-head{padding:16px 16px 12px}.pc-steps{padding:10px 12px;overflow-x:auto}.pc-steps li{white-space:nowrap}.pc-view{padding:14px 16px 4px}.pc-tips{grid-template-columns:1fr}.pc-foot{padding:12px 16px 16px}.pc-foot .pc-btn{flex:1}}
+/* The upload control on the traveler form is now a button that opens the window */
+button.passport-upload-button{border:0;font-family:inherit}

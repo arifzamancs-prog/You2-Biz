@@ -21,6 +21,9 @@ ensure_fifo_only_product_categories($conn, $user_id);
 ensure_product_variant_schema($conn);
 ensure_product_subcategory_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
+require_once '../includes/service_warranty_helper.php';
+$show_warranty = product_warranty_enabled();
+if ($show_warranty) product_warranty_schema($conn);
 
 $message = '';
 $message_type = '';
@@ -207,6 +210,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if(mysqli_stmt_execute($stmt)){
         $product_id = (int)mysqli_insert_id($conn);
         $stock_saved = true;
+        product_warranty_save($conn, $user_id, $product_id, $_POST['warranty_months'] ?? 0);
         if(!empty($category_variants)){
             $variant_stmt = mysqli_prepare($conn, 'INSERT INTO product_variants(user_id,product_id,variant_name) VALUES (?,?,?)');
             foreach($variant_opening as $variant => $variant_qty){
@@ -512,6 +516,14 @@ require_once '../includes/sidebar.php';
                         value="<?= htmlspecialchars((string)($form_data['minimum_stock'] ?? '5'), ENT_QUOTES, 'UTF-8') ?>">
 
                 </div>
+
+                <?php if($show_warranty){ ?>
+                <div class="form-group">
+                    <label>Warranty (months)</label>
+                    <input type="number" step="1" min="0" max="600" name="warranty_months" class="form-control" value="<?= (int)($form_data['warranty_months'] ?? 0) ?>">
+                    <small class="text-muted">0 = no warranty. Used by Warranty Receive.</small>
+                </div>
+                <?php } ?>
 
             </div>
 

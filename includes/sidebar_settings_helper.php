@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/schema_cache_helper.php';
 require_once __DIR__ . '/supplier_label_helper.php';
+require_once __DIR__ . '/travel_agency_helper.php';
 
 require_once __DIR__ . '/product_expiry_helper.php';
 require_once __DIR__ . '/pricing_plan_visibility_helper.php';
@@ -72,7 +73,7 @@ function sidebar_setting_item($id, $label, $href = '', $parent = '', $sort = 0, 
 {
     return [
         'id' => $id,
-        'label' => $label,
+        'label' => company_menu_label($label),
         'href' => $href,
         'parent' => $parent,
         'sort' => $sort,
@@ -82,6 +83,26 @@ function sidebar_setting_item($id, $label, $href = '', $parent = '', $sort = 0, 
 }
 
 function sidebar_default_layout_items($project_package_labels = [], $company_type = '')
+{
+    $items = sidebar_default_layout_items_base($project_package_labels, $company_type);
+    if (travel_agency_active()) {
+        foreach (travel_booking_menu_items() as $position => $menu) {
+            $items[] = sidebar_setting_item('travel_' . basename($menu['href'], '.php'), $menu['label'], $menu['href'], 'sales', 51 + $position);
+        }
+        $items[] = sidebar_setting_item('travel_reports', 'Travel Reports', app_path('travel/reports.php'), 'reports', 121);
+    }
+    if ($company_type === 'Stock Product') {
+        $items[] = sidebar_setting_item('service_center', 'Service Center', '', '', 77);
+        $items[] = sidebar_setting_item('service_receive', 'Receive for Service', app_path('sales/service_receive.php'), 'service_center', 1);
+        $items[] = sidebar_setting_item('service_jobs', 'Service Jobs', app_path('sales/service_jobs.php'), 'service_center', 2);
+        $items[] = sidebar_setting_item('warranty', 'Warranty', '', '', 78);
+        $items[] = sidebar_setting_item('warranty_receive', 'Warranty Receive', app_path('sales/warranty_receive.php'), 'warranty', 1);
+        $items[] = sidebar_setting_item('warranty_claims', 'Warranty Claims', app_path('sales/warranty_claims.php'), 'warranty', 2);
+    }
+    return $items;
+}
+
+function sidebar_default_layout_items_base($project_package_labels = [], $company_type = '')
 {
     $module = $project_package_labels['module'] ?? 'Project & Package';
     $project = $project_package_labels['project'] ?? 'Project';

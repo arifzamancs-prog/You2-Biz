@@ -7,6 +7,7 @@ require_once '../includes/printing_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/super_admin_config.php';
 require_once '../includes/customer_due_allocation_helper.php';
+require_once '../includes/service_warranty_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 ensure_invoice_posting_columns($conn);
@@ -711,7 +712,7 @@ window.addEventListener('load', preparePosPrintPage);
         <tbody>
         <?php foreach($items as $item){ ?>
             <tr>
-                <td><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?></td>
+                <td><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
                 <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
                 <td class="text-right"><?= number_format($item['unit_price'],2); ?></td>
                 <td class="text-right"><?= number_format($item['total_price'],2); ?></td>
@@ -1208,6 +1209,7 @@ window.addEventListener('load', function () {
             <td>
                 <?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?>
                 <?php if(!empty($item['variant_name'])){ ?><br><small>Variant: <?= htmlspecialchars($item['variant_name']); ?></small><?php } ?>
+                <?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?>
             </td>
             <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
             <td class="text-right">BDT <?= number_format($item['unit_price'],2); ?></td>
