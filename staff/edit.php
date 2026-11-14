@@ -114,8 +114,8 @@ require_once '../includes/sidebar.php';
         <?php if($error){ ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php } ?>
         <form method="post" enctype="multipart/form-data">
             <div class="form-group"><label>Staff ID <span class="text-danger">*</span></label><input class="form-control" name="staff_code" value="<?= htmlspecialchars($_POST['staff_code'] ?? $staff['staff_code'] ?? staff_code_from_id($staff['id'])) ?>" required></div>
-            <?php if(!empty($staff['photo'])){ ?><div class="form-group"><label>Current Photo</label><div><img src="../<?= htmlspecialchars($staff['photo']) ?>" alt="Staff Photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"></div></div><?php } ?>
-            <div class="form-group"><label>Update Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            <?php if(!empty($staff['photo'])){ ?><div class="form-group"><label>Current Photo</label><div><img id="staff-photo-preview" src="../<?= htmlspecialchars($staff['photo']) ?>" alt="Staff Photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"></div></div><?php } ?>
+            <div class="form-group"><label>Update Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><?php if(empty($staff['photo'])){ ?><img id="staff-photo-preview" class="d-none mt-2" alt="Selected staff photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"><?php } ?></div>
             <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? $staff['name']) ?>" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" value="<?= htmlspecialchars($staff['email'] ?? '') ?>" placeholder="staff@example.com"></div>
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($staff['phone']) ?>"></div>
@@ -128,5 +128,5 @@ require_once '../includes/sidebar.php';
         </form>
     </div>
 </div>
-<script>document.getElementById('designation').addEventListener('change',function(){const newDesignation=document.getElementById('new_designation');newDesignation.style.display=this.value==='__new__'?'block':'none';newDesignation.required=this.value==='__new__';});</script>
+<script>document.getElementById('designation').addEventListener('change',function(){const newDesignation=document.getElementById('new_designation');newDesignation.style.display=this.value==='__new__'?'block':'none';newDesignation.required=this.value==='__new__';});(function(){const input=document.querySelector('input[name="photo"][type="file"]'),preview=document.getElementById('staff-photo-preview');if(!input||!preview)return;const original=preview.getAttribute('src')||'';let objectUrl='';input.addEventListener('change',function(){if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl='';}const file=input.files&&input.files[0];if(file&&/^image\//.test(file.type)){objectUrl=URL.createObjectURL(file);preview.src=objectUrl;preview.classList.remove('d-none');}else if(original){preview.src=original;preview.classList.remove('d-none');}else{preview.removeAttribute('src');preview.classList.add('d-none');}});})();</script>
 <?php require_once '../includes/footer.php'; ?>

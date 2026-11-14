@@ -139,7 +139,7 @@ require_once '../includes/sidebar.php';
                 </small>
                 <small id="staff_code_status" class="d-block mt-1 text-muted"><?= $staff_code !== '' && $last_staff_code !== '' ? 'The next ID is filled in; you can change it.' : 'Type a new Staff ID to check availability.'; ?></small>
             </div>
-            <div class="form-group"><label>Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            <div class="form-group"><label>Photo</label><input class="form-control" name="photo" type="file" accept="image/jpeg,image/png,image/webp"><img id="staff-photo-preview" class="d-none mt-2" alt="Selected staff photo" style="width:90px;height:90px;object-fit:cover;border-radius:50%;"></div>
             <div class="form-group"><label>Name</label><input class="form-control" name="name" value="<?= htmlspecialchars($_POST['name'] ?? ''); ?>" required></div>
             <div class="form-group"><label>Email</label><input class="form-control" name="email" type="email" placeholder="staff@example.com" value="<?= htmlspecialchars($_POST['email'] ?? ''); ?>"></div>
             <div class="form-group"><label>Phone</label><input class="form-control" name="phone" value="<?= htmlspecialchars($_POST['phone'] ?? ''); ?>"></div>
@@ -239,5 +239,6 @@ function updateStaffCodeStatus() {
 staffCode.addEventListener('input', updateStaffCodeStatus);
 staffCode.addEventListener('blur', updateStaffCodeStatus);
 updateStaffCodeStatus();
+(function(){const input=document.querySelector('input[name="photo"][type="file"]'),preview=document.getElementById('staff-photo-preview');if(!input||!preview)return;const original=preview.getAttribute('src')||'';let objectUrl='';input.addEventListener('change',function(){if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl='';}const file=input.files&&input.files[0];if(file&&/^image\//.test(file.type)){objectUrl=URL.createObjectURL(file);preview.src=objectUrl;preview.classList.remove('d-none');}else if(original){preview.src=original;preview.classList.remove('d-none');}else{preview.removeAttribute('src');preview.classList.add('d-none');}});})();
 </script>
 <?php require_once '../includes/footer.php'; ?>

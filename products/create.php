@@ -384,7 +384,7 @@ require_once '../includes/sidebar.php';
 
             </div>
 
-            <?php if($product_photos_enabled){ ?><div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div></div></div><?php } ?>
+            <?php if($product_photos_enabled){ ?><div class="row"><div class="col-md-4"><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small><img id="product-photo-preview" class="d-none mt-2" alt="Selected product photo" style="width:70px;height:70px;object-fit:cover;border:1px solid #ddd;border-radius:4px"></div></div></div><?php } ?>
 
             <div class="row">
 
@@ -596,7 +596,7 @@ function syncVariants(){
 }
 category.addEventListener('change',syncVariants); syncVariants();
 })();
-(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input||!status)return;input.addEventListener('change',function(){status.textContent='';});})();
+(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status'),preview=document.getElementById('product-photo-preview');if(!input)return;const original=preview?(preview.getAttribute('src')||''):'';let objectUrl='';input.addEventListener('change',function(){if(status)status.textContent='';if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl='';}if(!preview)return;const file=input.files&&input.files[0];if(file&&/^image\//.test(file.type)){objectUrl=URL.createObjectURL(file);preview.src=objectUrl;preview.classList.remove('d-none');}else if(original){preview.src=original;preview.classList.remove('d-none');}else{preview.removeAttribute('src');preview.classList.add('d-none');}});})();
 // Save products with AJAX and keep the form open for the next product.
 (function(){
   const form=document.getElementById('product-form'), button=document.getElementById('save-product-btn'), box=document.getElementById('product-save-message');
@@ -611,7 +611,7 @@ category.addEventListener('change',syncVariants); syncVariants();
     const min=form.querySelector('[name="minimum_stock"]'); if(min)min.value='5';
     const exp=form.querySelector('[name="expired_on"]'); if(exp)exp.value='';
     const status=form.querySelector('[name="status"]'); if(status)status.value='active';
-    const photo=document.getElementById('product_photo'); if(photo)photo.value='';
+    const photo=document.getElementById('product_photo'); if(photo){photo.value='';photo.dispatchEvent(new Event('change'));}
     form.querySelectorAll('#variant-opening-fields input').forEach(f=>{f.value='0';f.dispatchEvent(new Event('input'));});
     const name=form.querySelector('[name="product_name"]'); if(name)name.focus();
   };

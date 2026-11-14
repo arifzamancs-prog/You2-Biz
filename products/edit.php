@@ -293,7 +293,7 @@ require_once '../includes/sidebar.php';
 
         <form method="post" enctype="multipart/form-data" id="product-form">
 
-            <?php if($product_photos_enabled){ ?><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><div class="mb-2"><img src="<?= htmlspecialchars(product_image_url($conn, $product['photo_path'] ?? '')); ?>" alt="Product" style="width:70px;height:70px;object-fit:cover;border:1px solid #ddd;border-radius:4px"></div><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div><?php } ?>
+            <?php if($product_photos_enabled){ ?><div class="form-group"><label>Product Photo <small class="text-muted">(Optional)</small></label><div class="mb-2"><img id="product-photo-preview" src="<?= htmlspecialchars(product_image_url($conn, $product['photo_path'] ?? '')); ?>" alt="Product" style="width:70px;height:70px;object-fit:cover;border:1px solid #ddd;border-radius:4px"></div><input type="file" name="product_photo" id="product_photo" accept="image/jpeg,image/png,image/webp" class="form-control"><small id="product-photo-status" class="form-text text-muted"></small></div><?php } ?>
 
             <div class="form-group">
 
@@ -505,7 +505,7 @@ function syncCategoryFields(){
 }
 category.addEventListener('change',syncCategoryFields);syncCategoryFields();
 })();
-(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status');if(!input||!status)return;input.addEventListener('change',function(){status.textContent='';});})();
+(function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status'),preview=document.getElementById('product-photo-preview');if(!input)return;const original=preview?(preview.getAttribute('src')||''):'';let objectUrl='';input.addEventListener('change',function(){if(status)status.textContent='';if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl='';}if(!preview)return;const file=input.files&&input.files[0];if(file&&/^image\//.test(file.type)){objectUrl=URL.createObjectURL(file);preview.src=objectUrl;preview.classList.remove('d-none');}else if(original){preview.src=original;preview.classList.remove('d-none');}else{preview.removeAttribute('src');preview.classList.add('d-none');}});})();
 </script>
 
 <?php require_once '../includes/footer.php'; ?>
