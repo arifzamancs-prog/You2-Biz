@@ -8,6 +8,7 @@ require_once '../includes/super_admin_config.php';
 require_once '../includes/sms_helper.php';
 require_once '../includes/branding_helper.php';
 require_once '../includes/company_backup_helper.php';
+require_once '../includes/company_file_cleanup_helper.php';
 require_once '../includes/smtp_mailer.php';
 require_once '../includes/app_config.php';
 require_once '../includes/email_verification_helper.php';
@@ -35,6 +36,9 @@ ensure_air_ticket_column($conn);
 ensure_stock_module_feature_column($conn);
 if (empty($_SESSION['multi_branch_csrf'])) {
     $_SESSION['multi_branch_csrf'] = bin2hex(random_bytes(32));
+}
+if (empty($_SESSION['admin_access_csrf'])) {
+    $_SESSION['admin_access_csrf'] = bin2hex(random_bytes(32));
 }
 if (empty($_SESSION['air_ticket_csrf'])) {
     $_SESSION['air_ticket_csrf'] = bin2hex(random_bytes(32));
@@ -276,43 +280,6 @@ function super_admin_delete_by_value($conn, $table, $column, $value)
     return mysqli_query($conn, "DELETE FROM `{$table}` WHERE `{$column}`={$value}");
 }
 
-function super_admin_company_avatar_cleanup_list($conn, $user_ids)
-{
-    $user_ids = array_values(array_unique(array_filter(array_map('intval', $user_ids))));
-
-    if(empty($user_ids)){
-        return [];
-    }
-
-    $id_list = implode(',', $user_ids);
-    $result = mysqli_query(
-        $conn,
-        "SELECT avatar
-         FROM users
-         WHERE id IN ({$id_list})"
-    );
-
-    $protected = [
-        'you2biz.png',
-        basename((string)SUPER_ADMIN_PROFILE_AVATAR),
-        basename((string)branding_company_default_avatar_filename($conn)),
-    ];
-
-    $files = [];
-
-    while($result && $row = mysqli_fetch_assoc($result)){
-        $avatar = basename(trim((string)($row['avatar'] ?? '')));
-
-        if($avatar === '' || in_array($avatar, $protected, true)){
-            continue;
-        }
-
-        $files[] = $avatar;
-    }
-
-    return array_values(array_unique($files));
-}
-
 function super_admin_delete_company($conn, $company_id)
 {
     $company_id = (int)$company_id;
@@ -355,7 +322,12 @@ function super_admin_delete_company($conn, $company_id)
         $user_ids[] = (int)$manager['id'];
     }
 
-    $avatar_files = super_admin_company_avatar_cleanup_list($conn, $user_ids);
+    @set_time_limit(300);
+
+    // Every uploaded file of the company (photos, logos, banners, seals...), found before
+    // its rows disappear and removed from disk once the delete is committed.
+    $company_files = company_files_collect($conn, $company_id, $user_ids);
+    $id_list = implode(',', array_map('intval', $user_ids));
 
     mysqli_begin_transaction($conn);
 
@@ -387,17 +359,48 @@ function super_admin_delete_company($conn, $company_id)
             }
         }
 
+        // Child rows that carry no owner column of their own: [child, link column, parent, parent owner filter].
+        $optional_child_deletes = [
+            ['activity_notification_reads', 'notification_id', 'activity_notifications', "user_id IN ({$id_list})"],
+            ['booking_invoice_charges', 'booking_invoice_id', 'booking_invoices', "user_id IN ({$id_list})"],
+            ['eshop_cancellations', 'order_id', 'eshop_orders', "company_id={$company_id}"],
+            ['eshop_delivery_history', 'order_id', 'eshop_orders', "company_id={$company_id}"],
+            ['eshop_delivery', 'order_id', 'eshop_orders', "company_id={$company_id}"],
+            ['purchase_return_items', 'return_id', 'purchase_returns', "user_id IN ({$id_list})"],
+            ['sales_refund_items', 'refund_id', 'sales_refunds', "user_id IN ({$id_list})"],
+            ['stock_damage_return_items', 'damage_return_id', 'stock_damage_returns', "user_id IN ({$id_list})"],
+            ['stock_distribution_items', 'distribution_id', 'stock_distributions', "user_id IN ({$id_list})"],
+        ];
+
+        foreach($optional_child_deletes as [$child_table, $link_column, $parent_table, $owner_filter]){
+            if(!super_admin_table_has_column($conn, $child_table, $link_column) || !super_admin_table_has_column($conn, $parent_table, 'id')){
+                continue;
+            }
+
+            if(!mysqli_query($conn, "DELETE FROM `{$child_table}` WHERE `{$link_column}` IN (SELECT id FROM `{$parent_table}` WHERE {$owner_filter})")){
+                throw new Exception(mysqli_error($conn));
+            }
+        }
+
         $tables_result = mysqli_query($conn, "SHOW TABLES");
 
         while($tables_result && $table_row = mysqli_fetch_row($tables_result)){
             $table = $table_row[0];
 
-            if($table === 'users' || !super_admin_valid_table_name($table)){
+            // The safety backup list and the Admin Access log are kept on purpose.
+            if(in_array($table, ['users', 'company_delete_backups', 'super_admin_access_log'], true) || !super_admin_valid_table_name($table)){
                 continue;
             }
 
             if(super_admin_table_has_column($conn, $table, 'user_id')){
                 if(!super_admin_delete_by_ids($conn, $table, 'user_id', $user_ids)){
+                    throw new Exception(mysqli_error($conn));
+                }
+            }
+
+            // E-shop, Parking and bill references are owned through company_id.
+            if(super_admin_table_has_column($conn, $table, 'company_id')){
+                if(!super_admin_delete_by_value($conn, $table, 'company_id', $company_id)){
                     throw new Exception(mysqli_error($conn));
                 }
             }
@@ -424,17 +427,20 @@ function super_admin_delete_company($conn, $company_id)
 
         mysqli_commit($conn);
 
-        $avatar_dir = branding_avatar_upload_dir_path();
+        [$files_removed, $bytes_freed, $files_kept, $files_failed] = company_files_remove($conn, $company_files, $company_id);
+        $message = 'Company and all related data deleted. '
+            . number_format($files_removed) . ' uploaded file(s) removed, '
+            . company_files_format_bytes($bytes_freed) . ' disk space freed.';
 
-        foreach($avatar_files as $avatar_file){
-            $avatar_path = $avatar_dir . '/' . basename($avatar_file);
-
-            if(is_file($avatar_path)){
-                @unlink($avatar_path);
-            }
+        if($files_kept > 0){
+            $message .= ' ' . number_format($files_kept) . ' file(s) kept because another company still uses them.';
         }
 
-        return [true, 'Company and all related data deleted.'];
+        if($files_failed > 0){
+            $message .= ' ' . number_format($files_failed) . ' file(s) could not be removed (check folder permissions).';
+        }
+
+        return [true, $message];
     }catch(Exception $e){
         mysqli_rollback($conn);
 
@@ -596,6 +602,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             super_admin_flash_and_redirect('Invalid company or Dummy Air Ticket status.', 'danger');
         }
         $enabled = (int)$enabled;
+        $type_row = mysqli_fetch_assoc(mysqli_query($conn, "SELECT company_type FROM users WHERE id=" . (int)$company_id . " AND role='admin' LIMIT 1"));
+        if ($enabled === 1 && !air_ticket_type_allowed($type_row['company_type'] ?? '')) {
+            super_admin_flash_and_redirect('Dummy Air Ticket is available only for Travel Agency and General Service companies.', 'danger');
+        }
         $stmt = mysqli_prepare($conn, "UPDATE users SET air_ticket_enabled=? WHERE id=? AND role='admin' LIMIT 1");
         mysqli_stmt_bind_param($stmt, 'ii', $enabled, $company_id);
         if (!mysqli_stmt_execute($stmt)) {
@@ -680,6 +690,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_bind_param($type_stmt, 'siii', $company_type, $stock_enabled, $table_enabled, $company_id);
 
         if(mysqli_stmt_execute($type_stmt)){
+            if($company_type === 'Travel Agency'){
+                // Service types, client passport fields and Dummy Air Ticket, once per company.
+                require_once '../includes/travel_agency_helper.php';
+                travel_agency_setup_company($conn, $company_id);
+            }
             super_admin_flash_and_redirect('Company type updated successfully.', 'success');
         }
 
@@ -918,6 +933,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ensure_default_product_categories($conn, $new_company_id);
         ensure_default_invoice_charges($conn, $new_company_id);
         ensure_default_cash_wallet($conn, $new_company_id);
+        if (normalize_company_type($company_type) === 'Travel Agency') {
+            // Default service types, packages and client passport fields.
+            require_once '../includes/travel_agency_helper.php';
+            travel_agency_setup_company($conn, $new_company_id);
+        }
 
         super_admin_flash_and_redirect('Company created and verified successfully.', 'success');
     }elseif($form_action === 'approve_request'){
@@ -1172,12 +1192,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if($subscription_status === 'trial'){
         $subscription_plan = 'Trial';
         $subscription_status = 'trial';
-        $max_managers = $trial_manager_limit;
-        $max_products = $trial_product_limit;
-        $max_invoices_monthly = $trial_invoice_limit;
-        $date_format = $trial_date_format;
 
-        $created_stmt = mysqli_prepare(
+        // Super Admin can give a trial company its own limits. A blank or
+        // non-number value (e.g. "Unlimited" left from Active) uses the trial default.
+        $trial_limit_value = function($field, $default){
+            $value = trim((string)($_POST[$field] ?? ''));
+            return ctype_digit($value) ? (int)$value : $default;
+        };
+        $max_managers = $trial_limit_value('max_managers', $trial_manager_limit);
+        $max_products = $trial_limit_value('max_products', $trial_product_limit);
+        $max_invoices_monthly = $trial_limit_value('max_invoices_monthly', $trial_invoice_limit);
+
+        $posted_expiry = DateTime::createFromFormat('!Y-m-d', $subscription_expires_at);
+        $posted_expiry_ok = $posted_expiry && $posted_expiry->format('Y-m-d') === $subscription_expires_at;
+
+        $created_stmt = $posted_expiry_ok ? false : mysqli_prepare(
             $conn,
             "SELECT DATE(DATE_ADD(created_at, INTERVAL 30 DAY)) AS trial_expiry
              FROM users
@@ -1263,15 +1292,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Trial companies keep the limits, expiry and date format Super Admin saved;
+// only missing values are filled with the trial defaults.
 mysqli_query(
     $conn,
     "UPDATE users
      SET subscription_plan='Trial',
-         max_managers={$trial_manager_limit},
-         max_products={$trial_product_limit},
-         max_invoices_monthly={$trial_invoice_limit},
-         subscription_expires_at=DATE(DATE_ADD(created_at, INTERVAL 30 DAY)),
-         date_format='{$trial_date_format}'
+         max_managers=IF(max_managers IS NULL, {$trial_manager_limit}, max_managers),
+         max_products=IF(max_products IS NULL OR max_products<=0, {$trial_product_limit}, max_products),
+         max_invoices_monthly=IF(max_invoices_monthly IS NULL OR max_invoices_monthly<=0, {$trial_invoice_limit}, max_invoices_monthly),
+         subscription_expires_at=IFNULL(subscription_expires_at, DATE(DATE_ADD(created_at, INTERVAL 30 DAY))),
+         date_format=IF(date_format IS NULL OR date_format='', '{$trial_date_format}', date_format)
      WHERE role='admin'
      AND (
         LOWER(subscription_plan)='trial'
@@ -1379,7 +1410,63 @@ $sql = "SELECT
         ORDER BY u.id DESC";
 
 $companies = mysqli_query($conn, $sql);
-$license_companies = mysqli_query($conn, "SELECT id, name, email FROM users WHERE role='admin' ORDER BY name ASC");
+
+// Extra usage for every company, one grouped query each (missing tables are skipped).
+$company_stats = [];
+$company_stat_add = function($key, $sql) use ($conn, &$company_stats){
+    try{
+        $result = mysqli_query($conn, $sql);
+        while($result && ($stat = mysqli_fetch_row($result))){
+            $company_stats[(int)$stat[0]][$key] = $stat[1];
+        }
+    }catch(Throwable $e){
+        // A company type without this module: nothing to count.
+    }
+};
+$company_stat_add('customers', "SELECT user_id, COUNT(*) FROM customers GROUP BY user_id");
+$company_stat_add('suppliers', "SELECT user_id, COUNT(*) FROM suppliers GROUP BY user_id");
+$company_stat_add('purchases', "SELECT user_id, COUNT(*) FROM purchases GROUP BY user_id");
+$company_stat_add('branches', "SELECT user_id, COUNT(*) FROM branches WHERE status='active' GROUP BY user_id");
+$company_stat_add('staff', "SELECT user_id, COUNT(*) FROM staff GROUP BY user_id");
+$company_stat_add('wallets', "SELECT user_id, COUNT(*) FROM wallets WHERE status='active' GROUP BY user_id");
+// Uploaded photos: product photos and galleries, staff/customer photos, shop logo and banners.
+$company_photos = [];
+$photo_root = dirname(__DIR__) . '/';
+$company_photo_add = function($sql, $folder) use ($conn, &$company_photos){
+    try{
+        $result = mysqli_query($conn, $sql);
+        while($result && ($photo = mysqli_fetch_row($result))){
+            $file = trim((string)$photo[1]);
+            if($file === '') continue;
+            $path = strpos($file, 'uploads/') === 0 ? $file : $folder . basename($file);
+            $company_photos[(int)$photo[0]][$path] = true;
+        }
+    }catch(Throwable $e){
+    }
+};
+$company_photo_add("SELECT user_id, photo_path FROM products WHERE photo_path IS NOT NULL AND photo_path<>''", 'uploads/products/');
+$company_photo_add("SELECT company_id, file_name FROM eshop_product_images", 'uploads/products/');
+$company_photo_add("SELECT user_id, photo FROM staff WHERE photo IS NOT NULL AND photo<>''", 'uploads/');
+$company_photo_add("SELECT user_id, photo FROM customers WHERE photo IS NOT NULL AND photo<>''", 'uploads/');
+$company_photo_add("SELECT company_id, logo_path FROM eshop_profiles WHERE logo_path IS NOT NULL AND logo_path<>''", 'uploads/eshop_logos/');
+$company_photo_add("SELECT company_id, image FROM eshop_banners WHERE image IS NOT NULL AND image<>''", 'uploads/eshop_banners/');
+foreach($company_photos as $photo_company_id => $photo_paths){
+    $photo_count = 0; $photo_bytes = 0;
+    foreach(array_keys($photo_paths) as $photo_path){
+        $full = $photo_root . $photo_path;
+        if(is_file($full)){ $photo_count++; $photo_bytes += (int)filesize($full); }
+    }
+    $company_stats[$photo_company_id]['photos'] = $photo_count;
+    $company_stats[$photo_company_id]['photo_bytes'] = $photo_bytes;
+}
+$format_bytes = static function($bytes){
+    $bytes = (float)$bytes;
+    if($bytes >= 1048576) return number_format($bytes / 1048576, 1) . ' MB';
+    if($bytes >= 1024) return number_format($bytes / 1024, 0) . ' KB';
+    return number_format($bytes, 0) . ' B';
+};
+
+$license_companies =mysqli_query($conn, "SELECT id, name, email FROM users WHERE role='admin' ORDER BY name ASC");
 $single_user_license_status = system_setting($conn, 'single_user_license_status', 'inactive');
 $single_user_license_company_id = (int)system_setting($conn, 'single_user_license_company_id', '0');
 $single_user_license_logo_file = system_setting($conn, 'single_user_license_logo_file', '');
@@ -1522,6 +1609,10 @@ require_once '../includes/sidebar.php';
 .sa-usage-head span:first-child { color: #6c757d; }
 .sa-usage-head span:last-child { font-weight: 600; }
 .sa-usage .progress { height: 5px; border-radius: 3px; }
+.sa-usage-stats { border-top: 1px dashed #dee2e6; margin-top: .6rem; padding-top: .5rem; }
+.sa-usage-stat { display: flex; justify-content: space-between; gap: .5rem; font-size: .78rem; line-height: 1.7; }
+.sa-usage-stat span { color: #6c757d; white-space: nowrap; }
+.sa-usage-stat strong { font-weight: 600; text-align: right; white-space: nowrap; }
 .sa-plan-name { font-weight: 700; font-size: .95rem; margin: .55rem 0 .35rem; }
 .sa-chip { display: inline-block; font-size: .72rem; background: #f1f3f5; border-radius: 1rem; padding: .15rem .55rem; margin: .15rem .15rem 0 0; color: #495057; }
 .sa-control { min-width: 340px; }
@@ -1643,6 +1734,7 @@ require_once '../includes/sidebar.php';
                                         </div>
                                     </div>
                                 </form>
+                                <?php if (air_ticket_type_allowed($row['company_type'] ?? '')) { ?>
                                 <form method="post" class="form-group mb-0 mt-3">
                                     <input type="hidden" name="company_id" value="<?= (int)$row['id'] ?>">
                                     <input type="hidden" name="form_action" value="update_air_ticket">
@@ -1658,6 +1750,7 @@ require_once '../includes/sidebar.php';
                                         </div>
                                     </div>
                                 </form>
+                                <?php } ?>
                             </div>
                         </td>
                         <td class="sa-contact">
@@ -1824,6 +1917,23 @@ require_once '../includes/sidebar.php';
                                     </div>
                                 </div>
                             <?php } ?>
+                            <?php
+                            $stats = $company_stats[(int)$row['id']] ?? [];
+                            $stat_lines = [
+                                ['fa-images', 'Photos', number_format((int)($stats['photos'] ?? 0)) . ' · ' . $format_bytes($stats['photo_bytes'] ?? 0)],
+                                ['fa-users', 'Customers', number_format((int)($stats['customers'] ?? 0))],
+                                ['fa-truck', 'Vendors', number_format((int)($stats['suppliers'] ?? 0))],
+                                ['fa-shopping-basket', 'Purchases', number_format((int)($stats['purchases'] ?? 0))],
+                                ['fa-user-tie', 'Staff', number_format((int)($stats['staff'] ?? 0))],
+                                ['fa-code-branch', 'Branches', number_format((int)($stats['branches'] ?? 0))],
+                                ['fa-wallet', 'Wallets', number_format((int)($stats['wallets'] ?? 0))],
+                            ];
+                            ?>
+                            <div class="sa-usage-stats">
+                                <?php foreach($stat_lines as [$stat_icon, $stat_label, $stat_value]){ ?>
+                                    <div class="sa-usage-stat"><span><i class="fas <?= $stat_icon; ?> fa-fw mr-1"></i><?= htmlspecialchars($stat_label); ?></span><strong><?= htmlspecialchars($stat_value); ?></strong></div>
+                                <?php } ?>
+                            </div>
                         </td>
                         <td class="sa-status">
                             <?php
@@ -2014,7 +2124,19 @@ require_once '../includes/sidebar.php';
                                         type="button"
                                         class="btn btn-outline-danger btn-sm"
                                         onclick="showDeleteConfirm(this);">
-                                        <i class="fas fa-trash-alt mr-1"></i> Delete
+                                        <i class="fas fa-trash-alt mr-1"></i> Delete Company
+                                    </button>
+                                    <input type="hidden" name="admin_access_csrf" value="<?= htmlspecialchars($_SESSION['admin_access_csrf']); ?>">
+                                    <button
+                                        type="submit"
+                                        name="admin_access_company"
+                                        value="<?= (int)$row['id']; ?>"
+                                        formaction="<?= htmlspecialchars(app_path('super_admin/admin_access.php')); ?>"
+                                        formtarget="_blank"
+                                        formnovalidate
+                                        class="btn btn-outline-dark btn-sm"
+                                        title="Open this company as its admin in a new tab (no password)">
+                                        <i class="fas fa-user-shield mr-1"></i> Admin Access
                                     </button>
                                 </div>
 
@@ -2033,7 +2155,7 @@ require_once '../includes/sidebar.php';
                                         name="form_action"
                                         value="delete_company"
                                         class="btn btn-danger btn-sm"
-                                        onclick="return confirm('Delete this company and all related data permanently?');">
+                                        onclick="return confirm('Delete this company and all related data permanently? Its uploaded photos, logos and seals will also be removed from the server.');">
                                         Confirm Delete
                                     </button>
                                     <button
@@ -2259,13 +2381,15 @@ function hideDeleteConfirm(button){
 
 document.addEventListener("change", function(event){
     if(event.target && event.target.name === "subscription_status"){
+        // On page load only the read-only state is set; the saved values stay as they are.
+        var initial = !!event.detail && event.detail.initial === true;
         var form = event.target.closest("form");
         var planInput = form ? form.querySelector(".subscription-plan-display") : null;
         var expiresInput = form ? form.querySelector(".subscription-expires-input") : null;
         var limitInputs = form ? form.querySelectorAll(".subscription-limit-input") : [];
         var value = event.target.value || "trial";
 
-        if(planInput){
+        if(planInput && !initial){
             planInput.value = value === "active"
                 ? "Basic"
                 : value.charAt(0).toUpperCase() + value.slice(1);
@@ -2274,13 +2398,17 @@ document.addEventListener("change", function(event){
         if(expiresInput){
             if(value === "trial"){
                 expiresInput.disabled = false;
-                expiresInput.value = event.target.getAttribute("data-trial-expiry") || "";
+                if(!initial){
+                    expiresInput.value = event.target.getAttribute("data-trial-expiry") || "";
+                }
             }else if(value === "active"){
                 expiresInput.value = "";
                 expiresInput.disabled = true;
             }else if(value === "expired" || value === "blocked"){
                 expiresInput.disabled = false;
-                expiresInput.value = event.target.getAttribute("data-current-date") || "";
+                if(!initial){
+                    expiresInput.value = event.target.getAttribute("data-current-date") || "";
+                }
             }else{
                 expiresInput.disabled = false;
             }
@@ -2291,8 +2419,13 @@ document.addEventListener("change", function(event){
                 input.value = "Unlimited";
                 input.readOnly = true;
             }else if(value === "trial"){
-                input.value = input.getAttribute("data-trial-value") || "0";
-                input.readOnly = true;
+                // Trial starts from the default limits and Super Admin may change them.
+                if(!initial){
+                    input.value = input.getAttribute("data-trial-value") || "0";
+                }
+                input.readOnly = false;
+            }else if(initial){
+                input.readOnly = false;
             }else{
                 var currentValue = input.getAttribute("data-current-value") || "0";
 
@@ -2309,7 +2442,7 @@ document.addEventListener("change", function(event){
 
 document.addEventListener("DOMContentLoaded", function(){
     document.querySelectorAll("select[name=\"subscription_status\"]").forEach(function(select){
-        select.dispatchEvent(new Event("change"));
+        select.dispatchEvent(new CustomEvent("change", {bubbles: true, detail: {initial: true}}));
     });
 });
 </script>

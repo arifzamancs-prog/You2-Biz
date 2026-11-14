@@ -5,12 +5,14 @@ require_once '../includes/db.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_image_helper.php';
 require_once '../includes/distribution_display_helper.php';
+require_once '../includes/stock_request_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $warehouse_receipt_mode = !empty($warehouse_receipt_mode) && stock_can_manage_warehouse($conn);
 $branch_id = $warehouse_receipt_mode ? stock_warehouse_id($conn, $user_id) : selected_branch_id($conn, true);
 $message = $_SESSION['stock_receive_message'] ?? '';
-unset($_SESSION['stock_receive_message']);
+$message_at = $_SESSION['stock_receive_message_at'] ?? '';
+unset($_SESSION['stock_receive_message'], $_SESSION['stock_receive_message_at']);
 $error = '';
 
 if (!company_multi_branch_enabled($conn, $user_id)) {
@@ -80,7 +82,47 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
     }
 }
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') !== 'send_stock') {
+// Product requests: ask another location for stock, and answer requests made to this one.
+$request_tables_ready = stock_request_schema($conn);
+$post_action = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' ? (string)($_POST['action'] ?? '') : '';
+if (in_array($post_action, ['request_stock', 'request_send', 'request_reject', 'request_cancel'], true)) {
+    try {
+        if (!$request_tables_ready) throw new RuntimeException('Product requests are not available right now.');
+        if ($post_action === 'request_stock') {
+            $source_branch_id = (int)($_POST['source_branch_id'] ?? 0);
+            if (!isset($locations[$source_branch_id]) || $source_branch_id === $branch_id) throw new RuntimeException('Select the location you want product from.');
+            $lines = [];
+            $product_ids = $_POST['product_id'] ?? [];
+            foreach (is_array($product_ids) ? $product_ids : [] as $line_index => $product_id) {
+                $line_variants = $_POST['variant_quantity'][$line_index] ?? [];
+                if (is_array($line_variants) && $line_variants) {
+                    foreach ($line_variants as $variant_index => $quantity) {
+                        $lines[] = [(int)$product_id, (string)($_POST['variant_name'][$line_index][$variant_index] ?? ''), (float)$quantity];
+                    }
+                } else {
+                    $lines[] = [(int)$product_id, '', (float)($_POST['quantity'][$line_index] ?? 0)];
+                }
+            }
+            stock_request_create($conn, $user_id, $branch_id, $source_branch_id, $lines, (string)($_POST['note'] ?? ''), (string)($_POST['request_key'] ?? ''));
+            $_SESSION['stock_receive_message'] = 'Product request sent to ' . $location_label($source_branch_id) . '. You will be notified when they send it.';
+        } elseif ($post_action === 'request_send') {
+            $send = $_POST['send_quantity'] ?? [];
+            stock_request_send($conn, $user_id, (int)($_POST['request_id'] ?? 0), $branch_id, is_array($send) ? array_map('floatval', $send) : [], (string)($_POST['response_note'] ?? ''));
+            $_SESSION['stock_receive_message'] = 'Requested product sent. It will be added there once they receive it.';
+        } else {
+            $close_status = $post_action === 'request_reject' ? 'rejected' : 'cancelled';
+            stock_request_close($conn, $user_id, (int)($_POST['request_id'] ?? 0), $branch_id, $close_status, (string)($_POST['response_note'] ?? ''));
+            $_SESSION['stock_receive_message'] = 'Product request ' . $close_status . '.';
+        }
+        $_SESSION['stock_receive_message_at'] = 'requests';
+        header('Location: receive_stock.php#' . ($post_action === 'request_cancel' || $post_action === 'request_stock' ? 'requests-outgoing' : 'product-requests'));
+        exit;
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if ($post_action === '' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     try {
         $receipts = $_POST['distribution_received'] ?? [];
         if(!is_array($receipts) || empty($receipts)){ throw new RuntimeException('Reload this page and select a stock receipt.'); }
@@ -184,6 +226,9 @@ foreach ($sent_groups as &$group) {
 }
 unset($group);
 
+$incoming_requests = $request_tables_ready ? stock_request_list($conn, $user_id, $branch_id, 'incoming') : [];
+$my_requests = $request_tables_ready ? stock_request_list($conn, $user_id, $branch_id, 'outgoing') : [];
+
 $received_history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.created_at) AS created_at,MIN(d.reference_no) AS reference_no,MAX(d.received_at) AS received_at,SUM(d.total_cost) AS total_cost,d.user_id,d.from_branch_id,d.to_branch_id,d.note,
     SUM(d.quantity) AS sent_quantity,SUM(d.quantity-d.damaged_quantity) AS received_quantity,SUM(d.damaged_quantity) AS damaged_quantity,
     GROUP_CONCAT(JSON_ARRAY(p.product_name,d.variant_summary) ORDER BY d.id SEPARATOR ',') AS product_summary,
@@ -215,7 +260,7 @@ require_once '../includes/sidebar.php';
 <section class="content"><div class="container-fluid"><div class="card card-outline card-success">
     <div class="card-header"><h3 class="card-title"><i class="fas fa-shipping-fast mr-2"></i>Send Product</h3></div>
     <div class="card-body">
-        <?php if ($message !== '') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
+        <?php if ($message !== '' && $message_at !== 'requests') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
         <?php if ($error !== '') { ?><div class="alert alert-danger"><?= htmlspecialchars($error); ?></div><?php } ?>
         <p class="text-muted mb-3">Send stock from <strong><?= htmlspecialchars($location_label($branch_id)); ?></strong> (<?= $location_kind($branch_id); ?>) to the warehouse or another branch. It leaves this location now and is added there when they receive it.</p>
         <form method="post" id="send-stock-form">
@@ -249,8 +294,173 @@ require_once '../includes/sidebar.php';
     </div>
 </div></div></section>
 
-<section class="content"><div class="container-fluid"><div class="card card-outline card-primary">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck-loading mr-2"></i>Product Receive Request</h3></div>
+<section class="content"><div class="container-fluid"><div class="card">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck mr-2"></i>Product Sent</h3></div>
+    <div class="card-body"><div class="table-responsive"><table class="table table-bordered table-striped mb-0">
+        <thead><tr><th>Photo</th><th>Reference</th><th>Date</th><th>To</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        <?php foreach ($sent_groups as $group) { $row = $group['row']; ?>
+            <tr>
+                <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
+                <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td>
+                <td><?= htmlspecialchars(app_date($row['created_at'])); ?></td>
+                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?><div class="mt-1"><?= $direction_badge($row['from_branch_id'], $row['to_branch_id']); ?></div></td>
+                <td><?= distribution_product_blocks($group['product_summary']); ?></td>
+                <td><?= htmlspecialchars($group['code_summary']); ?></td>
+                <td><?= number_format($group['quantity'], 0); ?></td>
+                <td><span class="badge badge-warning">Pending</span><small class="d-block text-muted">Awaiting receipt</small></td>
+                <td><a href="../warehouse/print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print mr-1"></i>Print</a></td>
+            </tr>
+        <?php } ?>
+        <?php if (!$sent_groups) { ?><tr><td colspan="9" class="text-center text-muted py-4">No product sent request is pending from this location.</td></tr><?php } ?>
+        </tbody>
+    </table></div></div>
+</div></div></section>
+
+<section class="content" id="product-request"><div class="container-fluid"><div class="card card-outline card-info">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-hand-holding-medical mr-2"></i>Request Product</h3></div>
+    <div class="card-body">
+        <p class="text-muted mb-3">Ask another branch or the warehouse to send product to <strong><?= htmlspecialchars($location_label($branch_id)); ?></strong>. They see it in their request list and send it, or reject it.</p>
+        <form method="post" id="request-stock-form">
+            <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>">
+            <input type="hidden" name="action" value="request_stock">
+            <input type="hidden" name="request_key" value="<?= bin2hex(random_bytes(24)); ?>">
+            <div class="form-row">
+                <div class="form-group col-md-4"><label for="request-from">Request From</label>
+                    <select id="request-from" name="source_branch_id" class="form-control" required>
+                        <option value="">Select location</option>
+                        <?php foreach (['Warehouse', 'Branch'] as $kind) { $group = array_filter($locations, fn($location) => $location_kind($location['id']) === $kind && (int)$location['id'] !== $branch_id); if (!$group) continue; ?>
+                            <optgroup label="<?= $kind === 'Warehouse' ? 'Main Warehouse' : 'Branches'; ?>">
+                                <?php foreach ($group as $location) { ?><option value="<?= (int)$location['id']; ?>" data-direction="<?= $kind . ' → ' . $location_kind($branch_id); ?>"><?= htmlspecialchars($location_label($location['id'])); ?></option><?php } ?>
+                            </optgroup>
+                        <?php } ?>
+                    </select>
+                </div>
+                <div class="form-group col-md-4"><label>To</label><input class="form-control" value="<?= htmlspecialchars($location_label($branch_id) . ' (' . $location_kind($branch_id) . ')'); ?>" readonly></div>
+                <div class="form-group col-md-4 d-flex align-items-end"><span id="request-direction" class="badge badge-info p-2" hidden></span></div>
+            </div>
+            <div id="request-lines">
+                <div class="form-row request-line">
+                    <div class="form-group col-md-6"><label>Product / Available there</label><select name="product_id[]" class="form-control request-product"><option value="">Select a location first</option></select></div>
+                    <div class="form-group col-md-6"><label>Quantity</label><div class="request-quantity-wrap"><input class="form-control" type="number" disabled></div></div>
+                </div>
+            </div>
+            <button class="btn btn-outline-info btn-sm mb-3" type="button" id="request-add-line"><i class="fas fa-plus mr-1"></i>Add more</button>
+            <div class="form-row"><div class="form-group col-md-6"><label for="request-note">Note</label><input id="request-note" class="form-control" name="note" maxlength="500" placeholder="Optional"></div></div>
+            <button class="btn btn-info" type="submit"><i class="fas fa-hand-paper mr-1"></i>Send Request</button>
+        </form>
+    </div>
+</div></div></section>
+
+<?php
+$request_status_badge = ['pending' => 'warning', 'sent' => 'success', 'rejected' => 'danger', 'cancelled' => 'secondary'];
+$request_items_html = static function ($request, $with_sent) {
+    // One block per product; its variants on one line.
+    $products = [];
+    foreach ($request['items'] as $item) {
+        $product_id = (int)$item['product_id'];
+        $products[$product_id]['head'] = '<strong>' . htmlspecialchars($item['product_name']) . '</strong>'
+            . (trim((string)$item['sku']) !== '' ? ' <small class="text-muted">[' . htmlspecialchars($item['sku']) . ']</small>' : '');
+        $products[$product_id]['parts'][] = ($item['variant_name'] !== '' ? htmlspecialchars($item['variant_name']) . ': ' : 'Qty: ') . number_format((float)$item['quantity'], 0)
+            . ($with_sent && $request['status'] === 'sent' ? ' (sent ' . number_format((float)$item['sent_quantity'], 0) . ')' : '');
+    }
+    $html = '';
+    foreach ($products as $product) {
+        $html .= '<div class="mb-1">' . $product['head'] . '<br><small>' . implode(' · ', $product['parts']) . '</small></div>';
+    }
+    return $html;
+};
+$request_total = static fn($request) => array_sum(array_map(static fn($item) => (float)$item['quantity'], $request['items']));
+$incoming_pending = count(array_filter($incoming_requests, static fn($request) => $request['status'] === 'pending'));
+$my_pending = count(array_filter($my_requests, static fn($request) => $request['status'] === 'pending'));
+?>
+<section class="content" id="product-requests"><div class="container-fluid"><div class="card card-outline card-info">
+    <div class="card-header p-0 border-bottom-0">
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#requests-incoming" role="tab"><i class="fas fa-inbox mr-1"></i>Requests to <?= htmlspecialchars($location_label($branch_id)); ?> <?php if ($incoming_pending) { ?><span class="badge badge-warning ml-1"><?= $incoming_pending; ?></span><?php } ?></a></li>
+            <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#requests-outgoing" role="tab"><i class="fas fa-paper-plane mr-1"></i>My Requests <?php if ($my_pending) { ?><span class="badge badge-secondary ml-1"><?= $my_pending; ?></span><?php } ?></a></li>
+        </ul>
+    </div>
+    <div class="card-body">
+        <?php if ($message !== '' && $message_at === 'requests') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
+        <div class="tab-content">
+        <div class="tab-pane fade show active" id="requests-incoming" role="tabpanel">
+            <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
+                <thead><tr><th>Request</th><th>Date</th><th>Requested By</th><th>Product</th><th>Qty</th><th>Note</th><th>Status</th><th style="min-width:260px">Action</th></tr></thead>
+                <tbody>
+                <?php foreach ($incoming_requests as $request) { $form_id = 'request-send-' . (int)$request['id']; ?>
+                    <tr<?= $request['status'] === 'pending' ? ' class="table-warning"' : ''; ?>>
+                        <td class="text-nowrap"><?= htmlspecialchars($request['request_no']); ?></td>
+                        <td class="text-nowrap"><?= htmlspecialchars(app_date($request['created_at'])); ?><small class="d-block text-muted"><?= htmlspecialchars(date('h:i A', strtotime($request['created_at']))); ?></small></td>
+                        <td><?= htmlspecialchars($location_label($request['requester_branch_id'])); ?><div class="mt-1"><?= $direction_badge($request['source_branch_id'], $request['requester_branch_id']); ?></div><?php if ($request['requested_by_name'] !== '') { ?><small class="d-block text-muted"><?= htmlspecialchars($request['requested_by_name']); ?></small><?php } ?></td>
+                        <td><?= $request_items_html($request, true); ?></td>
+                        <td><?= number_format($request_total($request), 0); ?></td>
+                        <td class="text-break"><?= htmlspecialchars($request['note']); ?></td>
+                        <td><span class="badge badge-<?= $request_status_badge[$request['status']] ?? 'light'; ?>"><?= htmlspecialchars(ucfirst($request['status'])); ?></span><?php if ($request['response_note'] !== '') { ?><small class="d-block text-muted"><?= htmlspecialchars($request['response_note']); ?></small><?php } ?></td>
+                        <td>
+                            <?php if ($request['status'] === 'pending') { ?>
+                                <form id="<?= $form_id; ?>" method="post" class="request-send-form">
+                                    <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>">
+                                    <input type="hidden" name="request_id" value="<?= (int)$request['id']; ?>">
+                                    <?php foreach ($request['items'] as $item) { ?>
+                                        <div class="input-group input-group-sm mb-1">
+                                            <div class="input-group-prepend"><span class="input-group-text text-truncate" style="max-width:150px" title="<?= htmlspecialchars($item['product_name']); ?>"><?= htmlspecialchars($item['variant_name'] !== '' ? $item['variant_name'] : $item['product_name']); ?></span></div>
+                                            <input type="number" class="form-control" name="send_quantity[<?= (int)$item['id']; ?>]" min="0" max="<?= (int)$item['quantity']; ?>" step="1" value="<?= (int)$item['quantity']; ?>">
+                                            <small class="w-100 text-muted request-available" data-product="<?= (int)$item['product_id']; ?>" data-variant="<?= htmlspecialchars($item['variant_name']); ?>"></small>
+                                        </div>
+                                    <?php } ?>
+                                    <input type="text" class="form-control form-control-sm mb-1" name="response_note" maxlength="500" placeholder="Note (optional, reason if rejected)">
+                                    <button class="btn btn-success btn-sm" type="submit" name="action" value="request_send"><i class="fas fa-paper-plane mr-1"></i>Send</button>
+                                    <button class="btn btn-outline-danger btn-sm" type="submit" name="action" value="request_reject" formnovalidate><i class="fas fa-times mr-1"></i>Reject</button>
+                                </form>
+                            <?php } else { ?>
+                                <small class="text-muted"><?= htmlspecialchars(ucfirst($request['status'])); ?><?= $request['responded_at'] ? ' ' . htmlspecialchars(app_date($request['responded_at'])) : ''; ?><?= $request['responded_by_name'] !== '' ? ' · ' . htmlspecialchars($request['responded_by_name']) : ''; ?></small>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php } ?>
+                <?php if (!$incoming_requests) { ?><tr><td colspan="8" class="text-center text-muted py-4">No branch has requested product from here.</td></tr><?php } ?>
+                </tbody>
+            </table></div>
+        </div>
+        <div class="tab-pane fade" id="requests-outgoing" role="tabpanel">
+            <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
+                <thead><tr><th>Request</th><th>Date</th><th>Requested From</th><th>Product</th><th>Qty</th><th>Note</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                <?php foreach ($my_requests as $request) { ?>
+                    <tr>
+                        <td class="text-nowrap"><?= htmlspecialchars($request['request_no']); ?></td>
+                        <td class="text-nowrap"><?= htmlspecialchars(app_date($request['created_at'])); ?><small class="d-block text-muted"><?= htmlspecialchars(date('h:i A', strtotime($request['created_at']))); ?></small></td>
+                        <td><?= htmlspecialchars($location_label($request['source_branch_id'])); ?><div class="mt-1"><?= $direction_badge($request['source_branch_id'], $request['requester_branch_id']); ?></div></td>
+                        <td><?= $request_items_html($request, true); ?></td>
+                        <td><?= number_format($request_total($request), 0); ?></td>
+                        <td class="text-break"><?= htmlspecialchars($request['note']); ?></td>
+                        <td><span class="badge badge-<?= $request_status_badge[$request['status']] ?? 'light'; ?>"><?= htmlspecialchars(ucfirst($request['status'])); ?></span>
+                            <?php if ($request['status'] === 'sent') { ?><small class="d-block text-muted">Receive it below</small><?php } ?>
+                            <?php if ($request['response_note'] !== '') { ?><small class="d-block text-muted"><?= htmlspecialchars($request['response_note']); ?></small><?php } ?></td>
+                        <td>
+                            <?php if ($request['status'] === 'pending') { ?>
+                                <form method="post" onsubmit="return confirm('Cancel this product request?');">
+                                    <input type="hidden" name="stock_csrf" value="<?= htmlspecialchars(stock_csrf_token()); ?>">
+                                    <input type="hidden" name="action" value="request_cancel">
+                                    <input type="hidden" name="request_id" value="<?= (int)$request['id']; ?>">
+                                    <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="fas fa-ban mr-1"></i>Cancel</button>
+                                </form>
+                            <?php } else { ?>
+                                <small class="text-muted"><?= $request['responded_at'] ? htmlspecialchars(app_date($request['responded_at'])) : ''; ?><?= $request['responded_by_name'] !== '' ? ' · ' . htmlspecialchars($request['responded_by_name']) : ''; ?></small>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php } ?>
+                <?php if (!$my_requests) { ?><tr><td colspan="8" class="text-center text-muted py-4">You have not requested product from another location yet.</td></tr><?php } ?>
+                </tbody>
+            </table></div>
+        </div>
+    </div></div>
+</div></div></section>
+
+<section class="content" id="product-receive"><div class="container-fluid"><div class="card card-outline card-primary">
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck-loading mr-2"></i>Product Receive</h3></div>
     <div class="card-body">
         <?php if ($warehouse_receipt_mode) { ?><a href="index.php" class="btn btn-outline-secondary mb-3">Back to Main Warehouse</a><?php } ?>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
@@ -285,29 +495,6 @@ require_once '../includes/sidebar.php';
             </tbody>
         </table></div>
     </div>
-</div></div></section>
-
-<section class="content"><div class="container-fluid"><div class="card">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-truck mr-2"></i>Product Sent</h3></div>
-    <div class="card-body"><div class="table-responsive"><table class="table table-bordered table-striped mb-0">
-        <thead><tr><th>Photo</th><th>Reference</th><th>Date</th><th>To</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>
-        <?php foreach ($sent_groups as $group) { $row = $group['row']; ?>
-            <tr>
-                <td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
-                <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td>
-                <td><?= htmlspecialchars(app_date($row['created_at'])); ?></td>
-                <td><?= htmlspecialchars(($row['to_head_office'] ? 'Head Office' : $row['to_branch_name']) . (!empty($row['to_branch_code']) ? ' [' . $row['to_branch_code'] . ']' : '')); ?><div class="mt-1"><?= $direction_badge($row['from_branch_id'], $row['to_branch_id']); ?></div></td>
-                <td><?= distribution_product_blocks($group['product_summary']); ?></td>
-                <td><?= htmlspecialchars($group['code_summary']); ?></td>
-                <td><?= number_format($group['quantity'], 0); ?></td>
-                <td><span class="badge badge-warning">Pending</span><small class="d-block text-muted">Awaiting receipt</small></td>
-                <td><a href="../warehouse/print_distribution.php?id=<?= (int)$row['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fas fa-print mr-1"></i>Print</a></td>
-            </tr>
-        <?php } ?>
-        <?php if (!$sent_groups) { ?><tr><td colspan="9" class="text-center text-muted py-4">No product sent request is pending from this location.</td></tr><?php } ?>
-        </tbody>
-    </table></div></div>
 </div></div></section>
 
 <section class="content"><div class="container-fluid"><div class="card">
@@ -455,6 +642,114 @@ document.querySelectorAll('form[id^="receipt-"]').forEach(function(form){
         const filled = [...form.querySelectorAll('input[name^="quantity"], input[name^="variant_quantity"]')].some(input => Number(input.value) > 0);
         if (!filled) { event.preventDefault(); alert('Add a product and enter at least one quantity.'); return; }
         if (!confirm('Send this stock to ' + (to.selectedOptions[0] ? to.selectedOptions[0].text : '') + '?')) event.preventDefault();
+    });
+})();
+// Request Product: products and variants available at the location being asked.
+(function () {
+    const form = document.getElementById('request-stock-form');
+    if (!form) return;
+    const lines = document.getElementById('request-lines');
+    const template = lines.querySelector('.request-line').cloneNode(true);
+    const from = document.getElementById('request-from');
+    const direction = document.getElementById('request-direction');
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let products = [];
+    function fillSelect(select) {
+        select.innerHTML = '';
+        if (!from.value) { select.add(new Option('Select a location first', '')); return; }
+        select.add(new Option(products.length ? 'Select product' : 'No stock available there', ''));
+        products.forEach(product => {
+            const option = new Option(product.name + ' — Available: ' + Number(product.available).toLocaleString(), product.id);
+            option.dataset.available = product.available;
+            option.dataset.variants = JSON.stringify(product.variants || []);
+            select.add(option);
+        });
+    }
+    function renderQuantity(select) {
+        const row = select.closest('.request-line');
+        const wrap = row.querySelector('.request-quantity-wrap');
+        const index = [...lines.querySelectorAll('.request-line')].indexOf(row);
+        const option = select.selectedOptions[0];
+        if (!option || !option.value) { wrap.innerHTML = '<input class="form-control" type="number" disabled>'; return; }
+        let variants = [];
+        try { variants = JSON.parse(option.dataset.variants || '[]'); } catch (e) {}
+        if (!variants.length) {
+            const available = Number(option.dataset.available || 0);
+            wrap.innerHTML = '<div class="input-group"><div class="input-group-prepend"><span class="input-group-text">Available: ' + available + '</span></div><input class="form-control" type="number" name="quantity[' + index + ']" min="1" max="' + available + '" step="1" required></div>';
+            return;
+        }
+        wrap.innerHTML = variants.map((variant, v) =>
+            '<div class="input-group mb-1"><div class="input-group-prepend"><span class="input-group-text">' + escapeHtml(variant.name) + ' (Available: ' + Number(variant.available) + ')</span></div>'
+            + '<input type="hidden" name="variant_name[' + index + '][' + v + ']" value="' + escapeHtml(variant.name) + '">'
+            + '<input class="form-control" type="number" name="variant_quantity[' + index + '][' + v + ']" min="0" max="' + Number(variant.available) + '" step="1"></div>'
+        ).join('');
+    }
+    lines.addEventListener('change', event => { if (event.target.classList.contains('request-product')) renderQuantity(event.target); });
+    function resetLines() {
+        lines.querySelectorAll('.request-line').forEach((row, i) => { if (i > 0) row.remove(); });
+        const select = lines.querySelector('.request-product');
+        fillSelect(select);
+        renderQuantity(select);
+    }
+    from.addEventListener('change', function () {
+        const option = from.selectedOptions[0];
+        direction.hidden = !option || !option.value;
+        direction.textContent = option && option.value ? option.dataset.direction : '';
+        products = [];
+        if (!from.value) { resetLines(); return; }
+        lines.querySelectorAll('.request-product').forEach(select => { select.innerHTML = '<option value="">Loading products…</option>'; });
+        fetch('../sales/request_stock_products.php?source=' + encodeURIComponent(from.value) + '<?= $warehouse_receipt_mode ? '&warehouse=1' : ''; ?>', {cache: 'no-store', credentials: 'same-origin'})
+            .then(response => response.ok ? response.json() : [])
+            .then(list => { products = Array.isArray(list) ? list : []; resetLines(); })
+            .catch(() => { lines.querySelectorAll('.request-product').forEach(select => { select.innerHTML = '<option value="">Products could not be loaded</option>'; }); });
+    });
+    document.getElementById('request-add-line').addEventListener('click', function () {
+        const row = template.cloneNode(true);
+        lines.appendChild(row);
+        fillSelect(row.querySelector('.request-product'));
+    });
+    form.addEventListener('submit', function (event) {
+        const filled = [...form.querySelectorAll('input[name^="quantity"], input[name^="variant_quantity"]')].some(input => Number(input.value) > 0);
+        if (!filled) { event.preventDefault(); alert('Add a product and enter at least one quantity.'); return; }
+        if (!confirm('Request this product from ' + (from.selectedOptions[0] ? from.selectedOptions[0].text : '') + '?')) event.preventDefault();
+    });
+})();
+// Requests to this location: show what is available here, confirm Send / Reject.
+(function () {
+    const hints = document.querySelectorAll('.request-available');
+    if (hints.length) {
+        fetch('../sales/send_stock_products.php<?= $warehouse_receipt_mode ? '?warehouse=1' : ''; ?>', {cache: 'no-store', credentials: 'same-origin'})
+            .then(response => response.ok ? response.json() : [])
+            .then(list => {
+                const stock = {};
+                (Array.isArray(list) ? list : []).forEach(product => {
+                    stock[product.id + '|'] = Number(product.available);
+                    (product.variants || []).forEach(variant => { stock[product.id + '|' + variant.name] = Number(variant.available); });
+                });
+                hints.forEach(hint => {
+                    const available = stock[hint.dataset.product + '|' + hint.dataset.variant] || 0;
+                    hint.textContent = 'Available here: ' + available;
+                    hint.classList.toggle('text-danger', available <= 0);
+                });
+            })
+            .catch(() => {});
+    }
+    document.querySelectorAll('.request-send-form').forEach(form => {
+        form.addEventListener('submit', event => {
+            const action = event.submitter ? event.submitter.value : 'request_send';
+            if (action === 'request_send' && ![...form.querySelectorAll('input[name^="send_quantity"]')].some(input => Number(input.value) > 0)) {
+                event.preventDefault();
+                alert('Enter at least one quantity to send.');
+                return;
+            }
+            if (!confirm(action === 'request_reject' ? 'Reject this product request?' : 'Send this product now?')) event.preventDefault();
+        });
+    });
+    // After a cancel the page opens on My Requests.
+    document.addEventListener('DOMContentLoaded', () => {
+        if (location.hash !== '#requests-outgoing' || !window.jQuery) return;
+        jQuery('a[href="#requests-outgoing"]').tab('show');
+        document.getElementById('product-requests').scrollIntoView();
     });
 })();
 const selectedRequest = document.querySelector('tr.table-primary[id^="receive-request-"]');

@@ -112,6 +112,10 @@ function eshop_place_order($conn,$cid,$cart,$input,$key){
         }
         if($delivery>0){ $s=mysqli_prepare($conn,'INSERT INTO invoice_charges(invoice_id,charge_type_id,amount) VALUES(?,?,?)'); mysqli_stmt_bind_param($s,'iid',$invoice,$charge,$delivery); mysqli_stmt_execute($s); }
         $s=mysqli_prepare($conn,'INSERT INTO eshop_orders(company_id,invoice_id,order_no,request_key,customer_name,phone,email,address,total) VALUES(?,?,?,?,?,?,?,?,?)'); mysqli_stmt_bind_param($s,'iissssssd',$cid,$invoice,$no,$key,$name,$phone,$email,$address,$total); mysqli_stmt_execute($s);
-        mysqli_commit($conn); return $no;
+        mysqli_commit($conn);
+        // Bell notification in You2 Biz for the new online order (after commit).
+        require_once __DIR__.'/activity_notification_helper.php';
+        activity_notify($conn,$cid,$branch,'sales_invoice',$invoice,'New E-shop order '.$no,$name.' · BDT '.number_format($total,2),'sales/view_invoice.php?id='.(int)$invoice);
+        return $no;
     }catch(Throwable $e){ mysqli_rollback($conn); throw $e; }
 }

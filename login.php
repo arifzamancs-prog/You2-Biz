@@ -1090,6 +1090,15 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
 <script src="adminlte/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
 
 <script src="adminlte/dist/js/adminlte.min.js"></script>
+<script>
+// Ctrl+R on the login page opens the registration page instead of reloading.
+document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault();
+        window.location.href = 'register.php';
+    }
+});
+</script>
 
 <?php require __DIR__ . '/includes/password_toggle.php'; ?>
 </body>

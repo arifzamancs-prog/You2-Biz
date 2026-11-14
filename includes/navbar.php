@@ -150,6 +150,20 @@ if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
     }
 }
 
+// New sales invoices, E-shop orders and purchases (unread by this person).
+$activity_notification_count = 0;
+$activity_notifications = [];
+if(isset($conn) && $conn instanceof mysqli && !is_super_admin_user()){
+    require_once __DIR__ . '/activity_notification_helper.php';
+    try{
+        [$activity_notification_count, $activity_notifications] = activity_notifications_unread($conn, (int)($_SESSION['user_id'] ?? 0), 10);
+    }catch(Throwable $e){
+        $activity_notification_count = 0;
+        $activity_notifications = [];
+    }
+}
+$navbar_notification_total = count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications) + $activity_notification_count;
+
 $avatar = app_path('uploads/avatars/you2biz.png');
 
 if (
@@ -181,6 +195,13 @@ if (
     .lead-followup-due { display: block; color: #d97706; font-size: 12px; font-weight: 600; margin-top: 5px; }
 </style>
 
+<?php if(!empty($_SESSION['admin_access']) && !empty($_SESSION['super_admin_backup'])){ ?>
+<div class="admin-access-banner" role="status">
+    <i class="fas fa-user-shield mr-2"></i>Super Admin access: you are working as <strong><?= htmlspecialchars((string)$_SESSION['admin_access']['company_name']); ?></strong>.
+    <a href="<?= htmlspecialchars(app_path('super_admin/end_admin_access.php')); ?>" class="btn btn-sm btn-dark ml-2"><i class="fas fa-sign-out-alt mr-1"></i>Return to Super Admin</a>
+</div>
+<style>.admin-access-banner{position:fixed;left:0;right:0;bottom:0;z-index:1060;background:#ffc107;color:#212529;font-size:.9rem;padding:6px 12px;text-align:center;box-shadow:0 -2px 8px rgba(0,0,0,.15)}body{padding-bottom:46px}@media print{.admin-access-banner{display:none}}</style>
+<?php } ?>
 <nav class="main-header navbar navbar-expand navbar-white navbar-light">
 
     <ul class="navbar-nav">
@@ -202,6 +223,66 @@ if (
 
     <ul class="navbar-nav ml-auto">
 
+        <?php
+        // Clock (left of the branch selector and the bell): 09:20 PM || 13 Nov 2026 || শুক্রবার, ২৮ কার্তিক ১৪৩৩
+        require_once __DIR__ . '/bangla_date_helper.php';
+        $navbar_now = new DateTimeImmutable('now');
+        ?>
+        <li class="nav-item d-none d-sm-flex align-items-center mr-2 navbar-clock" data-tz="<?= htmlspecialchars(date_default_timezone_get()); ?>" data-server-ms="<?= (int)round(microtime(true) * 1000); ?>">
+            <span data-clock-time><?= $navbar_now->format('h:i A'); ?></span>
+            <span class="navbar-clock-sep d-none d-lg-inline">||</span>
+            <span class="d-none d-lg-inline" data-clock-date><?= $navbar_now->format('d M Y'); ?></span>
+            <span class="navbar-clock-sep d-none d-lg-inline">||</span>
+            <span class="d-none d-lg-inline navbar-clock-bn" data-clock-bn><?= htmlspecialchars(bangla_date_text($navbar_now)); ?></span>
+        </li>
+        <style>
+            .navbar-clock{white-space:nowrap;font-size:.875rem;font-weight:600;color:#495057;font-variant-numeric:tabular-nums}
+            .navbar-clock-sep{color:#adb5bd;margin:0 .45rem;font-weight:400}
+            .navbar-clock-bn{font-weight:500}
+            @media print{.navbar-clock{display:none!important}}
+        </style>
+        <script>
+        (function () {
+            var el = document.querySelector('.navbar-clock');
+            if (!el || !window.Intl) return;
+            var tz = el.getAttribute('data-tz') || 'Asia/Dhaka';
+            // The server clock is the source: a wrong clock on the user's computer must not change the date.
+            var offset = (+el.getAttribute('data-server-ms') || Date.now()) - Date.now();
+            var digits = '০১২৩৪৫৬৭৮৯';
+            var bn = function (v) { return String(v).replace(/[0-9]/g, function (d) { return digits[d]; }); };
+            var days = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+            var months = ['বৈশাখ', 'জ্যৈষ্ঠ', 'আষাঢ়', 'শ্রাবণ', 'ভাদ্র', 'আশ্বিন', 'কার্তিক', 'অগ্রহায়ণ', 'পৌষ', 'মাঘ', 'ফাল্গুন', 'চৈত্র'];
+            var shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            var fmt;
+            try {
+                fmt = new Intl.DateTimeFormat('en-US', {timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false});
+            } catch (e) { return; }
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            // Same rules as includes/bangla_date_helper.php (Bangladesh, revised 2019).
+            var bangla = function (y, m, d) {
+                var startYear = (m > 4 || (m === 4 && d >= 14)) ? y : y - 1;
+                var offset = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(startYear, 3, 14)) / 86400000);
+                var next = startYear + 1;
+                var leap = (next % 4 === 0 && next % 100 !== 0) || next % 400 === 0;
+                var lengths = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, leap ? 30 : 29, 30];
+                var i = 0;
+                while (i < 11 && offset >= lengths[i]) { offset -= lengths[i]; i++; }
+                return bn(offset + 1) + ' ' + months[i] + ' ' + bn(startYear - 593);
+            };
+            var tick = function () {
+                var p = {};
+                fmt.formatToParts(new Date(Date.now() + offset)).forEach(function (x) { p[x.type] = x.value; });
+                var y = +p.year, m = +p.month, d = +p.day, h = +p.hour % 24, min = +p.minute;
+                var weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                el.querySelector('[data-clock-time]').textContent = pad(h % 12 || 12) + ':' + pad(min) + ' ' + (h < 12 ? 'AM' : 'PM');
+                el.querySelector('[data-clock-date]').textContent = pad(d) + ' ' + shortMonths[m - 1] + ' ' + y;
+                el.querySelector('[data-clock-bn]').textContent = days[weekday] + ', ' + bangla(y, m, d);
+            };
+            tick();
+            setInterval(tick, 15000);
+        })();
+        </script>
+
         <?php if($navbar_branches){ ?>
         <li class="nav-item d-flex align-items-center mr-2">
             <form method="post" action="<?= htmlspecialchars(app_path('branch_context.php')); ?>" class="form-inline">
@@ -221,15 +302,24 @@ if (
         <li class="nav-item dropdown">
             <a class="nav-link position-relative" data-toggle="dropdown" href="#" title="Notifications" aria-label="Notifications">
                 <i class="far fa-bell"></i>
-                <?php if(count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications) > 0){ ?>
-                    <span class="badge badge-danger navbar-badge"><?= count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications); ?></span>
+                <?php if($navbar_notification_total > 0){ ?>
+                    <span class="badge badge-danger navbar-badge"><?= $navbar_notification_total; ?></span>
                 <?php } ?>
             </a>
             <div class="dropdown-menu dropdown-menu-right navbar-followup-dropdown">
                 <div class="navbar-followup-heading">
                     <span><i class="far fa-bell mr-2"></i>Notifications</span>
-                    <span class="badge badge-primary badge-pill"><?= count($followup_notifications) + count($stock_receive_notifications) + count($damaged_return_notifications); ?></span>
+                    <span class="badge badge-primary badge-pill"><?= $navbar_notification_total; ?></span>
                 </div>
+                <?php if($activity_notifications){ ?>
+                    <?php foreach($activity_notifications as $notification){ $is_purchase = $notification['type'] === 'purchase'; $is_stock_request = $notification['type'] === 'stock_request'; ?>
+                        <a href="<?= htmlspecialchars(app_path('notifications/read.php?id=' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
+                            <span class="lead-followup-icon <?= $is_stock_request ? 'bg-warning' : ($is_purchase ? 'bg-info' : 'bg-primary'); ?>"><i class="fas <?= $is_stock_request ? 'fa-hand-holding-medical' : ($is_purchase ? 'fa-shopping-basket' : 'fa-file-invoice'); ?>"></i></span>
+                            <span class="lead-followup-content"><span class="lead-followup-title"><?= htmlspecialchars($notification['title']); ?></span><span class="lead-followup-meta"><?= htmlspecialchars($notification['meta']); ?><?= trim((string)$notification['created_by_name']) !== '' ? ' · ' . htmlspecialchars($notification['created_by_name']) : ''; ?></span><span class="lead-followup-due"><?= htmlspecialchars(app_date($notification['created_at'])); ?> <?= htmlspecialchars(date('h:i A', strtotime($notification['created_at']))); ?></span></span>
+                        </a>
+                    <?php } ?>
+                    <a href="<?= htmlspecialchars(app_path('notifications/read.php?all=1')); ?>" class="dropdown-item text-center small text-primary"><?= $activity_notification_count > count($activity_notifications) ? 'Showing latest ' . count($activity_notifications) . ' of ' . (int)$activity_notification_count . ' · ' : ''; ?>Mark all as read</a>
+                <?php } ?>
                 <?php if($damaged_return_notifications){ ?>
                     <?php foreach($damaged_return_notifications as $notification){ ?>
                         <a href="<?= htmlspecialchars(app_path('warehouse/damaged_returns.php?return_id=' . (int)$notification['id'] . '#damage-return-' . (int)$notification['id'])); ?>" class="dropdown-item lead-followup-item">
@@ -260,7 +350,7 @@ if (
                             </span>
                         </a>
                     <?php } ?>
-                <?php }elseif(!$stock_receive_notifications && !$damaged_return_notifications){ ?>
+                <?php }elseif(!$stock_receive_notifications && !$damaged_return_notifications && !$activity_notifications){ ?>
                     <span class="dropdown-item text-muted py-3"><i class="far fa-bell-slash mr-2"></i>No notifications.</span>
                 <?php } ?>
             </div>

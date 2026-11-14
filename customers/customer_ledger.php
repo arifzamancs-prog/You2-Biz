@@ -9,6 +9,8 @@ require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_opening_due_helper.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/project_package_helper.php';
+// A travel agency keeps client accounts in its booking ledger.
+if(project_package_company_type($conn, (int)($_SESSION['user_id'] ?? 0)) === 'Travel Agency'){ header('Location: ' . app_path('travel/client_ledger.php?client_id=' . (int)($_GET['id'] ?? 0))); exit; }
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';

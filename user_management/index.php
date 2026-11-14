@@ -316,10 +316,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !in_array(($_POST['action'] ?? ''),
         ));
     }
 
-    if($company_type === 'Service type'){
+    if(in_array($company_type, ['Service type', 'Travel Agency'], true)){
+        // Travel agencies keep Vendors (airlines, consolidators, hotels, embassies).
         $access_permissions = array_values(array_diff(
             $access_permissions,
-            ['stock_sales', 'products', 'warehouse', 'suppliers']
+            $company_type === 'Travel Agency' ? ['stock_sales', 'products', 'warehouse'] : ['stock_sales', 'products', 'warehouse', 'suppliers']
         ));
     }
 
@@ -886,7 +887,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label>Access Permissions</label>
                         <div class="row">
-                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($company_type === 'Restaurant & Cafe' && $permission_key === 'warehouse') continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if($company_type === 'Service type' && in_array($permission_key, ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Car Parking' && !in_array($permission_key, ['main_dashboard', 'parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; if(in_array($company_type, ['Stock Product', 'Fashion house'], true) && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
+                            <?php foreach(available_manager_permissions($project_package_labels) as $permission_key => $permission_label){ if(in_array($permission_key, array_merge($admin_sidebar_permission_keys, ['admin_sidebar_configured']), true)) continue; if($company_type === 'Restaurant & Cafe' && $permission_key === 'warehouse') continue; if($permission_key === 'land_ledger' && $company_type !== 'Housing') continue; if($company_type === 'Housing' && in_array($permission_key, ['stock_sales', 'products', 'warehouse'], true)) continue; if(in_array($company_type, ['Service type', 'Travel Agency'], true) && in_array($permission_key, $company_type === 'Travel Agency' ? ['stock_sales', 'products', 'warehouse'] : ['stock_sales', 'products', 'warehouse', 'suppliers'], true)) continue; if($company_type === 'Car Parking' && !in_array($permission_key, ['main_dashboard', 'parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; if(in_array($company_type, ['Stock Product', 'Fashion house'], true) && in_array($permission_key, ['sales', 'projects'], true)) continue; if(!$multi_branch_enabled && in_array($permission_key, ['dashboard', 'all_branches', 'warehouse'], true)) continue; ?>
                                 <?php if ($permission_key === 'stock_live_report' && $company_type !== 'Fashion house') continue; ?>
                                 <?php if ($company_type !== 'Car Parking' && in_array($permission_key, ['parking_dashboard', 'parking_entry', 'parking_exit', 'parking_reports', 'parking_settings'], true)) continue; ?>
                                 <div class="col-md-6 mb-2">

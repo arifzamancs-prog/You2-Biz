@@ -197,6 +197,13 @@ ensure_default_invoice_charges($conn, $user_id);
 
 ensure_default_cash_wallet($conn, $user_id);
 
+/* Travel Agency: default service types, packages and client passport fields (the client may delete them) */
+
+if($normalized_company_type === 'Travel Agency'){
+    require_once __DIR__ . '/includes/travel_agency_helper.php';
+    travel_agency_setup_company($conn, $user_id);
+}
+
 $registration_base_url = app_base_url();
 $registration_url = app_url('register.php');
 $verification_url = app_url('verify_email.php?token=' . urlencode($verification_token));
@@ -867,14 +874,19 @@ Register - <?= htmlspecialchars($auth_site_title); ?>
                 </div>
 
                 <div class="form-group">
-                    <label>Company Type</label>
-                    <div class="d-flex flex-wrap" style="gap: 16px;">
-                        <?php foreach (registration_company_type_options() as $type_key => $type_label) { ?>
-                        <div class="custom-control custom-radio">
-                            <input type="radio" id="company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>" name="company_type" value="<?= htmlspecialchars($type_key) ?>" class="custom-control-input" <?= isset($company_type) && valid_company_type($company_type) && normalize_company_type($company_type) === $type_key ? 'checked' : '' ?> required>
-                            <label class="custom-control-label" for="company_type_<?= htmlspecialchars(str_replace(' ', '_', $type_key)) ?>"><?= htmlspecialchars($type_label) ?></label>
+                    <label for="company_type">Company Type</label>
+                    <div class="input-group">
+                        <select id="company_type" name="company_type" class="form-control auth-input" required>
+                            <option value="">Select company type</option>
+                            <?php foreach (registration_company_type_options() as $type_key => $type_label) { ?>
+                            <option value="<?= htmlspecialchars($type_key) ?>" <?= isset($company_type) && valid_company_type($company_type) && normalize_company_type($company_type) === $type_key ? 'selected' : '' ?>><?= htmlspecialchars($type_label) ?></option>
+                            <?php } ?>
+                        </select>
+                        <div class="input-group-append">
+                            <div class="input-group-text auth-icon">
+                                <span class="fas fa-briefcase"></span>
+                            </div>
                         </div>
-                        <?php } ?>
                     </div>
                 </div>
 

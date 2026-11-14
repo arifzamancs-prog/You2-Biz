@@ -11,6 +11,7 @@ require_once '../includes/product_expiry_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/expense_helper.php';
 require_once '../includes/supplier_helper.php';
+require_once '../includes/activity_notification_helper.php';
 
 $user_id = $_SESSION['user_id'];
 // Suppliers created from a purchase get the next Vendor/Supplier ID.
@@ -610,6 +611,15 @@ try{
     }
 
     mysqli_commit($conn);
+
+    // Bell notification for the new purchase (after commit).
+    $notify_row = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT p.purchase_no,p.total_amount,p.branch_id,s.supplier_name FROM purchases p LEFT JOIN suppliers s ON s.id=p.supplier_id WHERE p.id=' . (int)$purchase_id . ' AND p.user_id=' . (int)$user_id));
+    if($notify_row){
+        activity_notify($conn, $user_id, (int)$notify_row['branch_id'], 'purchase', (int)$purchase_id,
+            'New purchase ' . $notify_row['purchase_no'],
+            trim((string)($notify_row['supplier_name'] ?? '')) . ' · BDT ' . number_format((float)$notify_row['total_amount'], 2),
+            'purchases/view.php?id=' . (int)$purchase_id);
+    }
 
     $_SESSION['success'] = "Purchase Saved Successfully.";
     header("Location:create.php?success=1");

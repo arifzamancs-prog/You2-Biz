@@ -29,6 +29,7 @@ $v = static fn($file) => rawurlencode((string)@filemtime(__DIR__ . '/' . $file))
     <div id="app"></div>
     <script src="pdf-export.js?v=<?= $v('pdf-export.js') ?>" defer></script>
     <script src="passport-ocr.js?v=<?= $v('passport-ocr.js') ?>" defer></script>
+    <script src="passport-crop.js?v=<?= $v('passport-crop.js') ?>" defer></script>
     <script src="app.js?v=<?= $v('app.js') ?>" defer></script>
   </body>
 </html>

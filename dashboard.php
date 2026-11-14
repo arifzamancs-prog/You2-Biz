@@ -84,6 +84,11 @@ function dashboard_resolve_transaction_type_label($conn, $transaction, $user_id)
         'sales_invoice' => 'Sales Invoice',
         'receive_payment' => 'Receive Due Payment',
         'purchase_return' => 'Vendor Return Refund',
+        'travel_payment' => 'Client Payment',
+        'travel_refund' => 'Client Refund',
+        'travel_commission' => 'Agent Commission',
+        'service_advance' => 'Service Advance',
+        'service_refund' => 'Service Refund',
         'purchase' => 'Purchase',
         'supplier_payment' => 'Supplier Due Payment',
         'invoice_income' => 'Booking Invoice',
@@ -471,6 +476,35 @@ $wallet_balances = array_map(function($wallet){
     return (float)$wallet['balance'];
 }, $wallets);
 
+// Travel Agency: sales come from travel bookings (refunds and reissues on their own dates),
+// and the recent list shows bookings.
+require_once 'includes/project_package_helper.php';
+$dashboard_travel_plane = project_package_company_type($conn, $user_id) === 'Travel Agency';
+if (project_package_company_type($conn, $user_id) === 'Travel Agency') {
+    require_once 'includes/travel_booking_helper.php';
+    if (travel_booking_schema($conn)) {
+        $total_sales = travel_sales_total($conn, $user_id, date('Y-m-d'), date('Y-m-d'));
+        foreach (travel_sales_by_period($conn, $user_id, $start_month, date('Y-m-d'), 'month') as $month_key => $amount) {
+            if (isset($month_sales_map[$month_key])) {
+                $month_sales_map[$month_key] = $amount;
+            }
+        }
+        $dashboard_invoice_print_url = 'travel/booking_view.php';
+        $recent_invoices = dashboard_rows(
+            $conn,
+            "SELECT b.id, b.booking_no AS invoice_no, b.booking_date AS invoice_date, " . travel_effective_price_sql() . " AS amount,
+                    IF(b.status='active', 'confirmed', b.status) AS status, c.customer_name
+             FROM travel_bookings b
+             LEFT JOIN customers c ON c.id=b.client_id AND c.user_id=b.user_id
+             WHERE b.user_id=?
+             ORDER BY b.booking_date DESC, b.id DESC
+             LIMIT 6",
+            "i",
+            [$user_id]
+        );
+    }
+}
+
 require_once 'includes/header.php';
 require_once 'includes/navbar.php';
 require_once 'includes/sidebar.php';
@@ -529,6 +563,45 @@ require_once 'includes/sidebar.php';
     </div>
 
     <div class="col-md-4 text-md-right mt-3 mt-md-0">
+
+        <?php if (!empty($dashboard_travel_plane)) { ?>
+        <!-- Travel Agency: a small plane flying between two airports beside the heading. -->
+        <style>
+            .dash-plane{width:280px;max-width:100%;height:80px;vertical-align:middle}
+            .dash-plane .dp-trail{animation:dp-dash 1.4s linear infinite}
+            @keyframes dp-dash{to{stroke-dashoffset:-20}}
+            @media (prefers-reduced-motion:reduce){.dash-plane .dp-trail{animation:none}}
+        </style>
+        <svg class="dash-plane d-none d-md-inline-block" viewBox="0 0 280 80" aria-hidden="true">
+            <path d="M206 30a9 9 0 0 1 17-3 7 7 0 0 1 11 6h-30a5 5 0 0 1 2-3z" fill="#dbe7f5"/>
+            <path d="M40 34a7 7 0 0 1 13-2 5 5 0 0 1 8 4H37a4 4 0 0 1 3-2z" fill="#e6eef8"/>
+            <path id="dpRoute" d="M18 64 C 80 6, 200 6, 262 58" fill="none" stroke="#9fbfe6" stroke-width="1.6" stroke-dasharray="5 5" class="dp-trail"/>
+            <circle cx="18" cy="64" r="4" fill="#2f80ed"/>
+            <circle cx="262" cy="58" r="4" fill="#f2994a"/>
+            <g class="dp-plane" transform="translate(18 64) rotate(-45)">
+                <path d="M11 0 L-4 -2.4 L-7.5 -9 L-10.5 -9 L-8.3 -2.2 L-12.8 -2.2 L-15 -6 L-17.3 -6 L-15.8 0 L-17.3 6 L-15 6 L-12.8 2.2 L-8.3 2.2 L-10.5 9 L-7.5 9 L-4 2.4 Z" fill="#1f5fbf"/>
+            </g>
+        </svg>
+        <script>
+        (function () {
+            var svg = document.querySelector('.dash-plane');
+            if (!svg || !window.requestAnimationFrame) return;
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            var route = svg.querySelector('#dpRoute'), plane = svg.querySelector('.dp-plane');
+            if (!route.getTotalLength) return;
+            var length = route.getTotalLength(), duration = 6000, start = null;
+            var ease = function (t) { return t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; };
+            var frame = function (now) {
+                if (start === null) start = now;
+                var d = ease(((now - start) % duration) / duration) * length;
+                var p = route.getPointAtLength(d), a = route.getPointAtLength(Math.max(0, d - 1)), b = route.getPointAtLength(Math.min(length, d + 1));
+                plane.setAttribute('transform', 'translate(' + p.x.toFixed(1) + ' ' + p.y.toFixed(1) + ') rotate(' + (Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI).toFixed(1) + ')');
+                requestAnimationFrame(frame);
+            };
+            requestAnimationFrame(frame);
+        })();
+        </script>
+        <?php } ?>
 
         <?php if(sales_module_enabled()){ ?>
             <a href="sales/create_invoice.php" class="btn btn-primary agent-dashboard-clickable">
@@ -697,9 +770,9 @@ require_once 'includes/sidebar.php';
                         <td><?= htmlspecialchars($invoice['customer_name']); ?></td>
                         <td>BDT <?= number_format($invoice['amount'],2); ?></td>
                         <td>
-                            <?php $is_confirmed = ($invoice['status'] ?? 'pending') === 'confirmed'; ?>
-                            <span class="badge badge-<?= $is_confirmed ? 'success' : 'warning'; ?>">
-                                <?= $is_confirmed ? 'Confirmed' : 'Pending'; ?>
+                            <?php $invoice_status = (string)($invoice['status'] ?? 'pending'); $is_confirmed = $invoice_status === 'confirmed'; ?>
+                            <span class="badge badge-<?= $is_confirmed ? 'success' : ($invoice_status === 'pending' ? 'warning' : 'secondary'); ?>">
+                                <?= $is_confirmed ? 'Confirmed' : htmlspecialchars(ucfirst($invoice_status)); ?>
                             </span>
                         </td>
                     </tr>
@@ -757,7 +830,9 @@ require_once 'includes/sidebar.php';
                         'sales_invoice',
                         'receive_payment',
                         'purchase_return',
-                        'invoice_income'
+                        'invoice_income',
+                        'travel_payment',
+                        'service_advance'
                     ];
 
                     $type_label =

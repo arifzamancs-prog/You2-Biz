@@ -2,6 +2,9 @@
 require_once __DIR__ . '/bill_reminder_helper.php';
 // A company with an older unpaid service charge bill sees only the payment page.
 if (isset($conn)) bill_reminder_enforce_lock($conn);
+// Travel agencies see "Client" wherever the app says "Customer".
+require_once __DIR__ . '/travel_agency_helper.php';
+if (travel_agency_active() && !is_super_admin_user()) ob_start('travel_client_terms_html');
 ?>
 <!DOCTYPE html>
 <html lang="en">

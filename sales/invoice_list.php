@@ -187,13 +187,13 @@ $result = mysqli_stmt_get_result($stmt);
 
                         <tr>
 
-                            <th>Invoice No</th>
-                            <th>Date</th>
+                            <th class="invoice-list-no">Invoice No</th>
+                            <th class="invoice-list-date">Date</th>
                             <?php if($show_customer_due_columns){ ?><th>Customer</th><?php } ?>
                             <?php if(!$restaurant_invoice_layout){ ?><th class="invoice-list-amount">Total</th><?php } ?>
                             <th class="invoice-list-amount"><?= $restaurant_invoice_layout ? 'Amount' : 'Paid' ?></th>
                             <?php if($show_customer_due_columns){ ?><th>Due</th><?php } ?>
-                            <th>Status</th>
+                            <th class="invoice-list-status">Status</th>
                             <?php if($show_actions){ ?>
                                 <th class="invoice-list-action">Action</th>
                             <?php } ?>
@@ -417,7 +417,10 @@ $result = mysqli_stmt_get_result($stmt);
                     <?php } ?>
 
                     <style>
-                        #example1 .invoice-list-amount { width: 180px; min-width: 160px; }
+                        #example1 .invoice-list-no { min-width: 260px; }
+                        #example1 .invoice-list-status { width: 170px; }
+                        #example1 .invoice-list-date { width: 150px; min-width: 130px; white-space: nowrap; }
+                        #example1 .invoice-list-amount { width: 120px; min-width: 100px; }
                         #example1 .invoice-list-action { width: 1%; white-space: nowrap; }
                     </style>
 

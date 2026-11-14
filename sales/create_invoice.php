@@ -14,6 +14,8 @@ require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/service_warranty_helper.php';
+invoice_warranty_prepare($conn);
 
 $user_id = $_SESSION['user_id'];
 $restaurant_catalog_enabled = restaurant_catalog_enabled($conn, $user_id);
@@ -148,8 +150,8 @@ $recent_invoices = mysqli_stmt_get_result($recent_stmt);
 // Inventory & Sales and Fashion Retail do not need the Due column in Recent Invoices.
 $recent_show_due = !in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true);
 $recent_widths = $recent_show_due
-    ? ['16%', '11%', '16%', '14%', '14%', '10%', '8%', '11%']
-    : ['18%', '12%', '18%', '16%', '16%', '0', '9%', '11%'];
+    ? ['22%', '11%', '16%', '11%', '11%', '10%', '8%', '11%']
+    : ['26%', '12%', '18%', '12%', '12%', '0', '9%', '11%'];
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -557,6 +559,7 @@ require_once '../includes/sidebar.php';
                             <?php } ?>
 
                         </select>
+                        <?= invoice_warranty_fields_html(); ?>
 
                     </td>
 
@@ -1908,6 +1911,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
 ' . ($barcode_scan_enabled ? barcode_scan_script($barcode_lookup) : '');
 ?>
+<?= invoice_warranty_script($conn, (int)$user_id); ?>
 
 <?php
 require_once '../includes/footer.php';

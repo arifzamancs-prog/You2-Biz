@@ -20,6 +20,13 @@ $message = '';
 $message_type = 'success';
 $user_id = (int)$customer['user_id'];
 $customer_id = (int)$customer['id'];
+// A travel agency's client sees bookings, trips, installments and visa status instead of packages.
+require_once '../includes/project_package_helper.php';
+$travel_portal = project_package_company_type($conn, $user_id) === 'Travel Agency';
+if($travel_portal){
+    require_once '../includes/travel_booking_helper.php';
+    $travel_portal = travel_booking_schema($conn);
+}
 ensure_customer_access_table($conn);
 ensure_booking_invoice_table($conn);
 ensure_booking_invoice_type_table($conn, $user_id);
@@ -121,7 +128,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Customer Dashboard - You2 Biz</title>
+    <title><?= $travel_portal ? 'Client' : 'Customer'; ?> Dashboard - You2 Biz</title>
     <link rel="stylesheet" href="../adminlte/plugins/fontawesome-free/css/all.min.css">
     <link rel="stylesheet" href="../adminlte/dist/css/adminlte.min.css">
     <style>
@@ -292,10 +299,10 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
     <div class="portal-navbar">
         <div class="portal-brand">
             <i class="fas fa-user-circle mr-1"></i>
-            Customer Dashboard
+            <?= $travel_portal ? 'Client' : 'Customer'; ?> Dashboard
         </div>
         <div class="portal-menu">
-            <a href="invoice_request.php" class="btn btn-primary portal-menu-link"><i class="fas fa-file-invoice"></i> Invoice Req.</a>
+            <?php if(!$travel_portal){ ?><a href="invoice_request.php" class="btn btn-primary portal-menu-link"><i class="fas fa-file-invoice"></i> Invoice Req.</a><?php } ?>
             <a href="#edit-profile" class="btn btn-info portal-menu-link" id="edit-profile-toggle"><i class="fas fa-user-edit"></i> Edit Profile</a>
             <a href="logout.php" class="btn btn-danger portal-menu-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
         </div>
@@ -332,6 +339,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
         <div class="alert alert-<?= htmlspecialchars($message_type); ?> portal-alert"><?= htmlspecialchars($message); ?></div>
     <?php } ?>
 
+    <?php if($travel_portal){ $travel_part = 'summary'; require __DIR__ . '/_travel_section.php'; } else { ?>
     <div class="portal-summary">
         <?php if($show_grand_summary){ ?>
             <div class="metric"><span>Total Package</span><strong><?= (int)$purchased_package_count; ?></strong></div>
@@ -344,6 +352,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
             <div class="metric metric-due"><span>Total Due</span><strong>BDT <?= number_format($total_due, 2); ?></strong></div>
         <?php } ?>
     </div>
+    <?php } ?>
 
     <div class="row">
         <div class="col-lg-4 portal-edit-panel <?= $show_edit_profile ? '' : 'd-none'; ?>">
@@ -374,6 +383,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
             </div>
         </div>
         <div class="<?= $show_edit_profile ? 'col-lg-8' : 'col-lg-12'; ?>" id="ledger-column">
+            <?php if($travel_portal){ $travel_part = 'body'; require __DIR__ . '/_travel_section.php'; } else { ?>
             <?php if(empty($ledger_groups)){ ?>
                 <div class="card portal-card">
                     <div class="card-header"><h3 class="card-title">Ledger</h3></div>
@@ -430,6 +440,7 @@ $show_edit_profile = ($_SERVER['REQUEST_METHOD'] === 'POST') || ($message !== ''
                         </table>
                     </div>
                 </div>
+            <?php } ?>
             <?php } ?>
         </div>
     </div>

@@ -16,6 +16,8 @@ require_once '../includes/restaurant_table_helper.php';
 require_once '../includes/invoice_reference_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/sales_return_helper.php';
+require_once '../includes/activity_notification_helper.php';
+require_once '../includes/service_warranty_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_branch_accounting_columns($conn, $user_id);
@@ -76,6 +78,8 @@ if($_SERVER['REQUEST_METHOD']!='POST'){
     exit;
 
 }
+
+$invoice_warranty_enabled = invoice_warranty_prepare($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -806,6 +810,11 @@ foreach($product_ids as $key => $product_id){
 
     $invoice_item_id = mysqli_insert_id($conn);
 
+    // Warranty and serial of this sold line (Inventory & Sales).
+    if($invoice_warranty_enabled){
+        invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $_POST['item_serial'][$key] ?? '');
+    }
+
     if(isset($item_charge_breakdown[$key])){
         invoice_save_item_charges($conn, $user_id, $invoice_item_id, $item_charge_breakdown[$key]);
     }
@@ -1181,6 +1190,15 @@ COMMIT
 */
 
 mysqli_commit($conn);
+
+// Bell notification for the new sale (after commit, so it can never undo the invoice).
+$notify_row = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT invoice_no,total_amount,customer_name,branch_id FROM invoices WHERE id=' . (int)$invoice_id . ' AND user_id=' . (int)$user_id));
+if($notify_row){
+    activity_notify($conn, $user_id, (int)$notify_row['branch_id'], 'sales_invoice', (int)$invoice_id,
+        'New sales invoice ' . $notify_row['invoice_no'],
+        trim((string)$notify_row['customer_name']) . ' · BDT ' . number_format((float)$notify_row['total_amount'], 2),
+        'sales/view_invoice.php?id=' . (int)$invoice_id);
+}
 
 unset($_SESSION['error']);
 $_SESSION['success'] =

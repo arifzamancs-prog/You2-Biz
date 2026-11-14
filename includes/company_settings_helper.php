@@ -27,7 +27,8 @@ function company_type_options()
 {
     return [
         'Housing' => 'Housing / Real Estate',
-        'Service type' => 'Service Business',
+        'Service type' => 'General Service',
+        'Travel Agency' => 'Travel Agency',
         'Stock Product' => 'Inventory & Sales',
         'Fashion house' => 'Fashion Retail',
         'Restaurant & Cafe' => 'Restaurant & Cafe',
@@ -43,7 +44,6 @@ function company_type_label($company_type)
 function registration_company_type_options()
 {
     $options = company_type_options();
-    unset($options['Car Parking']);
     return $options;
 }
 
@@ -60,7 +60,7 @@ function normalize_company_type($company_type)
         return 'Service type';
     }
 
-    return in_array($company_type, ['Housing', 'Service type', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
+    return in_array($company_type, ['Housing', 'Service type', 'Travel Agency', 'Stock Product', 'Fashion house', 'Restaurant & Cafe', 'Car Parking'], true)
         ? $company_type
         : 'Housing';
 }
@@ -73,6 +73,12 @@ function valid_company_type($company_type)
     return $company_type === 'Others'
         || array_key_exists($company_type, company_type_options())
         || in_array($company_type, company_type_options(), true);
+}
+
+// General Service and the company types built on it (Travel Agency) share its modules and rules.
+function company_type_is_service($company_type)
+{
+    return in_array(normalize_company_type($company_type), ['Service type', 'Travel Agency'], true);
 }
 
 function company_type_uses_stock_products($company_type)
