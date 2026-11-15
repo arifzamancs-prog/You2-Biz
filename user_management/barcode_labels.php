@@ -95,8 +95,8 @@ require_once '../includes/sidebar.php';
     .barcode-label .bl-shop{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
     .barcode-label .bl-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
     .barcode-label .bl-bars{flex:1 1 auto;min-height:0;width:100%;margin:.4mm 0;overflow:hidden;display:flex;align-items:stretch;justify-content:center}
-    .barcode-label .bl-bars svg{width:92%;height:100%}
-    .barcode-label .bl-code{letter-spacing:.5px}
+    .barcode-label .bl-bars svg{flex:0 0 auto;height:100%}
+    .barcode-label .bl-code{letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;flex:0 0 auto}
     .barcode-label .bl-price{font-weight:700}
     .barcode-label .bl-extra{flex:0 0 auto;font-size:1em;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
     .barcode-grid{display:grid;box-sizing:border-box}
@@ -150,6 +150,45 @@ require_once '../includes/sidebar.php';
                 <label for="a4-start">Start From Label No.</label>
                 <input type="number" id="a4-start" class="form-control" min="1" value="1">
                 <small class="text-muted">To use a sheet that is partly used.</small>
+            </div>
+        </div>
+
+        <!-- Print adjustment: remembered in this browser. -->
+        <div class="row">
+            <div class="col-md-3 form-group">
+                <label for="printer-dpi">Printer Resolution</label>
+                <select id="printer-dpi" class="form-control print-setting">
+                    <option value="203">203 dpi (most thermal printers)</option>
+                    <option value="300">300 dpi</option>
+                    <option value="600">600 dpi (laser / inkjet)</option>
+                </select>
+                <small class="text-muted">Bars are sized to the printer's dots so they scan.</small>
+            </div>
+            <div class="col-md-3 form-group">
+                <label>Shift Print: Right × Down (mm)</label>
+                <div class="input-group">
+                    <input type="number" id="offset-x" class="form-control print-setting" min="-10" max="10" step="0.5" value="0">
+                    <div class="input-group-prepend input-group-append"><span class="input-group-text">×</span></div>
+                    <input type="number" id="offset-y" class="form-control print-setting" min="-10" max="10" step="0.5" value="0">
+                </div>
+                <small class="text-muted">If the print lands off the label. Minus moves left / up.</small>
+            </div>
+            <div class="col-md-3 form-group a4-only d-none">
+                <label>Sheet Margin: Top × Left (mm)</label>
+                <div class="input-group">
+                    <input type="number" id="a4-margin-top" class="form-control print-setting" min="0" max="40" step="0.5" value="10">
+                    <div class="input-group-prepend input-group-append"><span class="input-group-text">×</span></div>
+                    <input type="number" id="a4-margin-left" class="form-control print-setting" min="0" max="40" step="0.5" value="5">
+                </div>
+                <small class="text-muted">Measure on your sticker sheet.</small>
+            </div>
+            <div class="col-md-3 form-group a4-only d-none">
+                <label>Gap Between Labels: Across × Down (mm)</label>
+                <div class="input-group">
+                    <input type="number" id="a4-gap-x" class="form-control print-setting" min="0" max="20" step="0.5" value="0">
+                    <div class="input-group-prepend input-group-append"><span class="input-group-text">×</span></div>
+                    <input type="number" id="a4-gap-y" class="form-control print-setting" min="0" max="20" step="0.5" value="0">
+                </div>
             </div>
         </div>
 
@@ -209,7 +248,9 @@ require_once '../includes/sidebar.php';
             <button type="button" id="barcode-clear" class="btn btn-outline-secondary btn-sm ml-auto">Clear</button>
             <button type="button" id="barcode-print" class="btn btn-success ml-2" disabled><i class="fas fa-print mr-1"></i>Print Labels</button>
         </div>
+        <div id="barcode-warning" class="alert alert-warning py-2 d-none"></div>
         <div id="barcode-preview"><p class="text-muted text-center mb-0">Add products to see the labels.</p></div>
+        <small class="text-muted d-block mt-2"><i class="fas fa-info-circle mr-1"></i>In the print window set <strong>Margins: None</strong> and <strong>Scale: 100%</strong> (not "Fit to page"), and choose the paper size that matches the label. Scaling changes the bar widths and the barcode may not scan.</small>
     </div>
 </div>
 
@@ -259,14 +300,22 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return node;
     }
 
+    function numberSetting(id, fallback, min, max){
+        const value = parseFloat($("#" + id).val());
+        return isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+    }
+    function printerDpi(){ return parseInt($("#printer-dpi").val(), 10) || 203; }
+    function printOffset(){ return {x: numberSetting("offset-x", 0, -10, 10), y: numberSetting("offset-y", 0, -10, 10)}; }
+
     function layout(){
         if($("#print-type").val() === "a4"){
             const parts = $("#a4-layout").val().split("x").map(Number);
             const cols = parts[0], rowsPerSheet = parts[1];
-            // Common A4 sticker sheets keep about 10 mm top/bottom and 5 mm side margins.
-            const padX = 5, padY = 10;
-            return {type: "a4", cols: cols, rows: rowsPerSheet, padX: padX, padY: padY,
-                w: (210 - padX * 2) / cols, h: (297 - padY * 2) / rowsPerSheet};
+            // Margins (top/bottom and left/right are the same) and label gaps are set to match the sticker sheet.
+            const padY = numberSetting("a4-margin-top", 10, 0, 40), padX = numberSetting("a4-margin-left", 5, 0, 40);
+            const gapX = numberSetting("a4-gap-x", 0, 0, 20), gapY = numberSetting("a4-gap-y", 0, 0, 20);
+            return {type: "a4", cols: cols, rows: rowsPerSheet, padX: padX, padY: padY, gapX: gapX, gapY: gapY,
+                w: (210 - padX * 2 - gapX * (cols - 1)) / cols, h: (297 - padY * 2 - gapY * (rowsPerSheet - 1)) / rowsPerSheet};
         }
         let size = $("#thermal-size").val();
         let w, h;
@@ -280,8 +329,10 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return {type: "thermal", w: w, h: h};
     }
 
+    // A part whose checkbox is not on the page (e.g. Variant for a company without variants) is off.
     function shown(part){
-        return document.querySelector(".label-part[data-part=\"" + part + "\"]").checked;
+        const box = document.querySelector(".label-part[data-part=\"" + part + "\"]");
+        return !!(box && box.checked);
     }
 
     function makeLabel(item, size){
@@ -295,8 +346,10 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         const name = (shown("name") ? item.name : "") + (shown("variant") && item.variant ? (shown("name") ? " - " : "") + item.variant : "");
         if(name) label.appendChild(el("div", "bl-name", name));
         const bars = el("div", "bl-bars");
-        bars.appendChild(barcodeSvg(item.barcode));
+        const barcode = barcodeSvg(item.barcode, size.w - 3, printerDpi());
+        bars.appendChild(barcode.svg);
         label.appendChild(bars);
+        if(barcode.quality !== "good") weakBarcodes[item.barcode] = barcode.quality;
         if(shown("code")) label.appendChild(el("div", "bl-code", item.barcode));
         if(shown("price") && item.price !== "") label.appendChild(el("div", "bl-price", currency + " " + Number(item.price).toFixed(2)));
         const extraText = ($("#label-extra-text").val() || "").trim();
@@ -304,20 +357,33 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return label;
     }
 
+    // Bars are sized in whole printer dots. Stretching a barcode to any width makes bars 1.6 or 2.2 dots
+    // wide, the printer rounds them unevenly and scanners fail. Each narrow bar is now exactly N dots,
+    // with a 10-bar quiet zone on both sides. quality: "good" (2+ dots), "thin" (1 dot), "too-long".
     const svgCache = {};
-    function barcodeSvg(value){
-        if(!svgCache[value]){
+    let weakBarcodes = {};
+    function barcodeSvg(value, innerWidthMm, dpi){
+        const cacheKey = value + "|" + innerWidthMm + "|" + dpi;
+        if(!svgCache[cacheKey]){
             const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-            JsBarcode(svg, value, {format: "CODE128", width: 2, height: 60, margin: 0, displayValue: false});
-            // Stretch to the label: bar widths keep their ratio, so scanners still read it.
-            svg.setAttribute("viewBox", "0 0 " + svg.getAttribute("width") + " " + svg.getAttribute("height"));
+            JsBarcode(svg, value, {format: "CODE128", width: 1, height: 60, margin: 0, displayValue: false});
+            const modules = parseFloat(svg.getAttribute("width")) || 1;
+            const dotMm = 25.4 / dpi;
+            const availableDots = Math.floor(innerWidthMm / dotMm);
+            let dots = Math.floor(availableDots / (modules + 20));
+            let quality = dots >= 2 ? "good" : (dots === 1 ? "thin" : "too-long");
+            if(dots < 1) dots = 1;
+            // Too long even at one dot per bar: shrink to fit (it may not scan, a warning is shown).
+            const barsMm = Math.min(modules * dots * dotMm, innerWidthMm);
+            svg.setAttribute("viewBox", "0 0 " + modules + " 60");
             svg.setAttribute("preserveAspectRatio", "none");
-            svg.removeAttribute("width");
-            svg.removeAttribute("height");
+            svg.setAttribute("shape-rendering", "crispEdges");
+            svg.setAttribute("width", barsMm.toFixed(3) + "mm");
+            svg.setAttribute("height", "100%");
             svg.removeAttribute("style");
-            svgCache[value] = svg;
+            svgCache[cacheKey] = {svg: svg, quality: quality};
         }
-        return svgCache[value].cloneNode(true);
+        return {svg: svgCache[cacheKey].svg.cloneNode(true), quality: svgCache[cacheKey].quality};
     }
 
     // The printable sheets: one page per thermal label, or A4 pages of labels.
@@ -328,12 +394,16 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
             for(let i = 0; i < row.qty; i++) labels.push(row);
         });
         const sheets = [];
+        const offset = printOffset();
         if(size.type === "thermal"){
             labels.forEach(function(row){
                 const sheet = el("div", "barcode-sheet");
                 sheet.style.width = size.w + "mm";
-                sheet.style.height = size.h + "mm";
-                sheet.appendChild(makeLabel(row.item, size));
+                // A hair under the page height, so rounding never pushes a blank label out between labels.
+                sheet.style.height = (size.h - 0.2) + "mm";
+                const label = makeLabel(row.item, size);
+                if(offset.x || offset.y) label.style.transform = "translate(" + offset.x + "mm," + offset.y + "mm)";
+                sheet.appendChild(label);
                 sheets.push(sheet);
             });
             return {sheets: sheets, size: size, count: labels.length};
@@ -345,9 +415,12 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
             const sheet = el("div", "barcode-sheet barcode-grid");
             sheet.style.width = "210mm";
             sheet.style.height = "297mm";
-            sheet.style.padding = size.padY + "mm " + size.padX + "mm";
+            // The shift moves the whole grid; the far margins shrink by the same amount so the page size stays A4.
+            sheet.style.padding = (size.padY + offset.y) + "mm " + (size.padX - offset.x) + "mm " + (size.padY - offset.y) + "mm " + (size.padX + offset.x) + "mm";
             sheet.style.gridTemplateColumns = "repeat(" + size.cols + ", " + size.w + "mm)";
             sheet.style.gridTemplateRows = "repeat(" + size.rows + ", " + size.h + "mm)";
+            sheet.style.columnGap = size.gapX + "mm";
+            sheet.style.rowGap = size.gapY + "mm";
             slots.slice(start, start + perSheet).forEach(function(row){
                 sheet.appendChild(row ? makeLabel(row.item, size) : el("div", "barcode-label"));
             });
@@ -356,9 +429,24 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return {sheets: sheets, size: size, count: labels.length};
     }
 
+    // Barcodes too long for this label at this printer resolution are named, with what to change.
+    function showBarcodeWarning(){
+        const box = $("#barcode-warning");
+        const codes = Object.keys(weakBarcodes);
+        if(!codes.length){ box.addClass("d-none").empty(); return; }
+        const tooLong = codes.filter(function(code){ return weakBarcodes[code] === "too-long"; });
+        box.removeClass("d-none").empty()
+            .append($("<strong>").text(tooLong.length ? "Some barcodes may not scan: " : "Thin barcodes: "))
+            .append(document.createTextNode(codes.join(", ") + ". "))
+            .append(document.createTextNode(tooLong.length
+                ? "They are too long for this label size. Use a wider label, a 300 dpi printer, or a shorter product Code."
+                : "Bars are 1 printer dot wide. A wider label or a 300 dpi printer scans more reliably."));
+    }
+
     function render(){
         const total = rows.reduce(function(sum, row){ return sum + row.qty; }, 0);
         preview.innerHTML = "";
+        if(total === 0 || total > MAX_LABELS) $("#barcode-warning").addClass("d-none").empty();
         printButton.disabled = total === 0 || total > MAX_LABELS;
         if(total === 0){
             preview.appendChild(el("p", "text-muted text-center mb-0", "Add products to see the labels."));
@@ -370,7 +458,9 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
             $("#barcode-summary").text(total + " labels");
             return;
         }
+        weakBarcodes = {};
         const built = buildSheets();
+        showBarcodeWarning();
         // The preview shows the first few pages; printing uses all of them.
         built.sheets.slice(0, built.size.type === "a4" ? 3 : 24).forEach(function(sheet){ preview.appendChild(sheet); });
         if(built.size.type === "thermal"){
@@ -452,11 +542,30 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
 
     $("#barcode-clear").on("click", function(){ rows.length = 0; renderTable(); render(); });
 
-    $("#print-type").on("change", function(){
+    // Print settings are remembered in this browser (paper, size, printer, shift, sheet margins).
+    const settingIds = ["print-type", "thermal-size", "thermal-width", "thermal-height", "a4-layout", "printer-dpi", "offset-x", "offset-y", "a4-margin-top", "a4-margin-left", "a4-gap-x", "a4-gap-y"];
+    try {
+        const saved = JSON.parse(localStorage.getItem("barcode_label_print_settings") || "{}");
+        settingIds.forEach(function(id){ if(saved[id] !== undefined && saved[id] !== null) $("#" + id).val(saved[id]); });
+    } catch(e) {}
+    function saveSettings(){
+        const values = {};
+        settingIds.forEach(function(id){ values[id] = $("#" + id).val(); });
+        try { localStorage.setItem("barcode_label_print_settings", JSON.stringify(values)); } catch(e) {}
+    }
+    $("#" + settingIds.join(", #")).on("change", saveSettings);
+    $("#printer-dpi, #offset-x, #offset-y, #a4-margin-top, #a4-margin-left, #a4-gap-x, #a4-gap-y").on("input change", render);
+
+    $("#print-type").on("change", function(event){
         const a4 = this.value === "a4";
         $("#thermal-size-group").toggleClass("d-none", a4);
         $("#thermal-custom-group").toggleClass("d-none", a4 || $("#thermal-size").val() !== "custom");
-        $("#a4-layout-group, #a4-start-group").toggleClass("d-none", !a4);
+        $("#a4-layout-group, #a4-start-group, .a4-only").toggleClass("d-none", !a4);
+        // A user switch of paper also suggests the usual printer: thermal 203 dpi, sheet printers 600 dpi.
+        if(event.originalEvent){
+            $("#printer-dpi").val(a4 ? "600" : "203");
+            saveSettings();
+        }
         render();
     });
     $("#thermal-size").on("change", function(){
