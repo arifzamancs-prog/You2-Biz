@@ -451,6 +451,13 @@ function invoice_product_display($product_name, $quantity, $unit_price)
     return $product_name;
 }
 
+// POS price: decimals only when needed (1,580 / 33.50).
+function pos_price_text($value)
+{
+    $value = round((float)$value, 2);
+    return abs($value - round($value)) < 0.005 ? number_format($value, 0) : number_format($value, 2);
+}
+
 function invoice_qty_display($quantity, $unit_price)
 {
     $quantity_value = (float)$quantity;
@@ -622,6 +629,10 @@ th{
     padding:2px 0;
 }
 
+/* Item lines: the name wraps, numbers stay on one line with a gap between columns. */
+.pos-items td.item{word-break:break-word;overflow-wrap:anywhere}
+.pos-items th.num,.pos-items td.num{text-align:center;white-space:nowrap;padding:4px 0 4px 8px}
+
 .grand td{
     border-top:1px dashed #111;
     font-size:13px;
@@ -747,24 +758,24 @@ window.addEventListener('load', preparePosPrintPage);
         </div>
     <?php } ?>
 
-    <table>
+    <table class="pos-items">
         <thead>
         <tr>
             <th>Item</th>
-            <th class="text-right">Qty</th>
-            <th class="text-right">Price</th>
-            <?php if($pos_show_discount){ ?><th class="text-right">Dis</th><?php } ?>
-            <th class="text-right">Total</th>
+            <th class="num">Qty</th>
+            <th class="num">Price</th>
+            <?php if($pos_show_discount){ ?><th class="num">Dis</th><?php } ?>
+            <th class="num">Total</th>
         </tr>
         </thead>
         <tbody>
         <?php foreach($items as $item){ ?>
             <tr>
-                <td><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
-                <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
-                <td class="text-right"><?= number_format($item['pos_price'] ?? $item['unit_price'],2); ?></td>
-                <?php if($pos_show_discount){ ?><td class="text-right"><?= ($item['pos_discount'] ?? 0) > 0.004 ? number_format($item['pos_discount'],2) : ''; ?></td><?php } ?>
-                <td class="text-right"><?= number_format($item['total_price'],2); ?></td>
+                <td class="item"><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
+                <td class="num"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
+                <td class="num"><?= pos_price_text($item['pos_price'] ?? $item['unit_price']); ?></td>
+                <?php if($pos_show_discount){ ?><td class="num"><?= ($item['pos_discount'] ?? 0) > 0.004 ? number_format($item['pos_discount'],2) : ''; ?></td><?php } ?>
+                <td class="num"><?= number_format($item['total_price'],2); ?></td>
             </tr>
         <?php } ?>
         </tbody>
