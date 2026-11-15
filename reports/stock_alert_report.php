@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/fifo_inventory_helper.php';
 
 header('Location: ' . app_path('dashboard.php?error=Stock%20Alert%20report%20is%20disabled'));
 exit;
@@ -12,21 +13,21 @@ require_once '../includes/sidebar.php';
 
 $user_id = $_SESSION['user_id'];
 
-$sql = "SELECT
+$sql = "SELECT * FROM (SELECT
             p.id,
             p.product_name,
             p.sku,
-            p.current_stock,
+            " . product_live_stock_sql('p') . " AS current_stock,
             p.minimum_stock,
             c.category_name
         FROM products p
-        LEFT JOIN product_categories c
-            ON c.id = p.category_id
+        INNER JOIN product_categories c
+            ON c.id = p.category_id AND c.category_type = 'stock_product'
         WHERE p.user_id = ?
-        AND p.status = 'active'
-        AND p.current_stock <= p.minimum_stock
-        ORDER BY p.current_stock ASC,
-                 p.product_name ASC";
+        AND p.status = 'active') stock_rows
+        WHERE stock_rows.current_stock <= stock_rows.minimum_stock
+        ORDER BY stock_rows.current_stock ASC,
+                 stock_rows.product_name ASC";
 
 $stmt = mysqli_prepare($conn,$sql);
 

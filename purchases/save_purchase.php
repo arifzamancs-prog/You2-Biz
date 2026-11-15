@@ -12,6 +12,8 @@ require_once '../includes/product_category_helper.php';
 require_once '../includes/expense_helper.php';
 require_once '../includes/supplier_helper.php';
 require_once '../includes/activity_notification_helper.php';
+require_once '../includes/eshop_variant_image_helper.php';
+$purchase_line_products = [];
 
 $user_id = $_SESSION['user_id'];
 // Suppliers created from a purchase get the next Vendor/Supplier ID.
@@ -342,6 +344,7 @@ function purchase_prepare_items($conn, $user_id)
                 throw new Exception("Selected product not found.");
             }
         }
+        $purchase_line_products[$key] = (int)$product_id;
 
         if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe'
             && !product_uses_stock($conn, $product_id, $user_id)) {
@@ -611,6 +614,14 @@ try{
     }
 
     mysqli_commit($conn);
+
+    // E-shop variant photos given on the purchase lines (after commit).
+    if(eshop_variant_images_enabled($conn, (int)$user_id)){
+        foreach($purchase_line_products as $line_key => $line_product_id){
+            $line_files = eshop_variant_files_slice('variant_photo', $line_key);
+            if($line_files) eshop_variant_images_save($conn, (int)$user_id, $line_product_id, $line_files);
+        }
+    }
 
     // Bell notification for the new purchase (after commit).
     $notify_row = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT p.purchase_no,p.total_amount,p.branch_id,s.supplier_name FROM purchases p LEFT JOIN suppliers s ON s.id=p.supplier_id WHERE p.id=' . (int)$purchase_id . ' AND p.user_id=' . (int)$user_id));

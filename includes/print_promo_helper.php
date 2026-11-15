@@ -93,3 +93,74 @@ function print_promo_html($conn, $compact = false)
 
     return '<div class="print-promo-message" style="' . $style . '">' . nl2br(htmlspecialchars($settings['message'])) . '</div>';
 }
+
+// VAT registration number printed under the company contact on invoices.
+// A company setting (Printing Option), Inactive by default.
+const PRINT_VAT_MAX_LENGTH = 50;
+
+function print_vat_ensure_columns($conn)
+{
+    static $done = false;
+    if($done){
+        return;
+    }
+    $done = true;
+    if(function_exists('schema_once') && !schema_once('print_vat_columns')){
+        return;
+    }
+    $columns = [
+        'print_vat_status' => "ALTER TABLE users ADD COLUMN print_vat_status VARCHAR(20) NOT NULL DEFAULT 'inactive'",
+        'print_vat_reg_no' => "ALTER TABLE users ADD COLUMN print_vat_reg_no VARCHAR(50) NOT NULL DEFAULT ''",
+    ];
+    foreach($columns as $column => $alter_sql){
+        $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE '{$column}'");
+        if($result && mysqli_num_rows($result) === 0){
+            mysqli_query($conn, $alter_sql);
+        }
+    }
+}
+
+// ['status' => 'active'|'inactive', 'reg_no' => text] for the logged-in company.
+function print_vat_settings($conn)
+{
+    $settings = ['status' => 'inactive', 'reg_no' => ''];
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if($company_id <= 0){
+        return $settings;
+    }
+    print_vat_ensure_columns($conn);
+    $result = mysqli_query($conn, "SELECT print_vat_status, print_vat_reg_no FROM users WHERE id={$company_id} LIMIT 1");
+    $row = $result ? mysqli_fetch_assoc($result) : null;
+    if($row){
+        $settings['status'] = ($row['print_vat_status'] ?? '') === 'active' ? 'active' : 'inactive';
+        $settings['reg_no'] = (string)($row['print_vat_reg_no'] ?? '');
+    }
+    return $settings;
+}
+
+function save_print_vat_settings($conn, $status, $reg_no)
+{
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if($company_id <= 0){
+        return false;
+    }
+    print_vat_ensure_columns($conn);
+    $status = $status === 'active' ? 'active' : 'inactive';
+    $reg_no = mb_substr(trim(preg_replace('/\s+/', ' ', (string)$reg_no)), 0, PRINT_VAT_MAX_LENGTH);
+    $stmt = mysqli_prepare($conn, 'UPDATE users SET print_vat_status=?, print_vat_reg_no=? WHERE id=?');
+    if(!$stmt){
+        return false;
+    }
+    mysqli_stmt_bind_param($stmt, 'ssi', $status, $reg_no, $company_id);
+    return mysqli_stmt_execute($stmt);
+}
+
+// "VAT Reg. No: 000123456-0101", or '' when it is off or empty.
+function print_vat_text($conn)
+{
+    $settings = print_vat_settings($conn);
+    if($settings['status'] !== 'active' || trim($settings['reg_no']) === ''){
+        return '';
+    }
+    return 'VAT Reg. No: ' . trim($settings['reg_no']);
+}

@@ -99,6 +99,10 @@ $print_top_margin = $printing_option === 'custom'
     ? $custom_top_margin
     : (should_use_general_top_margin($conn) ? current_printing_general_top_margin($conn) : 0);
 $company_profile = printing_company_profile_data($conn);
+// My Profile switches: Email / Website can be kept off invoices.
+$invoice_contact_visibility = company_invoice_contact_visibility($conn, (int)($_SESSION['user_id'] ?? 0));
+if(!$invoice_contact_visibility['email']) $company_profile['email'] = 'None';
+if(!$invoice_contact_visibility['website']) $company_profile['website'] = '';
 $show_company_profile = should_print_company_profile($conn);
 $company_logo_url = should_print_company_logo($conn) ? current_print_company_logo_url($conn) : '';
 $has_print_logo = $company_logo_url !== '';
@@ -162,7 +166,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
                     <?php if($company_logo_url !== ''){ ?><img class="company-logo" src="<?= htmlspecialchars($company_logo_url); ?>" alt="Company logo"><?php } ?>
                     <?php if($show_company_profile){ ?><div class="brand"><?= htmlspecialchars($company_profile['name'] ?: 'Company'); ?></div><?php } ?>
                 </div>
-                <?php if($show_company_profile){ ?><div class="company-contact"><div class="address-phone"><?= !empty($company_profile['address']) && $company_profile['address'] !== 'None' ? htmlspecialchars($company_profile['address']) : ''; ?><?= !empty($company_profile['address']) && $company_profile['address'] !== 'None' && !empty($company_profile['phone']) && $company_profile['phone'] !== 'None' ? '<span class="phone-separator"> · </span>' : ''; ?><?= !empty($company_profile['phone']) && $company_profile['phone'] !== 'None' ? '<span class="company-phone">Phone: ' . htmlspecialchars($company_profile['phone']) . '</span>' : ''; ?></div><?= !empty($company_profile['email']) && $company_profile['email'] !== 'None' ? '<div>Email: ' . htmlspecialchars($company_profile['email']) . '</div>' : ''; ?></div><?php } ?>
+                <?php if($show_company_profile){ ?><div class="company-contact"><div class="address-phone"><?= !empty($company_profile['address']) && $company_profile['address'] !== 'None' ? htmlspecialchars($company_profile['address']) : ''; ?><?= !empty($company_profile['address']) && $company_profile['address'] !== 'None' && !empty($company_profile['phone']) && $company_profile['phone'] !== 'None' ? '<span class="phone-separator"> · </span>' : ''; ?><?= !empty($company_profile['phone']) && $company_profile['phone'] !== 'None' ? '<span class="company-phone">Phone: ' . htmlspecialchars($company_profile['phone']) . '</span>' : ''; ?></div><?= !empty($company_profile['email']) && $company_profile['email'] !== 'None' ? '<div>Email: ' . htmlspecialchars($company_profile['email']) . '</div>' : ''; ?><?= !empty($company_profile['website']) ? '<div>Website: ' . htmlspecialchars($company_profile['website']) . '</div>' : ''; ?><?= ($company_vat_text = print_vat_text($conn)) !== '' ? '<div style="display:inline-block;margin-top:4px;padding:1px 8px;border:1px solid #1f2933;border-radius:4px"><strong>VAT Reg. No:</strong> ' . htmlspecialchars(substr($company_vat_text, strlen('VAT Reg. No: '))) . '</div>' : ''; ?></div><?php } ?>
             </div>
             <div>
                 <p class="title"><?= htmlspecialchars(booking_invoice_page_title($invoice['invoice_type'], $invoice_types)); ?></p>

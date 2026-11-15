@@ -22,6 +22,8 @@ ensure_product_variant_schema($conn);
 ensure_product_subcategory_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
 require_once '../includes/service_warranty_helper.php';
+require_once '../includes/eshop_variant_image_helper.php';
+$variant_photos_enabled = eshop_variant_images_enabled($conn, (int)$user_id);
 $show_warranty = product_warranty_enabled();
 if ($show_warranty) product_warranty_schema($conn);
 
@@ -232,12 +234,14 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             $message_type = "danger";
         }else{
             mysqli_commit($conn);
+            // E-shop variant photos (only when the e-shop is active).
+            $variant_photo_error = $variant_photos_enabled ? eshop_variant_images_save($conn, (int)$user_id, $product_id, eshop_variant_files_slice('variant_photo')) : '';
 
             if($is_ajax_save){
                 header('Content-Type: application/json; charset=utf-8');
                 echo json_encode([
                     'ok' => true,
-                    'message' => 'Product "' . $product_name . '" saved successfully.',
+                    'message' => 'Product "' . $product_name . '" saved successfully.' . ($variant_photo_error !== '' ? ' Variant photo: ' . $variant_photo_error : ''),
                     'product' => ['id' => $product_id, 'name' => $product_name, 'sku' => $sku, 'stock' => $opening_stock],
                     // Pre-fill the next product's code from the one just saved.
                     'last_sku' => trim((string)$sku),
@@ -657,5 +661,6 @@ category.addEventListener('change',syncVariants); syncVariants();
 </script>
 
 <?php
+if($variant_photos_enabled) echo eshop_variant_photo_script('#variant-opening-fields input[type=number]', ['^variant_opening_qty', 'variant_photo']);
 require_once '../includes/footer.php';
 ?>

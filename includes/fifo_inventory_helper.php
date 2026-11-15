@@ -1057,3 +1057,24 @@ function fifo_inventory_product_is_editable_before_sale($conn, $user_id, $produc
 
     return (int)($row['consumed_batches'] ?? 0) === 0;
 }
+
+// Live stock of a product = what is left in its FIFO batches (all branches).
+// products.current_stock is only a running counter and can drift (edits, transfers,
+// damage), so screens that show or compare stock should use this.
+function product_live_stock_sql($alias = 'p')
+{
+    if(!fifo_inventory_is_enabled()){
+        return $alias . '.current_stock';
+    }
+    return '(SELECT COALESCE(SUM(sb_live.remaining_quantity),0) FROM stock_batches sb_live WHERE sb_live.product_id=' . $alias . '.id AND sb_live.user_id=' . $alias . '.user_id)';
+}
+
+// Bring products.current_stock back in line with the FIFO batches.
+function product_sync_current_stock($conn, $user_id, $product_id = 0)
+{
+    if(!fifo_inventory_is_enabled()){
+        return;
+    }
+    $where = 'p.user_id=' . (int)$user_id . ((int)$product_id > 0 ? ' AND p.id=' . (int)$product_id : '');
+    mysqli_query($conn, 'UPDATE products p SET p.current_stock=(SELECT COALESCE(SUM(sb.remaining_quantity),0) FROM stock_batches sb WHERE sb.product_id=p.id AND sb.user_id=p.user_id) WHERE ' . $where . ' AND EXISTS (SELECT 1 FROM product_categories c WHERE c.id=p.category_id AND c.category_type=\'stock_product\')');
+}

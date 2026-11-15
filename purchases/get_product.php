@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/product_category_helper.php';
+require_once '../includes/fifo_inventory_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -11,12 +12,12 @@ $product_id = isset($_POST['product_id'])
     : 0;
 
 $sql = "SELECT
-            purchase_price,
-            sale_price,
-            current_stock
-        FROM products
-        WHERE id=?
-        AND user_id=?";
+            p.purchase_price,
+            p.sale_price,
+            " . product_live_stock_sql('p') . " AS current_stock
+        FROM products p
+        WHERE p.id=?
+        AND p.user_id=?";
 
 $stmt = mysqli_prepare($conn,$sql);
 

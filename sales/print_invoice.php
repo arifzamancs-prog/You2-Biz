@@ -226,6 +226,27 @@ while($row = mysqli_fetch_assoc($items_result)){
     $items[] = $row;
 }
 
+// POS receipt: product discount of each line (product charges of type "less").
+// Price = unit price before that discount; Dis = discount of the whole line.
+$pos_line_discounts = [];
+$pos_item_ids = array_filter(array_map('intval', array_column($items, 'id')));
+$pos_charge_table = mysqli_query($conn, "SHOW TABLES LIKE 'invoice_item_charges'");
+if($pos_item_ids && $pos_charge_table && mysqli_num_rows($pos_charge_table) > 0){
+    $pos_discount_result = mysqli_query($conn, "SELECT invoice_item_id, SUM(amount_per_unit) AS per_unit FROM invoice_item_charges WHERE charge_type='less' AND invoice_item_id IN (" . implode(',', $pos_item_ids) . ") GROUP BY invoice_item_id");
+    while($pos_discount_result && ($pos_discount_row = mysqli_fetch_assoc($pos_discount_result))){
+        $pos_line_discounts[(int)$pos_discount_row['invoice_item_id']] = (float)$pos_discount_row['per_unit'];
+    }
+}
+$pos_show_discount = false;
+foreach($items as $pos_index => $pos_item){
+    $pos_per_unit = $pos_line_discounts[(int)($pos_item['id'] ?? 0)] ?? 0.0;
+    $items[$pos_index]['pos_price'] = (float)$pos_item['unit_price'] + $pos_per_unit;
+    $items[$pos_index]['pos_discount'] = round($pos_per_unit * abs((float)$pos_item['quantity']), 2);
+    if($items[$pos_index]['pos_discount'] > 0.004){
+        $pos_show_discount = true;
+    }
+}
+
 $returnable_summary = [];
 
 if((int)($invoice['customer_id'] ?? 0) > 0){
@@ -382,6 +403,13 @@ if(is_super_admin_user() && empty($profile)){
     $account_phone = $profile['phone'] ?? '';
     $account_email = $profile['email'] ?? '';
 }
+$account_website = is_super_admin_user() && empty($profile) ? '' : company_profile_website($conn, (int)$user_id);
+// My Profile switches: Email / Website can be kept off invoices.
+if(!(is_super_admin_user() && empty($profile))){
+    $invoice_contact_visibility = company_invoice_contact_visibility($conn, (int)$user_id);
+    if(!$invoice_contact_visibility['email']) $account_email = '';
+    if(!$invoice_contact_visibility['website']) $account_website = '';
+}
 
 $status_class = [
     'paid' => 'status-paid',
@@ -480,6 +508,8 @@ $paid_seal_url = current_paid_seal_url($conn);
 $company_logo_url = current_print_company_logo_url($conn);
 $show_company_profile = should_print_company_profile($conn);
 $show_general_company_logo = $general_printing && should_print_company_logo($conn) && $company_logo_url !== '';
+// POS receipt: the logo sits at the very top when logo printing is active.
+$show_pos_company_logo = should_print_company_logo($conn) && $company_logo_url !== '';
 $show_general_company_seal = $general_printing && should_print_company_seal($conn) && $company_seal_url !== '';
 $show_invoice_barcode = should_print_invoice_barcode($conn);
 $show_general_paid_seal = $general_printing && should_print_paid_seal($conn) && $paid_seal_url !== '' && (($invoice['payment_status'] ?? '') === 'paid' || $total_due_amount <= 0.009);
@@ -667,14 +697,31 @@ window.addEventListener('load', preparePosPrintPage);
 </div>
 
 <main class="receipt">
+    <?php if($show_pos_company_logo){ ?>
+    <div class="text-center" style="margin-bottom:6px">
+        <img src="<?= htmlspecialchars($company_logo_url); ?>" alt="Company Logo" style="max-width:60%;max-height:70px;object-fit:contain">
+    </div>
+    <?php } ?>
     <?php if($show_company_profile){ ?>
     <div class="text-center">
         <h1><?= htmlspecialchars($account_name); ?></h1>
         <?php if(!empty($account_address) && $account_address != 'None'){ ?>
             <div class="muted"><?= htmlspecialchars($account_address); ?></div>
         <?php } ?>
-        <?php if(!empty($account_phone)){ ?>
-            <div class="muted">Phone: <?= htmlspecialchars($account_phone); ?></div>
+        <?php $pos_contact = array_filter([
+            !empty($account_phone) && $account_phone !== 'None' ? 'Phone: ' . $account_phone : '',
+            !empty($account_email) && $account_email !== 'None' ? 'Email: ' . $account_email : '',
+            // No email: the website joins the phone line instead of its own line.
+            (empty($account_email) || $account_email === 'None') && $account_website !== '' ? 'Website: ' . $account_website : '',
+        ]); ?>
+        <?php if($pos_contact){ ?>
+            <div class="muted"><?= htmlspecialchars(implode(', ', $pos_contact)); ?></div>
+        <?php } ?>
+        <?php if($account_website !== '' && !empty($account_email) && $account_email !== 'None'){ ?>
+            <div class="muted">Website: <?= htmlspecialchars($account_website); ?></div>
+        <?php } ?>
+        <?php if(($pos_vat_text = print_vat_text($conn)) !== ''){ ?>
+            <div style="display:inline-block;margin-top:3px;padding:1px 6px;border:1px solid #000;border-radius:3px;font-size:11px;color:#000"><strong>VAT Reg. No:</strong> <?= htmlspecialchars(substr($pos_vat_text, strlen('VAT Reg. No: '))); ?></div>
         <?php } ?>
     </div>
     <?php } ?>
@@ -705,7 +752,8 @@ window.addEventListener('load', preparePosPrintPage);
         <tr>
             <th>Item</th>
             <th class="text-right">Qty</th>
-            <th class="text-right">Rate</th>
+            <th class="text-right">Price</th>
+            <?php if($pos_show_discount){ ?><th class="text-right">Dis</th><?php } ?>
             <th class="text-right">Total</th>
         </tr>
         </thead>
@@ -714,7 +762,8 @@ window.addEventListener('load', preparePosPrintPage);
             <tr>
                 <td><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
                 <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
-                <td class="text-right"><?= number_format($item['unit_price'],2); ?></td>
+                <td class="text-right"><?= number_format($item['pos_price'] ?? $item['unit_price'],2); ?></td>
+                <?php if($pos_show_discount){ ?><td class="text-right"><?= ($item['pos_discount'] ?? 0) > 0.004 ? number_format($item['pos_discount'],2) : ''; ?></td><?php } ?>
                 <td class="text-right"><?= number_format($item['total_price'],2); ?></td>
             </tr>
         <?php } ?>
@@ -1132,6 +1181,12 @@ window.addEventListener('load', function () {
                     Email: <?= htmlspecialchars($account_email); ?>
                 <?php } ?>
             </div>
+            <?php if($account_website !== ''){ ?>
+                <div class="muted">Website: <?= htmlspecialchars($account_website); ?></div>
+            <?php } ?>
+            <?php if(($account_vat_text = print_vat_text($conn)) !== ''){ ?>
+                <div style="display:inline-block;margin-top:6px;padding:2px 10px;border:1px solid #1f2933;border-radius:4px;font-size:12px;color:#1f2933"><strong>VAT Reg. No:</strong> <?= htmlspecialchars(substr($account_vat_text, strlen('VAT Reg. No: '))); ?></div>
+            <?php } ?>
         </div>
         <?php } ?>
 

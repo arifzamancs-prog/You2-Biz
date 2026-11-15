@@ -137,7 +137,7 @@ require_once '../includes/sidebar.php';
     <?php unset($_SESSION['success']); ?>
 <?php } ?>
 
-<form method="post" action="save_purchase.php">
+<form method="post" action="save_purchase.php" enctype="multipart/form-data">
 
 <div class="row">
     <div class="col-md-12">
@@ -622,6 +622,9 @@ function calculateDue(){
 }
 </script>
 SCRIPT;
+// E-shop active: a photo for each variant received (shown only on the e-shop).
+require_once '../includes/eshop_variant_image_helper.php';
+if(eshop_variant_images_enabled($conn, (int)$user_id)) $page_script .= eshop_variant_photo_script('.variant-qty', ['^variant_quantity', 'variant_photo']);
 
 require_once "../includes/footer.php";
 

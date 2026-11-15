@@ -98,6 +98,7 @@ require_once '../includes/sidebar.php';
     .barcode-label .bl-bars svg{width:92%;height:100%}
     .barcode-label .bl-code{letter-spacing:.5px}
     .barcode-label .bl-price{font-weight:700}
+    .barcode-label .bl-extra{flex:0 0 auto;font-size:1em;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
     .barcode-grid{display:grid;box-sizing:border-box}
     #barcode-items td{vertical-align:middle}
 </style>
@@ -159,6 +160,10 @@ require_once '../includes/sidebar.php';
             <?php if($company_has_variants){ ?><div class="custom-control custom-checkbox custom-control-inline" title="On: each variant gets its own barcode. Off: one barcode per product."><input type="checkbox" class="custom-control-input label-part" id="show-variant" data-part="variant"><label class="custom-control-label" for="show-variant">Variant</label></div><?php } ?>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-price" data-part="price" checked><label class="custom-control-label" for="show-price">Price</label></div>
             <div class="custom-control custom-checkbox custom-control-inline"><input type="checkbox" class="custom-control-input label-part" id="show-code" data-part="code" checked><label class="custom-control-label" for="show-code">Barcode Number</label></div>
+            <div class="d-inline-flex align-items-center mt-2 mt-md-0" title="Printed on every label, e.g. VAT included">
+                <div class="custom-control custom-checkbox custom-control-inline mr-2"><input type="checkbox" class="custom-control-input label-part" id="show-extra" data-part="extra"><label class="custom-control-label" for="show-extra">Extra Text</label></div>
+                <input type="text" id="label-extra-text" class="form-control form-control-sm" maxlength="40" placeholder="e.g. VAT included" style="width:190px">
+            </div>
         </div>
 
         <hr>
@@ -294,6 +299,8 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         label.appendChild(bars);
         if(shown("code")) label.appendChild(el("div", "bl-code", item.barcode));
         if(shown("price") && item.price !== "") label.appendChild(el("div", "bl-price", currency + " " + Number(item.price).toFixed(2)));
+        const extraText = ($("#label-extra-text").val() || "").trim();
+        if(shown("extra") && extraText !== "") label.appendChild(el("div", "bl-extra", extraText));
         return label;
     }
 
@@ -458,6 +465,17 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
     });
     $("#thermal-width, #thermal-height, #a4-layout, #a4-start").on("input change", render);
     $(".label-part").on("change", render);
+    // Extra text (e.g. "VAT included") is remembered in this browser.
+    try {
+        $("#label-extra-text").val(localStorage.getItem("barcode_label_extra_text") || "");
+        $("#show-extra").prop("checked", localStorage.getItem("barcode_label_extra_on") === "1");
+    } catch(e) {}
+    $("#label-extra-text").on("input", function(){
+        if(this.value.trim() !== "") $("#show-extra").prop("checked", true);
+        try { localStorage.setItem("barcode_label_extra_text", this.value); localStorage.setItem("barcode_label_extra_on", $("#show-extra").prop("checked") ? "1" : "0"); } catch(e) {}
+        render();
+    });
+    $("#show-extra").on("change", function(){ try { localStorage.setItem("barcode_label_extra_on", this.checked ? "1" : "0"); } catch(e) {} });
 
     printButton.addEventListener("click", function(){
         const built = buildSheets();

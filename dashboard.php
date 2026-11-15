@@ -8,6 +8,7 @@ require_once 'includes/customer_opening_due_helper.php';
 require_once 'includes/customer_due_allocation_helper.php';
 require_once 'includes/booking_invoice_helper.php';
 require_once 'includes/branch_context_helper.php';
+require_once 'includes/fifo_inventory_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $user_name = $_SESSION['login_name'] ?? $_SESSION['user_name'] ?? 'User';
@@ -281,10 +282,11 @@ $active_wallets = dashboard_value(
 $low_stock = dashboard_value(
     $conn,
     "SELECT COUNT(*)
-     FROM products
-     WHERE user_id=?
-     AND status='active'
-     AND current_stock <= minimum_stock",
+     FROM products p
+     INNER JOIN product_categories pc ON pc.id=p.category_id AND pc.category_type='stock_product'
+     WHERE p.user_id=?
+     AND p.status='active'
+     AND " . product_live_stock_sql('p') . " <= p.minimum_stock",
     "i",
     [$user_id]
 );
@@ -351,15 +353,16 @@ if ($dashboard_uses_sales_invoices) {
 
 $low_stock_products = dashboard_rows(
     $conn,
-    "SELECT
-        product_name,
-        current_stock,
-        minimum_stock
-     FROM products
-     WHERE user_id=?
-     AND status='active'
-     AND current_stock <= minimum_stock
-     ORDER BY current_stock ASC, product_name ASC
+    "SELECT * FROM (SELECT
+        p.product_name,
+        " . product_live_stock_sql('p') . " AS current_stock,
+        p.minimum_stock
+     FROM products p
+     INNER JOIN product_categories pc ON pc.id=p.category_id AND pc.category_type='stock_product'
+     WHERE p.user_id=?
+     AND p.status='active') low
+     WHERE low.current_stock <= low.minimum_stock
+     ORDER BY low.current_stock ASC, low.product_name ASC
      LIMIT 6",
     "i",
     [$user_id]

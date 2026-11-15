@@ -18,6 +18,8 @@ ensure_product_subcategory_schema($conn);
 ensure_product_variant_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
 require_once '../includes/service_warranty_helper.php';
+require_once '../includes/eshop_variant_image_helper.php';
+$variant_photos_enabled = eshop_variant_images_enabled($conn, (int)$user_id);
 $show_warranty = product_warranty_enabled();
 if ($show_warranty) product_warranty_schema($conn);
 
@@ -202,6 +204,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     );
 
     $stock_saved = mysqli_stmt_execute($stmt);
+    // After FIFO activity the opening stock is fixed; the stock counter follows the batches.
+    if($stock_saved && !$opening_stock_editable && $is_stock_product) product_sync_current_stock($conn, $user_id, $id);
     if($stock_saved) product_warranty_save($conn, $user_id, $id, $_POST['warranty_months'] ?? 0);
     if($stock_saved && $product_fifo_editable){
         $stock_saved = fifo_inventory_remove_product_opening_batches($conn, $id);
@@ -236,6 +240,11 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     if($stock_saved){
         mysqli_commit($conn);
+        // E-shop variant photos (only when the e-shop is active).
+        if($variant_photos_enabled){
+            $variant_photo_error = eshop_variant_images_save($conn, (int)$user_id, (int)$id, eshop_variant_files_slice('variant_photo'), array_map('strval', (array)($_POST['variant_photo_remove'] ?? [])));
+            if($variant_photo_error !== '') $_SESSION['error'] = 'Product saved, but a variant photo was not: ' . $variant_photo_error;
+        }
         if($new_photo_path !== '' && !empty($product['photo_path']) && $product['photo_path'] !== $new_photo_path) product_delete_photo_file($product['photo_path']);
 
         header("Location: index.php");
@@ -520,4 +529,5 @@ category.addEventListener('change',syncCategoryFields);syncCategoryFields();
 (function(){const input=document.getElementById('product_photo'),status=document.getElementById('product-photo-status'),preview=document.getElementById('product-photo-preview');if(!input)return;const original=preview?(preview.getAttribute('src')||''):'';let objectUrl='';input.addEventListener('change',function(){if(status)status.textContent='';if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl='';}if(!preview)return;const file=input.files&&input.files[0];if(file&&/^image\//.test(file.type)){objectUrl=URL.createObjectURL(file);preview.src=objectUrl;preview.classList.remove('d-none');}else if(original){preview.src=original;preview.classList.remove('d-none');}else{preview.removeAttribute('src');preview.classList.add('d-none');}});})();
 </script>
 
+<?php if($variant_photos_enabled) echo eshop_variant_photo_script('#variant-opening-fields input[type=number]', ['^variant_opening_qty', 'variant_photo'], eshop_variant_image_urls($conn, (int)$user_id, (int)$id)); ?>
 <?php require_once '../includes/footer.php'; ?>

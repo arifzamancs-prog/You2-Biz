@@ -338,5 +338,130 @@ $(function () {
 });
 </script>
 <?php endif; ?>
+<script>
+// Instant photo preview: choosing an image in any file field shows it at once.
+// On edit pages the current photo just before the field is replaced by the new one.
+// Pages that already draw their own preview are left alone.
+(function () {
+    var URLS = window.URL || window.webkitURL;
+    if (!URLS || !URLS.createObjectURL) return;
+    var previewSrcs = function () {
+        return Array.prototype.map.call(document.images, function (img) { return img.getAttribute('src') || ''; });
+    };
+    var currentPhoto = function (input) {
+        var prev = input.previousElementSibling;
+        if (!prev) return null;
+        if (prev.tagName === 'IMG') return prev;
+        var imgs = prev.querySelectorAll ? prev.querySelectorAll('img') : [];
+        return imgs.length === 1 && prev.children.length === 1 ? imgs[0] : null;
+    };
+    var anchorOf = function (input) {
+        // Put the preview after the field's wrapper (custom-file / input-group), else after the field.
+        var wrap = input.closest('.custom-file, .input-group');
+        return wrap || input;
+    };
+    document.addEventListener('change', function (event) {
+        var input = event.target;
+        if (!input || input.tagName !== 'INPUT' || input.type !== 'file' || input.hasAttribute('data-no-instant-preview')) return;
+        var files = Array.prototype.filter.call(input.files || [], function (file) { return /^image\//.test(file.type); });
+        var before = previewSrcs();
+        var box = input._instantPreviewBox;
+        var photo = input._instantPreviewPhoto || currentPhoto(input);
+        if (photo && !input._instantPreviewPhoto) { input._instantPreviewPhoto = photo; photo.setAttribute('data-original-src', photo.getAttribute('src') || ''); }
+        // Wait a moment: if the page itself put a new image preview on screen, keep only that one.
+        setTimeout(function () {
+            var after = previewSrcs();
+            var pageDrewPreview = after.some(function (src, i) { return src !== before[i] && /^(data:|blob:)/.test(src) && !(box && box.contains(document.images[i])) && document.images[i] !== photo; });
+            if (box) { box.innerHTML = ''; box.style.display = 'none'; }
+            if (photo && !files.length) photo.setAttribute('src', photo.getAttribute('data-original-src') || '');
+            if (!files.length || pageDrewPreview) return;
+            if (photo && files.length === 1) { photo.setAttribute('src', URLS.createObjectURL(files[0])); photo.title = files[0].name; return; }
+            if (!box) {
+                box = document.createElement('div');
+                box.className = 'instant-photo-preview';
+                box.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px';
+                var anchor = anchorOf(input);
+                anchor.parentNode.insertBefore(box, anchor.nextSibling);
+                input._instantPreviewBox = box;
+            }
+            box.style.display = 'flex';
+            files.slice(0, 6).forEach(function (file) {
+                var link = document.createElement('a');
+                var url = URLS.createObjectURL(file);
+                link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.title = file.name;
+                var img = document.createElement('img');
+                img.src = url; img.alt = file.name;
+                img.style.cssText = 'width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db;box-shadow:0 1px 3px rgba(0,0,0,.08)';
+                link.appendChild(img);
+                box.appendChild(link);
+            });
+            // A page preview that shows up a little later wins: remove ours then.
+            if (window.MutationObserver) {
+                var watcher = new MutationObserver(function (changes) {
+                    var drawn = function (el) { return el && el.tagName === 'IMG' && el !== photo && !box.contains(el) && /^(data:|blob:)/.test(el.getAttribute('src') || ''); };
+                    changes.forEach(function (change) {
+                        var hit = drawn(change.target);
+                        Array.prototype.forEach.call(change.addedNodes || [], function (node) {
+                            if (drawn(node) || (node.querySelectorAll && Array.prototype.some.call(node.querySelectorAll('img'), drawn))) hit = true;
+                        });
+                        if (hit) { box.innerHTML = ''; box.style.display = 'none'; watcher.disconnect(); }
+                    });
+                });
+                watcher.observe(document.body, {attributes: true, attributeFilter: ['src'], childList: true, subtree: true});
+                setTimeout(function () { watcher.disconnect(); }, 3000);
+            }
+        }, 350);
+    }, true);
+})();
+</script>
+<style>
+.table td img:not(.no-zoom),.form-group img:not(.no-zoom){cursor:zoom-in}
+.table td a img,.table td button img,.form-group a img,.form-group button img{cursor:pointer}
+.photo-zoom-overlay{position:fixed;inset:0;z-index:2050;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(10,18,32,.86);padding:24px;cursor:zoom-out}
+.photo-zoom-overlay img{max-width:92vw;max-height:80vh;object-fit:contain;border-radius:8px;background:#fff;box-shadow:0 18px 60px rgba(0,0,0,.45);cursor:default}
+.photo-zoom-bar{display:flex;align-items:center;gap:14px;margin-top:14px;color:#e8eef7;font-size:14px;max-width:92vw}
+.photo-zoom-bar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.photo-zoom-bar a,.photo-zoom-bar button{color:#fff;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);border-radius:6px;padding:5px 12px;font-size:13px;text-decoration:none;cursor:pointer}
+.photo-zoom-bar a:hover,.photo-zoom-bar button:hover{background:rgba(255,255,255,.25)}
+</style>
+<script>
+// Photo zoom: clicking a small photo in a table (or a current photo in a form) opens it big.
+// Photos that already open something (inside a link or button) keep their own behaviour.
+(function () {
+    var overlay = null;
+    var close = function () { if (overlay) { overlay.remove(); overlay = null; document.removeEventListener('keydown', onKey); } };
+    var onKey = function (e) { if (e.key === 'Escape') close(); };
+    var open = function (src, title) {
+        close();
+        overlay = document.createElement('div');
+        overlay.className = 'photo-zoom-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        var img = document.createElement('img');
+        img.src = src; img.alt = title || '';
+        var bar = document.createElement('div');
+        bar.className = 'photo-zoom-bar';
+        var name = document.createElement('span'); name.textContent = title || '';
+        var link = document.createElement('a'); link.href = src; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Open original';
+        var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Close (Esc)';
+        bar.append(name, link, btn);
+        overlay.append(img, bar);
+        overlay.addEventListener('click', function (e) { if (e.target === overlay || e.target === btn) close(); });
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onKey);
+        btn.focus();
+    };
+    document.addEventListener('click', function (e) {
+        var img = e.target;
+        if (!img || img.tagName !== 'IMG' || img.classList.contains('no-zoom')) return;
+        if (img.closest('a, button, .photo-zoom-overlay, [data-toggle="modal"]')) return;
+        if (!img.closest('.table td, .form-group')) return;
+        var src = img.currentSrc || img.src;
+        if (!src || /\.svg(\?|$)/i.test(src)) return;
+        e.preventDefault();
+        open(src, img.getAttribute('alt') || img.getAttribute('title') || '');
+    });
+})();
+</script>
 </body>
 </html>

@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/login_email_otp_helper.php';
+require_once '../includes/printing_helper.php';
 require_once '../includes/staff_helper.php';
 require_once '../includes/branch_helper.php';
 
@@ -12,6 +13,7 @@ ensure_login_email_otp_columns($conn);
 $is_super_admin = is_super_admin_user();
 $is_manager = is_manager_user();
 $is_company_admin = !$is_super_admin && !$is_manager;
+$profile_shows_website = $is_company_admin;
 $user_id = $is_super_admin
     ? 0
     : ($is_manager
@@ -109,6 +111,12 @@ if($is_super_admin){
             : 'inactive',
     ];
 }else{
+    // Company website (shown and edited by the company admin).
+    $website_column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'website'");
+    if($website_column && mysqli_num_rows($website_column) === 0){
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN website VARCHAR(255) NOT NULL DEFAULT ''");
+    }
+    company_invoice_contact_visibility($conn, 0); // makes sure the switch columns exist
     $sql = "SELECT * FROM users WHERE id=?";
 
     $stmt = mysqli_prepare($conn,$sql);
@@ -172,6 +180,9 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     $email = ($is_super_admin || $is_company_admin) ? $user['email'] : trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $phone_is_valid = $phone !== '';
+    $website = substr(trim((string)($_POST['website'] ?? ($user['website'] ?? ''))), 0, 255);
+    $website_check = $website === '' ? '' : (preg_match('#^https?://#i', $website) ? $website : 'https://' . $website);
+    $website_is_valid = $website === '' || (filter_var($website_check, FILTER_VALIDATE_URL) && strpos((string)parse_url($website_check, PHP_URL_HOST), '.') !== false);
     $login_email_otp_status = (
         !$is_manager &&
         (($_POST['login_email_otp_status'] ?? 'inactive') === 'active')
@@ -197,6 +208,10 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
     if (!$phone_is_valid) {
         $message = 'Phone number is required.';
+        $message_type = 'danger';
+    }elseif($profile_shows_website && !$website_is_valid){
+        $can_update_profile = false;
+        $message = 'Enter a valid website, e.g. www.textweb.com';
         $message_type = 'danger';
     }
 
@@ -350,6 +365,19 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
                 mysqli_stmt_bind_param($head_office_sync, 'ssi', $address, $phone, $user_id);
                 mysqli_stmt_execute($head_office_sync);
             }
+            if($profile_shows_website){
+                $show_email_on_invoice = empty($_POST['show_email_on_invoice']) ? 0 : 1;
+                $show_website_on_invoice = empty($_POST['show_website_on_invoice']) ? 0 : 1;
+                $switch_stmt = mysqli_prepare($conn, 'UPDATE users SET show_email_on_invoice=?, show_website_on_invoice=? WHERE id=?');
+                mysqli_stmt_bind_param($switch_stmt, 'iii', $show_email_on_invoice, $show_website_on_invoice, $user_id);
+                mysqli_stmt_execute($switch_stmt);
+                $user['show_email_on_invoice'] = $show_email_on_invoice;
+                $user['show_website_on_invoice'] = $show_website_on_invoice;
+                $website_stmt = mysqli_prepare($conn, 'UPDATE users SET website=? WHERE id=?');
+                mysqli_stmt_bind_param($website_stmt, 'si', $website, $user_id);
+                mysqli_stmt_execute($website_stmt);
+                $user['website'] = $website;
+            }
         }
 
         $user['name'] = $name;
@@ -474,20 +502,6 @@ if($is_manager && !empty($user['staff_photo'])){
 
                     <div class="form-group">
 
-                        <label>Email</label>
-
-                        <input
-                            type="<?= $is_manager ? 'text' : 'email'; ?>"
-                            name="email"
-                            class="form-control"
-                            value="<?= htmlspecialchars($user['email']); ?>"
-                            <?= ($is_super_admin || $is_company_admin) ? 'readonly' : ''; ?>
-                            required>
-
-                    </div>
-
-                    <div class="form-group">
-
                         <label>Phone</label>
 
                         <input
@@ -499,6 +513,40 @@ if($is_manager && !empty($user['staff_photo'])){
                             placeholder="None">
 
                     </div>
+
+                    <div class="form-group">
+
+                        <label>Email</label>
+
+                        <?php if($profile_shows_website){ ?><div class="input-group"><?php } ?>
+                        <input
+                            type="<?= $is_manager ? 'text' : 'email'; ?>"
+                            name="email"
+                            class="form-control"
+                            value="<?= htmlspecialchars($user['email']); ?>"
+                            <?= ($is_super_admin || $is_company_admin) ? 'readonly' : ''; ?>
+                            required>
+                        <?php if($profile_shows_website){ ?><div class="input-group-append"><div class="input-group-text bg-white"><div class="custom-control custom-switch" title="Show in invoice"><input type="checkbox" class="custom-control-input" id="show_email_switch" name="show_email_on_invoice" value="1" <?= (int)($user['show_email_on_invoice'] ?? 1) === 1 ? 'checked' : ''; ?>><label class="custom-control-label small" for="show_email_switch">Show in invoice</label></div></div></div></div><?php } ?>
+
+                    </div>
+
+                    <?php if($profile_shows_website){ ?>
+                    <div class="form-group">
+
+                        <label>Website</label>
+
+                        <?php if($profile_shows_website){ ?><div class="input-group"><?php } ?>
+                        <input
+                            type="text"
+                            name="website"
+                            class="form-control"
+                            maxlength="255"
+                            value="<?= htmlspecialchars((string)($user['website'] ?? '')); ?>"
+                            placeholder="www.textweb.com">
+                        <?php if($profile_shows_website){ ?><div class="input-group-append"><div class="input-group-text bg-white"><div class="custom-control custom-switch" title="Show in invoice"><input type="checkbox" class="custom-control-input" id="show_website_switch" name="show_website_on_invoice" value="1" <?= (int)($user['show_website_on_invoice'] ?? 1) === 1 ? 'checked' : ''; ?>><label class="custom-control-label small" for="show_website_switch">Show in invoice</label></div></div></div></div><?php } ?>
+
+                    </div>
+                    <?php } ?>
 
                     <?php if(!$is_manager){ ?>
                         <div class="form-group">

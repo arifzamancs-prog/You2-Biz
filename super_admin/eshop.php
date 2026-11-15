@@ -16,6 +16,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         $error = 'Your session has changed. Refresh the page and try again.';
     }elseif(!eshop_valid_slug($slug)){
         $error = 'Use 3–64 lowercase letters, numbers or hyphens. Start and end with a letter or number.';
+    }elseif(eshop_slug_is_reserved($slug)){
+        $error = 'This shop URL is used by the system. Please choose another name.';
     }else{
         $stmt = mysqli_prepare($conn, "SELECT id FROM users WHERE id=? AND role='admin'");
         mysqli_stmt_bind_param($stmt, 'i', $company_id);

@@ -188,6 +188,35 @@
         group.addEventListener('change', sync); sync();
     });
 
+    // A variant with its own photo shows that photo in the gallery.
+    $$('[data-variant-chips]').forEach(function (group) {
+        var gallery = $('[data-gallery]');
+        if (!gallery) return;
+        var box = $('.gallery-main', gallery) || gallery;
+        var main = $('[data-gallery-main]', gallery);
+        var original = main ? main.getAttribute('src') : '';
+        var empty = $('.no-photo', box);
+        var show = function () {
+            var checked = $('input:checked', group);
+            var photo = checked ? (checked.dataset.photo || '') : '';
+            if (!photo && !main) return;
+            if (!main) {
+                main = document.createElement('img');
+                main.setAttribute('data-gallery-main', '');
+                main.alt = '';
+                box.appendChild(main);
+            }
+            // No variant photo and no product photo: back to the "No photo" placeholder.
+            var src = photo || original;
+            main.style.display = src ? '' : 'none';
+            if (empty) empty.style.display = src ? 'none' : '';
+            if (src) main.src = src;
+            $$('[data-gallery-thumb]', gallery).forEach(function (thumb) { thumb.classList.toggle('is-active', !photo && thumb.dataset.galleryThumb === original); });
+        };
+        group.addEventListener('change', show);
+        if ($$('input[data-photo]', group).some(function (input) { return input.dataset.photo; })) show();
+    });
+
     // Filters and sort apply immediately.
     $$('[data-auto-submit]').forEach(function (control) {
         control.addEventListener('change', function () { control.form.submit(); });

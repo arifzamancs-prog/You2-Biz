@@ -1,0 +1,9 @@
+# E-shop at the site root: https://you2biz.com/<shop-name>/...
+# Real files and folders (login.php, sales/, assets…) are served as before;
+# any other single top-level name is handed to the shop.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([a-z0-9][a-z0-9-]{1,62}[a-z0-9])(?:/(.*))?$ shop/index.php?shop=$1&route=$2 [L,QSA]
+</IfModule>

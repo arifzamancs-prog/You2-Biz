@@ -32,8 +32,16 @@ if(!$shop) shop_not_found('Shop is currently unavailable.');
 $shop = eshop_storefront_profile($conn,$shop);
 $cid = (int)$shop['company_id'];
 
-$root = app_path('shop/'.rawurlencode($slug));
-$absoluteRoot = app_url('shop/'.rawurlencode($slug));
+$root = app_path(rawurlencode($slug));
+$absoluteRoot = app_url(rawurlencode($slug));
+// Old address /shop/<slug>/…: send visitors (GET) to the new one; forms still work.
+$shop_old_prefix = app_path('shop/'.rawurlencode($slug));
+$shop_request_path = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+if(($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($shop_request_path === $shop_old_prefix || strpos($shop_request_path, $shop_old_prefix.'/') === 0)){
+    $shop_query = (string)parse_url((string)$_SERVER['REQUEST_URI'], PHP_URL_QUERY);
+    header('Location: '.$root.substr($shop_request_path, strlen($shop_old_prefix)).($shop_query !== '' ? '?'.$shop_query : ''), true, 301);
+    exit;
+}
 function shop_url($route='',$params=[]){
     global $root;
     $url=$root.'/'.ltrim((string)$route,'/');
@@ -229,6 +237,9 @@ if($route===''){
     $product=eshop_storefront_product($conn,$cid,(int)$productMatch[1]);
     if(!$product) shop_not_found('Product not available.');
     $images=eshop_storefront_images($conn,$cid,$product);
+    // Each variant's own e-shop photo (set in Products / Purchase).
+    require_once __DIR__.'/../includes/eshop_variant_image_helper.php';
+    $variantPhotos=eshop_variant_image_urls($conn,$cid,(int)$product['id']);
     $specs=eshop_storefront_spec_rows($product['specification']??'');
     [$related]=eshop_storefront_products($conn,$cid,['category'=>$product['category_id'],'exclude'=>$product['id']],5);
     $productAbsolute=shop_absolute(product_url($product));

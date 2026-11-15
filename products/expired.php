@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/product_expiry_helper.php';
+require_once '../includes/fifo_inventory_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 
@@ -15,6 +16,7 @@ if(!is_product_expiry_enabled($conn)){
 
 $sql = "SELECT
             p.*,
+            " . product_live_stock_sql('p') . " AS current_stock,
             c.category_name
         FROM products p
         LEFT JOIN product_categories c

@@ -34,7 +34,7 @@ $firstVariant=null; foreach($p['variants'] as $option){ if((int)$option['availab
                 <fieldset class="variant-chips" data-variant-chips>
                     <legend>Choose option</legend>
                     <?php foreach($p['variants'] as $option){ $out=(int)$option['available']<1; ?>
-                    <label class="chip<?= $out?' is-out':'' ?>"><input type="radio" name="variant_name" value="<?= h($option['name']) ?>" data-available="<?= min(99,(int)$option['available']) ?>" <?= $out?'disabled':'' ?> <?= $option['name']===$firstVariant?'checked':'' ?> required><span><?= h($option['name']) ?></span></label>
+                    <label class="chip<?= $out?' is-out':'' ?>"><input type="radio" name="variant_name" value="<?= h($option['name']) ?>" data-available="<?= min(99,(int)$option['available']) ?>" data-photo="<?= h($variantPhotos[$option['name']] ?? '') ?>" <?= $out?'disabled':'' ?> <?= $option['name']===$firstVariant?'checked':'' ?> required><span><?= h($option['name']) ?></span></label>
                     <?php } ?>
                 </fieldset>
                 <?php }else{ ?><input type="hidden" name="variant_name" value=""><?php } ?>

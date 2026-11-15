@@ -846,6 +846,19 @@ function current_print_company_logo_url($conn)
     return printing_upload_dir_url() . '/' . rawurlencode($transparent_filename);
 }
 
+// Company website from My Profile (empty when not set).
+function company_profile_website($conn, $company_id)
+{
+    static $has_column = null;
+    if($has_column === null){
+        $column = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'website'");
+        $has_column = $column && mysqli_num_rows($column) > 0;
+    }
+    if(!$has_column || (int)$company_id <= 0) return '';
+    $row = mysqli_fetch_row(mysqli_query($conn, 'SELECT website FROM users WHERE id=' . (int)$company_id . ' LIMIT 1'));
+    return trim((string)($row[0] ?? ''));
+}
+
 function printing_company_profile_data($conn)
 {
     $default_profile = [
@@ -931,6 +944,7 @@ function printing_company_profile_data($conn)
             $profile[$key] = 'None';
         }
     }
+    $profile['website'] = company_profile_website($conn, $target_user_id);
 
     if(
         preg_match('/\.manager\.\d+@you2-wallet\.local$/', (string)$profile['email']) ||
@@ -1162,4 +1176,27 @@ function printing_fit_one_page_html($selector, $area, $use_area_width = true, $m
         . '}'
         . 'window.addEventListener("load",fit);window.addEventListener("beforeprint",fit);'
         . '})();</script>';
+}
+
+// Company admin can hide Email / Website from invoices (My Profile switches). Both shown by default.
+function company_invoice_contact_visibility($conn, $company_id)
+{
+    static $ready = false;
+    if(!$ready){
+        $ready = true;
+        foreach(['show_email_on_invoice', 'show_website_on_invoice'] as $column){
+            $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE '{$column}'");
+            if($result && mysqli_num_rows($result) === 0){
+                mysqli_query($conn, "ALTER TABLE users ADD COLUMN {$column} TINYINT(1) NOT NULL DEFAULT 1");
+            }
+        }
+    }
+    $visibility = ['email' => true, 'website' => true];
+    if((int)$company_id <= 0) return $visibility;
+    $row = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT show_email_on_invoice, show_website_on_invoice FROM users WHERE id=' . (int)$company_id . ' LIMIT 1'));
+    if($row){
+        $visibility['email'] = (int)$row['show_email_on_invoice'] === 1;
+        $visibility['website'] = (int)$row['show_website_on_invoice'] === 1;
+    }
+    return $visibility;
 }

@@ -10,7 +10,8 @@ ensure_product_image_column($conn);
 ensure_restaurant_product_categories($conn, $user_id);
 $show_expired_on = is_product_expiry_enabled($conn);
 if (empty($_SESSION['product_delete_csrf'])) $_SESSION['product_delete_csrf'] = bin2hex(random_bytes(32));
-$stmt = mysqli_prepare($conn, "SELECT p.*, COALESCE(c.category_name,'Unassigned') category_name,
+require_once __DIR__ . '/../includes/fifo_inventory_helper.php';
+$stmt = mysqli_prepare($conn, "SELECT p.*, " . product_live_stock_sql('p') . " AS current_stock, COALESCE(c.category_name,'Unassigned') category_name,
     COALESCE(c.category_type,'non_stock') category_type
     FROM products p LEFT JOIN product_categories c ON c.id=p.category_id AND c.user_id=p.user_id
     WHERE p.user_id=?" . restaurant_catalog_scope_sql($conn, 'p') . " ORDER BY p.id DESC");

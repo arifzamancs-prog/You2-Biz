@@ -76,6 +76,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             // Super admin edits only the defaults for new companies; the message is one per company (all branches).
             if(!is_super_admin_user()){
                 save_print_promo_settings($conn, $_POST['print_promo_status'] ?? 'inactive', $_POST['print_promo_message'] ?? '');
+                save_print_vat_settings($conn, $_POST['print_vat_status'] ?? 'inactive', $_POST['print_vat_reg_no'] ?? '');
             }
 
             if($company_seal_changed || $paid_seal_changed){
@@ -109,6 +110,7 @@ $company_seal_url = current_company_seal_url($conn);
 $paid_seal_url = current_paid_seal_url($conn);
 $company_logo_url = current_print_company_logo_url($conn);
 $print_promo = print_promo_settings($conn);
+$print_vat = print_vat_settings($conn);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -611,6 +613,48 @@ require_once '../includes/sidebar.php';
                             maxlength="<?= PRINT_PROMO_MAX_LENGTH; ?>"
                             placeholder="e.g. Eid offer: 10% off on your next purchase!"><?= htmlspecialchars($print_promo['message']); ?></textarea>
                         <small class="text-muted">Up to <?= PRINT_PROMO_MAX_LENGTH; ?> characters. Printed only while Active.</small>
+                    </div>
+
+                    <div class="border rounded p-3 mb-3">
+                        <label class="mb-1">VAT Reg. No</label>
+                        <div class="text-muted small mb-3">
+                            Your VAT registration (BIN) number, printed under the company contact on sales invoices and POS receipts.
+                        </div>
+
+                        <div class="custom-control custom-radio mb-2">
+                            <input
+                                type="radio"
+                                id="print_vat_status_active"
+                                name="print_vat_status"
+                                value="active"
+                                class="custom-control-input"
+                                <?= $print_vat['status'] === 'active' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_vat_status_active">
+                                Active
+                            </label>
+                        </div>
+
+                        <div class="custom-control custom-radio mb-3">
+                            <input
+                                type="radio"
+                                id="print_vat_status_inactive"
+                                name="print_vat_status"
+                                value="inactive"
+                                class="custom-control-input"
+                                <?= $print_vat['status'] !== 'active' ? 'checked' : ''; ?>>
+                            <label class="custom-control-label" for="print_vat_status_inactive">
+                                Inactive
+                            </label>
+                        </div>
+
+                        <input
+                            type="text"
+                            name="print_vat_reg_no"
+                            class="form-control"
+                            maxlength="<?= PRINT_VAT_MAX_LENGTH; ?>"
+                            value="<?= htmlspecialchars($print_vat['reg_no']); ?>"
+                            placeholder="e.g. 000123456-0101">
+                        <small class="text-muted">Printed as "VAT Reg. No: …" only while Active.</small>
                     </div>
                     <?php } ?>
 
