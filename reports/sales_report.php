@@ -31,7 +31,8 @@ $rows = function($sql, $types, $params) use ($conn){
     return mysqli_fetch_all(mysqli_stmt_get_result($stmt), MYSQLI_ASSOC);
 };
 $posted = "COALESCE(i.accounting_status,'posted')='posted' AND i.invoice_date BETWEEN ? AND ?";
-$is_return = "(i.total_amount < 0 OR i.created_by_type='sales_refund')";
+// COALESCE: created_by_type is NULL on many invoices; a NULL here made NOT {$is_return} NULL and dropped them everywhere.
+$is_return = "(i.total_amount < 0 OR COALESCE(i.created_by_type,'')='sales_refund')";
 
 // Totals for the cards (every report type shows them).
 $totals = $rows(
