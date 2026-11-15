@@ -827,7 +827,7 @@ window.addEventListener('load', preparePosPrintPage);
     <?php } ?>
 
     <div class="footer">
-        Thank you for your cooperation.
+        <?= htmlspecialchars(print_thanks_text($conn)); ?>
     </div>
 <?= printing_powered_by_html(); ?>
 </main>
@@ -1364,7 +1364,7 @@ window.addEventListener('load', function () {
     <?= print_promo_html($conn); ?>
 
     <div class="footer-note">
-        Thank you for your cooperation.
+        <?= htmlspecialchars(print_thanks_text($conn)); ?>
     </div>
 
 <?= printing_powered_by_html(); ?>

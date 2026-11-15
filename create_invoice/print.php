@@ -203,7 +203,7 @@ $invoice_width = $printing_option === 'pos' ? '80mm' : ($printing_option === 'cu
             <?php if($company_seal_url !== ''){ ?><div class="seal-block company-seal-block"><img src="<?= htmlspecialchars($company_seal_url); ?>" alt="Company seal"></div><?php } ?>
         </div><?php } ?>
         <?php if($show_created_by){ ?><div class="created-by">Created by: <strong><?= htmlspecialchars($created_by_name); ?></strong></div><?php } ?>
-        <div class="print-end"><?= print_promo_html($conn); ?><?php if($show_invoice_barcode && $printing_option === 'pos'){ ?><div class="invoice-barcode-wrap"><?= printing_invoice_barcode_html($invoice['invoice_no'], 0.9, 36); ?></div><?php } ?><div class="footer">Thank you for your cooperation.</div><?= printing_powered_by_html(); ?></div>
+        <div class="print-end"><?= print_promo_html($conn); ?><?php if($show_invoice_barcode && $printing_option === 'pos'){ ?><div class="invoice-barcode-wrap"><?= printing_invoice_barcode_html($invoice['invoice_no'], 0.9, 36); ?></div><?php } ?><div class="footer"><?= htmlspecialchars(print_thanks_text($conn)); ?></div><?= printing_powered_by_html(); ?></div>
     </div></div>
 </body>
 </html>

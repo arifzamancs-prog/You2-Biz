@@ -51,12 +51,15 @@ function product_barcodes_for_items($conn, $user_id, $items)
     $used = [];
     $result = mysqli_query($conn, "SELECT product_id, variant_name, barcode FROM product_barcodes WHERE user_id={$user_id}");
 
+    $by_lower = [];
     while($row = mysqli_fetch_assoc($result)){
         $map[(int)$row['product_id']][(string)$row['variant_name']] = $row['barcode'];
+        $by_lower[(int)$row['product_id']][mb_strtolower((string)$row['variant_name'])] = (string)$row['variant_name'];
         $used[strtoupper($row['barcode'])] = true;
     }
 
     $insert = mysqli_prepare($conn, 'INSERT INTO product_barcodes (user_id, product_id, variant_name, barcode) VALUES (?,?,?,?)');
+    $rename = mysqli_prepare($conn, 'UPDATE product_barcodes SET variant_name=? WHERE user_id=? AND product_id=? AND variant_name=?');
 
     foreach($items as $item){
         $product_id = (int)$item['product']['id'];
@@ -64,6 +67,18 @@ function product_barcodes_for_items($conn, $user_id, $items)
 
         if(isset($map[$product_id][$variant])){
             continue;
+        }
+
+        // The variant was renamed only in letter case (e.g. after a category change): keep its barcode.
+        $saved_name = $by_lower[$product_id][mb_strtolower($variant)] ?? null;
+        if($saved_name !== null && $saved_name !== $variant){
+            mysqli_stmt_bind_param($rename, 'siis', $variant, $user_id, $product_id, $saved_name);
+            if(mysqli_stmt_execute($rename)){
+                $map[$product_id][$variant] = $map[$product_id][$saved_name];
+                unset($map[$product_id][$saved_name]);
+                $by_lower[$product_id][mb_strtolower($variant)] = $variant;
+                continue;
+            }
         }
 
         $value = product_barcode_base($item['product']);
@@ -112,8 +127,17 @@ function product_barcode_lookup_map($conn, $user_id, $products, $variant_map)
     while($row = mysqli_fetch_assoc($result)){
         // A product-level label of a product with variants: the variant is picked on the invoice.
         $variant = (string)$row['variant_name'];
-        if($variant === '' && !empty($variant_map[(int)$row['product_id']])){
+        $current = array_map('strval', $variant_map[(int)$row['product_id']] ?? []);
+        if($variant === '' && $current){
             $variant = null;
+        }elseif($variant !== '' && !in_array($variant, $current, true)){
+            // Label printed before the product's variants changed (e.g. a new category):
+            // match the variant ignoring letter case, otherwise let the cashier pick it.
+            $match = null;
+            foreach($current as $name){
+                if(mb_strtolower($name) === mb_strtolower($variant)){ $match = $name; break; }
+            }
+            $variant = $match !== null ? $match : ($current ? null : '');
         }
         $add($row['barcode'], $row['product_id'], $variant);
     }
@@ -177,7 +201,7 @@ function barcode_scan_script($map)
     // Ticks the variant once the line has its variant boxes (they may arrive by AJAX).
     function pickVariant(row, variant, tries){
         const box = row.find(".variant-choice-input").filter(function(){
-            return this.value === variant || (variant === "" && this.value === "__none__");
+            return this.value.toLowerCase() === String(variant).toLowerCase() || (variant === "" && this.value === "__none__");
         });
         if(box.length){
             if(!box.prop("checked")) box.prop("checked", true).trigger("change");

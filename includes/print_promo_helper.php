@@ -164,3 +164,62 @@ function print_vat_text($conn)
     }
     return 'VAT Reg. No: ' . trim($settings['reg_no']);
 }
+
+// Closing line printed at the bottom of invoices ("Thank you for your cooperation." by default).
+const PRINT_THANKS_DEFAULT = 'Thank you for your cooperation.';
+const PRINT_THANKS_MAX_LENGTH = 150;
+
+function print_thanks_ensure_column($conn)
+{
+    static $done = false;
+    if($done){
+        return;
+    }
+    $done = true;
+    if(function_exists('schema_once') && !schema_once('print_thanks_column')){
+        return;
+    }
+    $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'print_thanks_text'");
+    if($result && mysqli_num_rows($result) === 0){
+        mysqli_query($conn, "ALTER TABLE users ADD COLUMN print_thanks_text VARCHAR(150) NOT NULL DEFAULT ''");
+    }
+}
+
+// The saved custom text ('' = use the default).
+function print_thanks_custom_text($conn)
+{
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if($company_id <= 0){
+        return '';
+    }
+    print_thanks_ensure_column($conn);
+    $result = mysqli_query($conn, "SELECT print_thanks_text FROM users WHERE id={$company_id} LIMIT 1");
+    $row = $result ? mysqli_fetch_assoc($result) : null;
+    return trim((string)($row['print_thanks_text'] ?? ''));
+}
+
+// Text to print: the company's own text, or the default.
+function print_thanks_text($conn)
+{
+    $text = print_thanks_custom_text($conn);
+    return $text !== '' ? $text : PRINT_THANKS_DEFAULT;
+}
+
+function save_print_thanks_text($conn, $text)
+{
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if($company_id <= 0){
+        return false;
+    }
+    print_thanks_ensure_column($conn);
+    $text = mb_substr(trim(preg_replace('/\s+/', ' ', (string)$text)), 0, PRINT_THANKS_MAX_LENGTH);
+    if($text === PRINT_THANKS_DEFAULT){
+        $text = ''; // keep following the default (and its translation)
+    }
+    $stmt = mysqli_prepare($conn, 'UPDATE users SET print_thanks_text=? WHERE id=?');
+    if(!$stmt){
+        return false;
+    }
+    mysqli_stmt_bind_param($stmt, 'si', $text, $company_id);
+    return mysqli_stmt_execute($stmt);
+}

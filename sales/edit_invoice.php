@@ -279,7 +279,7 @@ require_once '../includes/sidebar.php';
 
             <hr>
 
-            <table
+            <table id="edit-invoice-items"
                 class="table table-bordered">
 
                 <thead>
@@ -414,6 +414,45 @@ require_once '../includes/sidebar.php';
                 </tbody>
 
             </table>
+
+            <button type="button" id="edit-add-product" class="btn btn-success btn-sm mb-2"><i class="fas fa-plus mr-1"></i>Add Product</button>
+
+            <template id="edit-invoice-row-template">
+                <tr class="edit-new-row">
+                    <td>
+                        <select name="product_id[]" class="form-control product">
+                            <option value="">Select Product</option>
+                            <?php mysqli_data_seek($products, 0); while($p = mysqli_fetch_assoc($products)){ ?>
+                            <option value="<?= (int)$p['id']; ?>"><?= htmlspecialchars(product_option_label($p['product_name'], $p['sku'] ?? '')); ?></option>
+                            <?php } ?>
+                        </select>
+                        <?= invoice_warranty_fields_html(); ?>
+                    </td>
+                    <td class="variant-column">
+                        <input type="hidden" name="variant_name[]" class="product-variant" value="">
+                        <div class="variant-choice-list"></div>
+                    </td>
+                    <td class="stock-column"><input type="text" class="form-control stock" readonly></td>
+                    <td><input type="number" step="1" name="qty[]" value="1" class="form-control qty" required></td>
+                    <td><input type="number" step="0.01" name="price[]" value="" class="form-control price" required></td>
+                    <?php foreach($product_charges as $product_charge_id => $product_charge){ ?>
+                    <td class="product-charge-column">
+                        <input type="number" step="0.01" min="0" <?= $product_charge['charge_value_type'] === 'percent' ? 'max="100"' : ''; ?>
+                            name="item_charge[<?= (int)$product_charge_id; ?>][]"
+                            value="<?= htmlspecialchars(number_format((float)($product_charge['default_value'] ?? 0), 2, '.', '')); ?>"
+                            data-charge-type="<?= htmlspecialchars($product_charge['charge_type']); ?>"
+                            data-value-type="<?= htmlspecialchars($product_charge['charge_value_type']); ?>"
+                            class="form-control item-charge">
+                    </td>
+                    <?php } ?>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <input type="number" name="line_total[]" value="" class="form-control line_total" readonly>
+                            <button type="button" class="btn btn-outline-danger btn-sm ml-1 edit-remove-row" title="Remove this product">&times;</button>
+                        </div>
+                    </td>
+                </tr>
+            </template>
             <hr>
 
             <?php if($charge_rows){ ?><h5>Charges</h5>
@@ -573,6 +612,24 @@ value="<?= $wallet['id']; ?>"
     </div>
 
 </div>
+<script>
+// Add Product: a new blank line on this invoice; only newly added lines can be removed here.
+// jQuery loads in the footer, so wait until the page is ready.
+document.addEventListener('DOMContentLoaded', function(){
+    var $ = window.jQuery;
+    $('#edit-add-product').on('click', function(){
+        var template = document.getElementById('edit-invoice-row-template');
+        var row = $(document.importNode(template.content, true).querySelector('tr'));
+        $('#edit-invoice-items > tbody').append(row);
+        initProductSelect(row);
+        row.find('.product').select2('open');
+    });
+    $(document).on('click', '.edit-remove-row', function(){
+        $(this).closest('tr').remove();
+        calculateInvoice();
+    });
+});
+</script>
 <?= invoice_warranty_script($conn, (int)$user_id); ?>
 <?php require_once '../includes/footer.php'; ?>
 <script>

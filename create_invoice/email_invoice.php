@@ -125,7 +125,8 @@ if($company_seal_path !== '' && is_file($company_seal_path)){
 }
 $pdf->Ln(34);
 $pdf->SetFont('Arial', 'I', 9);
-$pdf->Cell(0, 7, 'Thank you for your cooperation.', 0, 1, 'C');
+$pdf_thanks_text = print_thanks_text($conn);
+$pdf->Cell(0, 7, preg_match('/[^\x20-\x7E]/', $pdf_thanks_text) ? PRINT_THANKS_DEFAULT : $pdf_thanks_text, 0, 1, 'C');
 $pdf->SetFont('Arial', '', 8);
 $pdf->Cell(0, 5, 'Powered by You2technologies.com', 0, 1, 'C');
 $pdf_content = $pdf->Output('S', 'invoice.pdf');

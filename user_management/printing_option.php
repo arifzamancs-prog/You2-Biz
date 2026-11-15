@@ -77,6 +77,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             if(!is_super_admin_user()){
                 save_print_promo_settings($conn, $_POST['print_promo_status'] ?? 'inactive', $_POST['print_promo_message'] ?? '');
                 save_print_vat_settings($conn, $_POST['print_vat_status'] ?? 'inactive', $_POST['print_vat_reg_no'] ?? '');
+                save_print_thanks_text($conn, $_POST['print_thanks_text'] ?? '');
             }
 
             if($company_seal_changed || $paid_seal_changed){
@@ -655,6 +656,22 @@ require_once '../includes/sidebar.php';
                             value="<?= htmlspecialchars($print_vat['reg_no']); ?>"
                             placeholder="e.g. 000123456-0101">
                         <small class="text-muted">Printed as "VAT Reg. No: …" only while Active.</small>
+                    </div>
+
+                    <div class="border rounded p-3 mb-3">
+                        <label class="mb-1" for="print_thanks_text">Invoice Closing Text</label>
+                        <div class="text-muted small mb-2">
+                            The line printed at the bottom of sales invoices and POS receipts.
+                        </div>
+                        <input
+                            type="text"
+                            id="print_thanks_text"
+                            name="print_thanks_text"
+                            class="form-control"
+                            maxlength="<?= PRINT_THANKS_MAX_LENGTH; ?>"
+                            value="<?= htmlspecialchars(print_thanks_text($conn)); ?>"
+                            placeholder="<?= htmlspecialchars(PRINT_THANKS_DEFAULT); ?>">
+                        <small class="text-muted">Leave it empty to use the default: "<?= htmlspecialchars(PRINT_THANKS_DEFAULT); ?>"</small>
                     </div>
                     <?php } ?>
 
