@@ -1018,6 +1018,26 @@ body{
     text-align:right;
 }
 
+/* Party box lines read "Customer : name": labels in one column, colons lined up. */
+.panel .line{
+    justify-content:flex-start;
+}
+
+.panel .label{
+    display:flex;
+    flex:0 0 90px;
+    justify-content:space-between;
+}
+
+.panel .label::after{
+    content:":";
+    padding-left:4px;
+}
+
+.panel .value{
+    text-align:left;
+}
+
 table{
     border-collapse:collapse;
     width:100%;
@@ -1025,6 +1045,11 @@ table{
 
 .items{
     margin-top:22px;
+}
+
+/* Amount columns stay on one line ("BDT 2,767,500.00"). */
+.items td.text-right{
+    white-space:nowrap;
 }
 
 th{
@@ -1224,24 +1249,19 @@ window.addEventListener('load', function () {
                 <span class="value"><?= htmlspecialchars($invoice['customer_name']); ?></span>
             </div>
 
-            <?php if(!empty($invoice['phone'])){ ?>
             <div class="line">
                 <span class="label">Phone</span>
-                <span class="value"><?= htmlspecialchars($invoice['phone']); ?></span>
+                <span class="value"><?= htmlspecialchars((string)($invoice['phone'] ?? '')); ?></span>
             </div>
-            <?php } ?>
 
-            <?php if(!empty($invoice['address'])){ ?>
             <div class="line">
                 <span class="label">Address</span>
-                <span class="value"><?= htmlspecialchars($invoice['address']); ?></span>
+                <span class="value"><?= htmlspecialchars((string)($invoice['address'] ?? '')); ?></span>
             </div>
-            <?php } ?>
         </div>
 
         <div class="invoice-meta">
-            <div class="muted">Date</div>
-            <strong><?= htmlspecialchars(app_date($invoice['invoice_date'] ?? '')); ?></strong>
+            <div><span class="muted">Date :</span> <strong><?= htmlspecialchars(app_date($invoice['invoice_date'] ?? '')); ?></strong></div>
             <?php if(!$is_eshop_invoice){ ?>
             <br>
             <span class="status <?= $status_class[$invoice['payment_status']] ?? 'status-due'; ?>">

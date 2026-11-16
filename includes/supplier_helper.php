@@ -192,6 +192,16 @@ function supplier_name_with_code($name, $code)
     return $code === '' ? (string)$name : $name . ' (ID: ' . $code . ')';
 }
 
+// Escaped HTML for prints: the "(ID: ...)" part never breaks, so on a long name it
+// moves under the name as one piece.
+function supplier_name_with_code_html($name, $code)
+{
+    $code = trim((string)$code);
+    $html = htmlspecialchars((string)$name);
+
+    return $code === '' ? $html : $html . ' <span style="white-space:nowrap">(ID: ' . htmlspecialchars($code) . ')</span>';
+}
+
 // Backwards-compatible name for existing Restaurant & Cafe callers.
 function ensure_restaurant_supplier_code_column($conn)
 {

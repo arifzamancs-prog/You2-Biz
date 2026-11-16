@@ -412,65 +412,6 @@ $recent_transactions = dashboard_rows(
     [$user_id]
 );
 
-$month_labels = [];
-$month_sales_map = [];
-$month_expense_map = [];
-
-for($i = 5; $i >= 0; $i--){
-    $key = date('Y-m', strtotime("-{$i} months"));
-    $month_labels[$key] = date('M Y', strtotime($key . '-01'));
-    $month_sales_map[$key] = 0;
-    $month_expense_map[$key] = 0;
-}
-
-$start_month = array_key_first($month_labels) . '-01';
-
-$sales_rows = dashboard_rows(
-    $conn,
-    "SELECT
-        DATE_FORMAT(bi.invoice_date,'%Y-%m') AS month_key,
-        COALESCE(SUM(bi.amount),0) AS total
-     FROM booking_invoices bi
-     LEFT JOIN booking_invoice_types bit
-        ON bit.user_id=bi.user_id
-        AND bit.type_key=bi.invoice_type
-     WHERE bi.user_id=?
-     {$booking_scope}
-     AND bi.status='confirmed'
-     AND COALESCE(bit.behavior,'income')='income'
-     AND bi.invoice_date >= ?
-     GROUP BY DATE_FORMAT(bi.invoice_date,'%Y-%m')",
-    "is",
-    [$user_id, $start_month]
-);
-
-foreach($sales_rows as $row){
-    if(isset($month_sales_map[$row['month_key']])){
-        $month_sales_map[$row['month_key']] = (float)$row['total'];
-    }
-}
-
-$expense_rows = dashboard_rows(
-    $conn,
-    "SELECT
-        DATE_FORMAT(txn_date,'%Y-%m') AS month_key,
-        COALESCE(SUM(amount),0) AS total
-     FROM expenses
-     WHERE user_id=?
-     {$expense_scope}
-     AND approval_status='approved'
-     AND txn_date >= ?
-     GROUP BY DATE_FORMAT(txn_date,'%Y-%m')",
-    "is",
-    [$user_id, $start_month]
-);
-
-foreach($expense_rows as $row){
-    if(isset($month_expense_map[$row['month_key']])){
-        $month_expense_map[$row['month_key']] = (float)$row['total'];
-    }
-}
-
 $wallet_labels = array_map(function($wallet){
     return $wallet['wallet_name'];
 }, $wallets);
@@ -487,11 +428,6 @@ if (project_package_company_type($conn, $user_id) === 'Travel Agency') {
     require_once 'includes/travel_booking_helper.php';
     if (travel_booking_schema($conn)) {
         $total_sales = travel_sales_total($conn, $user_id, date('Y-m-d'), date('Y-m-d'));
-        foreach (travel_sales_by_period($conn, $user_id, $start_month, date('Y-m-d'), 'month') as $month_key => $amount) {
-            if (isset($month_sales_map[$month_key])) {
-                $month_sales_map[$month_key] = $amount;
-            }
-        }
         $dashboard_invoice_print_url = 'travel/booking_view.php';
         $recent_invoices = dashboard_rows(
             $conn,
@@ -505,6 +441,127 @@ if (project_package_company_type($conn, $user_id) === 'Travel Agency') {
             "i",
             [$user_id]
         );
+    }
+}
+
+// Business chart: daily, weekly, monthly and yearly bars for the selected branch. Sales
+// come from the same source as Today's Sale; due bars show what is still unpaid on the
+// invoices / purchases dated in that period. Customer due exists only with sales invoices.
+$chart_today = new DateTimeImmutable('today');
+$chart_from = $chart_today->modify('first day of this month')->modify('-11 months')->format('Y-m-d');
+$chart_this_year = (int)$chart_today->format('Y');
+$chart_year_from = ($chart_this_year - 4) . '-01-01';
+$chart_series = [
+    'sales' => ['label' => 'Sales', 'color' => '#28a745'],
+    'purchase' => ['label' => 'Purchase', 'color' => '#ffc107'],
+    'expense' => ['label' => 'Expense', 'color' => '#dc3545'],
+    'customer_due' => ['label' => 'Customer Due', 'color' => '#007bff'],
+    'supplier_due' => ['label' => 'Supplier Due', 'color' => '#6f42c1'],
+];
+$chart_sources = [
+    'purchase' => ["SELECT {period} AS period, COALESCE(SUM(total_amount),0) AS total FROM purchases WHERE user_id=? {$purchase_scope} AND purchase_date >= ? GROUP BY period", 'purchase_date'],
+    'expense' => ["SELECT {period} AS period, COALESCE(SUM(amount),0) AS total FROM expenses WHERE user_id=? {$expense_scope} AND approval_status='approved' AND txn_date >= ? GROUP BY period", 'txn_date'],
+    'supplier_due' => ["SELECT {period} AS period, COALESCE(SUM(due_amount),0) AS total FROM purchases WHERE user_id=? {$purchase_scope} AND purchase_date >= ? GROUP BY period", 'purchase_date'],
+];
+$chart_days = [];
+$chart_years = [];
+
+if ($dashboard_travel_plane && function_exists('travel_sales_by_period')) {
+    $chart_days['sales'] = travel_sales_by_period($conn, $user_id, $chart_from, $chart_today->format('Y-m-d'), 'day');
+    $chart_years['sales'] = [];
+    foreach (travel_sales_by_period($conn, $user_id, $chart_year_from, $chart_today->format('Y-m-d'), 'year') as $year_key => $amount) {
+        $chart_years['sales'][(int)$year_key] = $amount;
+    }
+} elseif ($dashboard_uses_sales_invoices) {
+    $chart_sources['sales'] = ["SELECT {period} AS period, COALESCE(SUM(total_amount),0) AS total FROM invoices WHERE user_id=? {$invoice_scope} AND accounting_status='posted' AND invoice_date >= ? GROUP BY period", 'invoice_date'];
+} else {
+    $chart_sources['sales'] = ["SELECT {period} AS period, COALESCE(SUM(bi.amount),0) AS total
+         FROM booking_invoices bi
+         LEFT JOIN booking_invoice_types bit
+            ON bit.user_id=bi.user_id
+            AND bit.type_key=bi.invoice_type
+         WHERE bi.user_id=?
+         {$booking_scope}
+         AND bi.status='confirmed'
+         AND COALESCE(bit.behavior,'income')='income'
+         AND bi.invoice_date >= ?
+         GROUP BY period", 'bi.invoice_date'];
+}
+
+if ($dashboard_uses_sales_invoices && !$dashboard_travel_plane) {
+    $chart_sources['customer_due'] = ["SELECT {period} AS period, COALESCE(SUM(due_amount),0) AS total FROM invoices WHERE user_id=? {$invoice_scope} AND accounting_status='posted' AND invoice_date >= ? GROUP BY period", 'invoice_date'];
+} else {
+    unset($chart_series['customer_due']);
+}
+
+$chart_days = $chart_days ?? [];
+$chart_years = $chart_years ?? [];
+
+foreach($chart_series as $key => $series){
+    if(!isset($chart_sources[$key])){
+        continue;
+    }
+
+    [$sql, $date_column] = $chart_sources[$key];
+    $chart_days[$key] = [];
+    $chart_years[$key] = [];
+
+    foreach(dashboard_rows($conn, str_replace('{period}', $date_column, $sql), "is", [$user_id, $chart_from]) as $row){
+        $chart_days[$key][$row['period']] = (float)$row['total'];
+    }
+
+    foreach(dashboard_rows($conn, str_replace('{period}', "YEAR({$date_column})", $sql), "is", [$user_id, $chart_year_from]) as $row){
+        $chart_years[$key][(int)$row['period']] = (float)$row['total'];
+    }
+}
+
+// [label, first day, last day] of every bar; weeks run Saturday to Friday.
+$chart_ranges = ['daily' => [], 'weekly' => [], 'monthly' => []];
+
+for($i = 29; $i >= 0; $i--){
+    $day = $chart_today->modify("-{$i} days");
+    $chart_ranges['daily'][] = [($day->format('d M')), $day->format('Y-m-d'), $day->format('Y-m-d')];
+}
+
+$week_start = $chart_today->modify('-' . (((int)$chart_today->format('w') + 1) % 7) . ' days');
+
+for($i = 11; $i >= 0; $i--){
+    $start = $week_start->modify('-' . ($i * 7) . ' days');
+    $chart_ranges['weekly'][] = [($start->format('d M')), $start->format('Y-m-d'), $start->modify('+6 days')->format('Y-m-d')];
+}
+
+for($i = 11; $i >= 0; $i--){
+    $month = $chart_today->modify('first day of this month')->modify("-{$i} months");
+    $chart_ranges['monthly'][] = [($month->format('M Y')), $month->format('Y-m-d'), $month->format('Y-m-t')];
+}
+
+$business_chart = ['series' => $chart_series, 'periods' => []];
+
+foreach($chart_ranges as $period => $ranges){
+    $business_chart['periods'][$period] = ['labels' => array_column($ranges, 0), 'data' => []];
+
+    foreach(array_keys($chart_series) as $key){
+        foreach($ranges as [, $from, $to]){
+            $total = 0;
+
+            foreach($chart_days[$key] ?? [] as $day => $amount){
+                if($day >= $from && $day <= $to){
+                    $total += $amount;
+                }
+            }
+
+            $business_chart['periods'][$period]['data'][$key][] = round($total, 2);
+        }
+    }
+}
+
+$business_chart['periods']['yearly'] = ['labels' => [], 'data' => []];
+
+for($year = $chart_this_year - 4; $year <= $chart_this_year; $year++){
+    $business_chart['periods']['yearly']['labels'][] = ((string)$year);
+
+    foreach(array_keys($chart_series) as $key){
+        $business_chart['periods']['yearly']['data'][$key][] = round($chart_years[$key][$year] ?? 0, 2);
     }
 }
 
@@ -685,13 +742,29 @@ require_once 'includes/sidebar.php';
 
             <div class="card-header">
                 <h3 class="card-title">
-                    Sales vs Expenses
+                    Business Overview
                 </h3>
+
+                <div class="card-tools">
+                    <div class="btn-group btn-group-sm" id="businessChartPeriods">
+                        <button type="button" class="btn btn-outline-success active" data-period="daily">Daily</button>
+                        <button type="button" class="btn btn-outline-success" data-period="weekly">Weekly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="monthly">Monthly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="yearly">Yearly</button>
+                    </div>
+                </div>
             </div>
 
             <div class="card-body">
+                <div class="btn-group btn-group-sm flex-wrap mb-3" id="businessChartMetrics">
+                    <?php foreach($business_chart['series'] as $metric_key => $metric){ ?>
+                        <button type="button" class="btn btn-outline-secondary<?= $metric_key === 'sales' ? ' active' : ''; ?>" data-metric="<?= htmlspecialchars($metric_key); ?>"><?= htmlspecialchars($metric['label']); ?></button>
+                    <?php } ?>
+                    <button type="button" class="btn btn-outline-secondary" data-metric="all">All</button>
+                </div>
+
                 <div style="height:320px;">
-                    <canvas id="salesExpenseChart"></canvas>
+                    <canvas id="businessChart"></canvas>
                 </div>
             </div>
 
@@ -900,30 +973,35 @@ require_once 'includes/sidebar.php';
 $page_script = '
 <script>
 $(function(){
-    const salesExpenseCanvas = document.getElementById("salesExpenseChart");
+    const businessCanvas = document.getElementById("businessChart");
+    const businessData = ' . json_encode($business_chart, JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_TAG) . ';
+    const businessKeys = Object.keys(businessData.series);
     const walletCanvas = document.getElementById("walletChart");
 
-    if(salesExpenseCanvas){
-        new Chart(salesExpenseCanvas, {
+    let businessChart = null;
+
+    if(businessCanvas){
+        const firstPeriod = businessData.periods.daily;
+
+        businessChart = new Chart(businessCanvas, {
             type: "bar",
             data: {
-                labels: ' . json_encode(array_values($month_labels)) . ',
-                datasets: [
-                    {
-                        label: "Sales",
-                        data: ' . json_encode(array_values($month_sales_map)) . ',
-                        backgroundColor: "#28a745"
-                    },
-                    {
-                        label: "Expenses",
-                        data: ' . json_encode(array_values($month_expense_map)) . ',
-                        backgroundColor: "#dc3545"
-                    }
-                ]
+                labels: firstPeriod.labels,
+                datasets: businessKeys.map(function(key){
+                    return {
+                        label: businessData.series[key].label,
+                        data: firstPeriod.data[key],
+                        backgroundColor: businessData.series[key].color,
+                        hidden: key !== "sales"
+                    };
+                })
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
                 scales: {
                     y: {
                         beginAtZero: true
@@ -932,6 +1010,37 @@ $(function(){
             }
         });
     }
+
+    $("#businessChartPeriods").on("click", "button", function(){
+        const period = businessData.periods[$(this).data("period")];
+
+        if(!businessChart || !period){
+            return;
+        }
+
+        $(this).addClass("active").siblings().removeClass("active");
+        businessChart.data.labels = period.labels;
+        businessKeys.forEach(function(key, index){
+            businessChart.data.datasets[index].data = period.data[key];
+        });
+        businessChart.update();
+    });
+
+    // One metric at a time, or every metric side by side with a legend.
+    $("#businessChartMetrics").on("click", "button", function(){
+        const metric = $(this).data("metric");
+
+        if(!businessChart){
+            return;
+        }
+
+        $(this).addClass("active").siblings().removeClass("active");
+        businessKeys.forEach(function(key, index){
+            businessChart.data.datasets[index].hidden = metric !== "all" && key !== metric;
+        });
+        businessChart.options.plugins.legend.display = metric === "all";
+        businessChart.update();
+    });
 
     if(walletCanvas){
         new Chart(walletCanvas, {
