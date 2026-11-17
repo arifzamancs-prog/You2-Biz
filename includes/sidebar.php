@@ -737,6 +737,12 @@ if(
                         }
                         sidebar_tree('Customer Manage', 'fas fa-users', $sidebar_customer_items);
                     }
+                    if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency' && manager_has_permission('sales')){
+                        sidebar_tree('Visa Processing', 'fas fa-passport', [
+                            ['href' => app_path('travel/visa_processing.php?entry=new'), 'label' => 'New Entry'],
+                            ['href' => app_path('travel/visa_processing.php'), 'label' => 'Entry List'],
+                        ]);
+                    }
                     if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency' && manager_has_permission('suppliers')){
                         sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', array_merge([
                             ['href' => app_path('suppliers/index.php'), 'label' => supplier_display_text('Suppliers')],
@@ -928,6 +934,15 @@ if(
                         ],
                     ] : [])
                 );
+
+                // Visa Processing register of a travel agency; Form Settings is for the administrator.
+                if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency'){
+                    sidebar_tree('Visa Processing', 'fas fa-passport', [
+                        ['href' => app_path('travel/visa_processing.php?entry=new'), 'label' => 'New Entry'],
+                        ['href' => app_path('travel/visa_processing.php'), 'label' => 'Entry List'],
+                        ['href' => app_path('travel/visa_processing_settings.php'), 'label' => 'Form Settings'],
+                    ]);
+                }
 
                 // Travel agencies keep Vendors (airlines, consolidators, hotels, embassies) without stock purchases.
                 if(project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Travel Agency'){
@@ -1338,7 +1353,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 : ($sidebar_is_car_parking
                     ? json_encode(['Action', 'Wallets', 'Parking Setup', 'Staff Manage'])
                     : (travel_agency_active()
-                    ? json_encode(array_map('company_menu_label', ['Sales / Invoice', 'Wallets', $project_package_labels['module'], 'Customer Manage', supplier_display_text('Suppliers'), 'Lead Management', 'Staff Manage']))
+                    ? json_encode(array_map('company_menu_label', ['Sales / Invoice', 'Visa Processing', 'Wallets', $project_package_labels['module'], 'Customer Manage', supplier_display_text('Suppliers'), 'Lead Management', 'Staff Manage']))
                     : json_encode(array_map('company_menu_label', ['Sales / Invoice', 'Products', supplier_display_text('Suppliers'), 'Main Warehouse', 'Sales', 'Wallets', $project_package_labels['module'], 'Customer Manage', 'Lead Management'])))))) ?>;
     let previousItem = operationsHeader;
 
