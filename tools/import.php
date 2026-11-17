@@ -191,6 +191,8 @@ function import_preflight($conn, $backup)
            count($rows) !== (int)$backup['row_counts'][$table]){
             throw new Exception('Invalid table/row count: ' . $table);
         }
+        // Manager/agent logins are a backup section, not a table: they are restored into users.
+        if($table === 'users_manager_agents') continue;
         // A table this installation never created (module not used yet) is
         // harmless when the backup holds no rows for it; skip it.
         $exists_check = mysqli_query($conn, "SHOW TABLES LIKE '" . mysqli_real_escape_string($conn, str_replace('_', '\\_', $table)) . "'");
@@ -198,7 +200,6 @@ function import_preflight($conn, $backup)
             if(count($rows) === 0) continue;
             throw new Exception('Target table missing: ' . $table);
         }
-        if($table === 'users_manager_agents') continue;
         $allowed_child_tables = ['purchase_items','invoice_items','invoice_charges',
             'invoice_item_allocations','booking_invoice_charges',
             'stock_distribution_items','stock_damage_return_items'];

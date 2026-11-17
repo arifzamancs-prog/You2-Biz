@@ -12,6 +12,10 @@ require_once '../includes/sidebar.php';
 $user_id = $_SESSION['user_id'];
 ensure_fifo_inventory_tables($conn);
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
+// Inventory & Sales: warranty and product serials of the received pieces.
+require_once '../includes/service_warranty_helper.php';
+$purchase_serial_enabled = product_serial_schema($conn);
+if($purchase_serial_enabled) product_warranty_schema($conn);
 
 $purchase_id = isset($_GET['id'])
     ? (int)$_GET['id']
@@ -105,6 +109,15 @@ mysqli_stmt_execute($stmt);
 $items =
     mysqli_stmt_get_result($stmt);
 $grouped_items = [];
+// Serials this purchase brought in, handed out to the lines of each product in order.
+$purchase_line_serials = [];
+$pw_map = [];
+if($purchase_serial_enabled){
+    $serial_rows = mysqli_query($conn, 'SELECT product_id, serial_no FROM product_serials WHERE user_id=' . (int)$user_id . " AND source_type='purchase' AND source_id=" . (int)$purchase_id . ' ORDER BY id');
+    while($serial_rows && ($serial_row = mysqli_fetch_assoc($serial_rows))) $purchase_line_serials[(int)$serial_row['product_id']][] = $serial_row['serial_no'];
+    $pw_rows = mysqli_query($conn, 'SELECT id, warranty_months, serial_enabled FROM products WHERE user_id=' . (int)$user_id . ' AND serial_enabled = 1');
+    while($pw_rows && ($pw_row = mysqli_fetch_assoc($pw_rows))) $pw_map[(int)$pw_row['id']] = [(int)$pw_row['warranty_months'], 1];
+}
 while($line = mysqli_fetch_assoc($items)){
     $key = $line['product_id'] . ':' . $line['unit_cost'];
     if(!isset($grouped_items[$key])){
@@ -256,6 +269,25 @@ value="<?= $product['id']; ?>"
 <?php } ?>
 
 </select>
+<?php if($purchase_serial_enabled){
+    $line_pid = (int)$item['product_id'];
+    $line_serial_on = !empty($pw_map[$line_pid]);
+    $line_serials = $line_serial_on ? array_splice($purchase_line_serials[$line_pid], 0, (int)$item['quantity']) : [];
+    if(!isset($purchase_line_serials[$line_pid])) $purchase_line_serials[$line_pid] = [];
+    $line_warranty = $item['warranty_months'] ?? null;
+    if($line_warranty === null && $line_serial_on) $line_warranty = $pw_map[$line_pid][0];
+?>
+<div class="pw-box mt-1" style="<?= $line_serial_on ? '' : 'display:none' ?>" data-pid="<?= $line_pid ?>" data-serials="<?= htmlspecialchars(implode("
+", $line_serials), ENT_QUOTES) ?>">
+    <div class="input-group input-group-sm" style="max-width:230px">
+        <div class="input-group-prepend"><span class="input-group-text" title="Warranty"><i class="fas fa-shield-alt text-success mr-1"></i>Warranty</span></div>
+        <input type="number" min="0" max="600" step="1" name="line_warranty[]" class="form-control pw-months" value="<?= $line_serial_on && (int)$line_warranty > 0 ? (int)$line_warranty : '' ?>" title="Warranty (months)">
+        <div class="input-group-append"><span class="input-group-text">mo</span></div>
+    </div>
+    <input type="hidden" name="line_serials[]" class="pw-serial-json">
+    <div class="pw-serials mt-1"></div>
+</div>
+<?php } ?>
 
 </td>
 
@@ -264,6 +296,7 @@ value="<?= $product['id']; ?>"
 <input
 type="number"
 step="0.01"
+min="0.01"
 name="cost_price[]"
 value="<?= $item['unit_cost']; ?>"
 class="form-control cost_price"
@@ -502,7 +535,7 @@ $(function(){
             data: {product_id: id},
             dataType: "json",
             success: function(res){
-                row.find(".cost_price").val(parseFloat(res.cost_price || 0).toFixed(2));
+                row.find(".cost_price").val(parseFloat(res.cost_price || 0) > 0 ? parseFloat(res.cost_price).toFixed(2) : "");
                 let variantSelect=row.find(".variant-fields");
                 variantSelect.empty();
                 row.find('.qty').prop('readonly', (res.variants || []).length > 0).val((res.variants || []).length ? 0 : 1);
@@ -635,6 +668,45 @@ function calculateDue(){
 
 </script>
 SCRIPT;
+if($purchase_serial_enabled){
+    $page_script .= product_serial_taken_script($conn, (int)$user_id, ['purchase', (int)$purchase_id]) . product_serial_box_script() . '<script>
+// Edit purchase: warranty and one serial for each piece of a Product Serial product.
+$(function(){
+    var info = ' . json_encode((object)$pw_map) . ';
+    function refresh(row){
+        var box = row.find(".pw-box"); if(!box.length) return;
+        var pid = String(row.find(".product").val() || "");
+        var meta = info[pid] || [0, 0];
+        box.toggle(!!meta[1]);
+        if(String(box.attr("data-pid")) !== pid){
+            box.attr("data-pid", pid).attr("data-serials", "");
+            box.find(".pw-months").val(meta[1] && meta[0] > 0 ? meta[0] : "");
+            box.find(".pw-serials").empty();
+        }
+        var holder = box.find(".pw-serials");
+        if(!meta[1]){ holder.empty(); collect(row); return; }
+        var qty = Math.max(0, parseInt(row.find(".qty").val(), 10) || 0);
+        var item = holder.children().first();
+        if(!item.length){
+            item = $("<div>").append($("<div>").addClass("ps-box").attr("data-value", box.attr("data-serials") || ""));
+            holder.append(item); window.psBoxInit(item[0]);
+        }
+        window.psBoxSetNeed(item.find(".ps-box")[0], qty);
+        collect(row);
+    }
+    function collect(row){
+        var values = row.find(".pw-serials .ps-tag").map(function(){ return this.dataset.serial; }).get();
+        row.find(".pw-serial-json").val(values.length ? JSON.stringify({"__none__": values.join("\n")}) : "");
+    }
+    function refreshAll(){ $("#purchaseTable tbody tr").each(function(){ refresh($(this)); }); }
+    $(document).on("change input", "#purchaseTable .product, #purchaseTable .qty", function(){ refresh($(this).closest("tr")); });
+    document.addEventListener("ps:change", function(e){ var row = $(e.target).closest("tr"); if(row.length) collect(row); });
+    $("#addRow").on("click", function(){ var row = $("#purchaseTable tbody tr:last"); var box = row.find(".pw-box"); box.attr("data-pid", "").attr("data-serials", ""); box.find(".pw-serials").empty(); box.find(".pw-months").val(""); row.find(".pw-serial-json").val(""); refresh(row); });
+    $("form").on("submit", function(){ $("#purchaseTable tbody tr").each(function(){ collect($(this)); }); });
+    refreshAll();
+});
+</script>';
+}
 
 require_once '../includes/footer.php';
 ?>

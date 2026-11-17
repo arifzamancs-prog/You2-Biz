@@ -42,11 +42,13 @@ try{
     $invoice_id     = (int)$_POST['invoice_id'];
     require_branch_record_access($conn, 'invoices', $invoice_id, 'invoice_list.php');
     $customer_id    = (int)$_POST['customer_id'];
-    // The invoice date can be corrected, but only to a real date that is not in the future.
-    $invoice_date   = trim((string)($_POST['invoice_date'] ?? ''));
-    $invoice_date_check = DateTime::createFromFormat('!Y-m-d', $invoice_date);
-    if(!$invoice_date_check || $invoice_date_check->format('Y-m-d') !== $invoice_date || $invoice_date > date('Y-m-d')){
-        throw new Exception('Enter a valid invoice date (today or earlier).');
+    // The invoice date cannot be changed on edit: the saved date is kept.
+    $date_stmt = mysqli_prepare($conn, 'SELECT invoice_date FROM invoices WHERE id=? AND user_id=? LIMIT 1');
+    mysqli_stmt_bind_param($date_stmt, 'ii', $invoice_id, $user_id);
+    mysqli_stmt_execute($date_stmt);
+    $invoice_date = (string)(mysqli_fetch_row(mysqli_stmt_get_result($date_stmt))[0] ?? '');
+    if($invoice_date === ''){
+        throw new Exception('Invoice not found.');
     }
 
     // Product charges turn each posted base price into the final unit price.
@@ -217,6 +219,9 @@ if($due_amount <= 0){
     OLD STOCK RESTORE
     ==========================================
     */
+
+    // The old lines' serials go back to stock; the new lines take theirs again.
+    product_serial_release_invoice($conn, $user_id, $invoice_id);
 
     $sql = "SELECT id, product_id, quantity
             FROM invoice_items
@@ -513,7 +518,9 @@ if(!product_variant_is_valid($conn, $product_id, $user_id, $variant_name)){
 
         // Warranty and serial of this sold line (Inventory & Sales).
         if($invoice_warranty_enabled){
-            invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $_POST['item_serial'][$key] ?? '');
+            // Serials in stock leave stock with this line; other serials are kept for warranty.
+        $line_serial_text = product_serial_invoice_line($conn, $user_id, $invoice_id, $invoice_item_id, $product_id, $variant_name, $qty, $_POST['item_serial'][$key] ?? '');
+        invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $line_serial_text);
         }
 
         if(isset($item_charge_breakdown[$key])){

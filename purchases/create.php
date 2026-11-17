@@ -14,6 +14,10 @@ if($purchase_vendor_codes){
     supplier_code_fill_missing($conn, (int)$user_id);
 }
 $housing_purchase = ($_SESSION['company_type'] ?? '') === 'Housing';
+// Inventory & Sales: warranty and product serials can be given while receiving.
+require_once '../includes/service_warranty_helper.php';
+$purchase_serial_enabled = product_serial_schema($conn);
+if($purchase_serial_enabled) product_warranty_schema($conn);
 $hide_purchase_product_add = in_array(
     normalize_company_type($_SESSION['company_type'] ?? ''),
     ['Stock Product', 'Fashion house'],
@@ -133,6 +137,10 @@ require_once '../includes/sidebar.php';
 <?php if(isset($_SESSION['success'])){ ?>
     <div class="alert alert-success">
         <?= htmlspecialchars($_SESSION['success']); ?>
+        <?php if(!empty($_SESSION['purchase_print_id'])){ $purchase_print_id = (int)$_SESSION['purchase_print_id']; unset($_SESSION['purchase_print_id']); ?>
+            <a href="print_purchase.php?id=<?= $purchase_print_id; ?>" target="_blank" class="btn btn-sm btn-light text-success font-weight-bold ml-2" style="color:#28a745 !important"><i class="fas fa-print mr-1"></i>Print</a>
+            <script>window.open('print_purchase.php?id=<?= $purchase_print_id; ?>', '_blank');</script>
+        <?php } ?>
     </div>
     <?php unset($_SESSION['success']); ?>
 <?php } ?>
@@ -198,13 +206,24 @@ require_once '../includes/sidebar.php';
     <?php if(!$hide_new_product_option){ ?><div class="new-product-box mt-2" style="display:none;">
         <input type="text" name="new_product_name[]" class="form-control new-product-name" placeholder="Enter product name">
     </div><?php } ?>
+    <?php if($purchase_serial_enabled){ ?><div class="pw-box mt-1" style="display:none">
+        <div>
+        <div class="input-group input-group-sm" style="max-width:230px">
+            <div class="input-group-prepend"><span class="input-group-text" title="Warranty"><i class="fas fa-shield-alt text-success mr-1"></i>Warranty</span></div>
+            <input type="number" min="0" max="600" step="1" name="line_warranty[]" class="form-control pw-months" title="Warranty (months)">
+            <div class="input-group-append"><span class="input-group-text">mo</span></div>
+        </div>
+        <input type="hidden" name="line_serials[]" class="pw-serial-json">
+        <div class="pw-serials mt-1"></div>
+        </div>
+    </div><?php } ?>
 </td>
 <td class="variant-column"><div class="product-variant-quantities text-muted small">No variant</div></td>
 <?php if(!$housing_purchase){ ?><td>
     <input type="text" class="form-control product_stock" readonly>
 </td><?php } ?>
 <td>
-    <input type="number" step="0.01" name="cost_price[]" class="form-control cost_price" required>
+    <input type="number" step="0.01" min="0.01" name="cost_price[]" class="form-control cost_price" required title="Purchase price is required">
 </td>
 <?php if(!$housing_purchase){ ?><td>
     <input type="number" step="0.01" min="0" name="sale_price[]" class="form-control sale_price" value="0" required>
@@ -278,7 +297,7 @@ require_once '../includes/sidebar.php';
     <textarea name="notes" class="form-control" rows="3"></textarea>
 </div>
 
-<button type="submit" class="btn btn-primary">Save Purchase</button>
+<button type="submit" class="btn btn-primary"><i class="fas fa-print mr-1"></i>Save Purchase &amp; Print</button>
 
 </form>
 
@@ -414,7 +433,7 @@ $(function(){
         if(id === "__new__"){
             newBox.show();
             nameInput.prop("required", true);
-            row.find(".cost_price").val("0");
+            row.find(".cost_price").val("");
             row.find(".sale_price").val("0");
             row.find(".product_stock").val(0);
             row.find(".product-variant-quantities").text("No variant");
@@ -445,7 +464,7 @@ $(function(){
             data: {product_id: id},
             dataType: "json",
             success: function(res){
-                row.find(".cost_price").val(res.cost_price);
+                row.find(".cost_price").val(parseFloat(res.cost_price) > 0 ? res.cost_price : "");
                 row.find(".sale_price").val(res.sale_price);
                 row.find(".product_stock").val(res.stock);
                 let variant = row.find(".product-variant-quantities");
@@ -625,6 +644,70 @@ SCRIPT;
 // E-shop active: a photo for each variant received (shown only on the e-shop).
 require_once '../includes/eshop_variant_image_helper.php';
 if(eshop_variant_images_enabled($conn, (int)$user_id)) $page_script .= eshop_variant_photo_script('.variant-qty', ['^variant_quantity', 'variant_photo']);
+if($purchase_serial_enabled){
+    $pw_map = [];
+    $pw_rows = mysqli_query($conn, 'SELECT id, warranty_months, serial_enabled FROM products WHERE user_id=' . (int)$user_id . ' AND (warranty_months > 0 OR serial_enabled = 1)');
+    while($pw_rows && ($pw_row = mysqli_fetch_assoc($pw_rows))) $pw_map[(int)$pw_row['id']] = [(int)$pw_row['warranty_months'], (int)$pw_row['serial_enabled']];
+    $page_script .= product_serial_taken_script($conn, (int)$user_id) . product_serial_box_script() . '<script>
+// Purchase receive: warranty (months) of the product and one serial for each piece received.
+$(function(){
+    var info = ' . json_encode((object)$pw_map) . ';
+    function refresh(row){
+        var box = row.find(".pw-box"); if(!box.length) return;
+        var pid = String(row.find(".product").val() || "");
+        var known = /^\d+$/.test(pid);
+        var meta = info[pid] || [0, 0];
+        // Only a product with Product Serial on has warranty and serials here.
+        box.toggle(known && !!meta[1]);
+        if(row.data("pw-pid") !== pid){
+            row.data("pw-pid", pid);
+            box.find(".pw-months").val(meta[1] && meta[0] > 0 ? meta[0] : "");
+            box.find(".pw-serials").empty();
+        }
+        var holder = box.find(".pw-serials");
+        if(!known || !meta[1]){ holder.empty(); collect(row); return; }
+        var targets = [];
+        var variants = row.find(".variant-qty");
+        if(variants.length){
+            variants.each(function(){ var m = this.name.match(/\]\[(.*)\]$/); targets.push({key: m ? m[1] : "", label: m ? m[1] : "", qty: Math.max(0, parseInt(this.value, 10) || 0), variant: true}); });
+        }else if(!row.data("has-variants")){
+            targets.push({key: "__none__", label: "", qty: Math.max(0, parseInt(row.find(".qty").val(), 10) || 0), variant: false});
+        }
+        var keep = {}; targets.forEach(function(t){ keep[t.key] = 1; });
+        holder.children().each(function(){ if(!keep[$(this).attr("data-key")]) $(this).remove(); });
+        targets.forEach(function(t){
+            var item = holder.children().filter(function(){ return $(this).attr("data-key") === t.key; });
+            if(!item.length){
+                item = $("<div>").addClass("mb-1").attr("data-key", t.key);
+                if(t.label) item.append($("<div>").addClass("small text-muted").text(t.label + " serials"));
+                item.append($("<div>").addClass("ps-box"));
+                holder.append(item); window.psBoxInit(item[0]);
+            }
+            item.toggle(!(t.variant && t.qty === 0 && !item.find(".ps-tag").length));
+            window.psBoxSetNeed(item.find(".ps-box")[0], t.qty);
+        });
+        collect(row);
+    }
+    // The serials of a line travel as JSON {variant: "A1\nA2"} in line_serials[].
+    function collect(row){
+        var data = {};
+        row.find(".pw-serials").children().each(function(){
+            var values = $(this).find(".ps-tag").map(function(){ return this.dataset.serial; }).get();
+            if(values.length) data[$(this).attr("data-key")] = values.join("\n");
+        });
+        row.find(".pw-serial-json").val(JSON.stringify(data));
+    }
+    function refreshAll(){ $("#purchaseTable tbody tr").each(function(){ refresh($(this)); }); }
+    $(document).on("change input", "#purchaseTable .product, #purchaseTable .qty, #purchaseTable .variant-qty", function(){ refresh($(this).closest("tr")); });
+    $(document).ajaxComplete(function(){ setTimeout(refreshAll, 0); });
+    document.addEventListener("ps:change", function(e){ var row = $(e.target).closest("tr"); if(row.length) collect(row); });
+    $("#addRow").on("click", function(){ var row = $("#purchaseTable tbody tr:last"); row.removeData("pw-pid"); row.find(".pw-serials").empty(); row.find(".pw-months").val(""); row.find(".pw-serial-json").val(""); refresh(row); });
+    $(document).on("click", ".removeRow", function(){ setTimeout(refreshAll, 0); });
+    $("form").on("submit", function(){ refreshAll(); });
+    refreshAll();
+});
+</script>';
+}
 
 require_once "../includes/footer.php";
 

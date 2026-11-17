@@ -266,12 +266,11 @@ require_once '../includes/sidebar.php';
                     </label>
 
                     <input
-                        type="date"
+                        type="text"
                         class="form-control"
-                        name="invoice_date"
-                        value="<?= htmlspecialchars((string)$invoice['invoice_date']); ?>"
-                        max="<?= date('Y-m-d'); ?>"
-                        required>
+                        value="<?= htmlspecialchars(app_date($invoice['invoice_date'])); ?>"
+                        readonly
+                        title="The invoice date cannot be changed.">
 
                 </div>
 
@@ -287,7 +286,7 @@ require_once '../includes/sidebar.php';
                 <tr>
 
                     <th width="35%">Product</th>
-                    <th class="variant-column">Variant</th>
+                    <th class="variant-column d-none">Variant</th>
                     <th width="15%" class="stock-column">Stock</th>
                     <th width="12%">Qty</th>
                     <th width="15%">Price</th>
@@ -345,7 +344,7 @@ require_once '../includes/sidebar.php';
 
                         </td>
 
-                        <td class="variant-column">
+                        <td class="variant-column d-none">
                             <input type="hidden" name="variant_name[]" class="product-variant" value="<?= htmlspecialchars($item['variant_name'] ?? ''); ?>">
                             <div class="variant-choice-list"></div>
                         </td>
@@ -428,7 +427,7 @@ require_once '../includes/sidebar.php';
                         </select>
                         <?= invoice_warranty_fields_html(); ?>
                     </td>
-                    <td class="variant-column">
+                    <td class="variant-column d-none">
                         <input type="hidden" name="variant_name[]" class="product-variant" value="">
                         <div class="variant-choice-list"></div>
                     </td>
@@ -626,11 +625,12 @@ document.addEventListener('DOMContentLoaded', function(){
     });
     $(document).on('click', '.edit-remove-row', function(){
         $(this).closest('tr').remove();
+        updateEditVariantColumn();
         calculateInvoice();
     });
 });
 </script>
-<?= invoice_warranty_script($conn, (int)$user_id); ?>
+<?= invoice_warranty_script($conn, (int)$user_id, (int)$invoice_id); ?>
 <?php require_once '../includes/footer.php'; ?>
 <script>
 
@@ -939,6 +939,12 @@ function initProductSelect(context){
 
 }
 
+// The Variant column shows only while a line has a product with variants (as on Create Invoice).
+function updateEditVariantColumn(){
+    var show = $("#edit-invoice-items tbody tr").toArray().some(function(row){ return $(row).find(".product").val() && $(row).data("has-variants") === true; });
+    $("#edit-invoice-items .variant-column").toggleClass("d-none", !show);
+}
+
 let editInvoiceVariantSequence = 0;
 function renderEditVariantChoices(row, variants, selected){
     const list=row.find('.variant-choice-list').empty();
@@ -967,6 +973,8 @@ function loadProduct(row){
 
         row.find(".stock").val("");
         row.find(".price").val("");
+        row.data("has-variants", false);
+        updateEditVariantColumn();
 
         calculateInvoice();
 
@@ -995,6 +1003,8 @@ function loadProduct(row){
                    .val(res.product.is_stock_product ? res.product.available_stock : "Unlimited");
 
                 const variants=res.product.variants || [];
+                row.data("has-variants", variants.length > 0);
+                updateEditVariantColumn();
                 if(variants.length){
                     renderEditVariantChoices(row,variants,variant_name);
                     if(!variant_name){ row.find('.stock').val('Select variant'); }

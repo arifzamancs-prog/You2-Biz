@@ -34,6 +34,8 @@ try {
         product_delete_response(409, false, 'This product cannot be deleted because it already has transactions.');
     }
     if (!fifo_inventory_remove_product_opening_batches($conn, $id)) throw new RuntimeException('Batch removal failed');
+    // Serials of the deleted product go with it.
+    if(mysqli_num_rows(mysqli_query($conn, "SHOW TABLES LIKE 'product_serials'")) > 0) mysqli_query($conn, 'DELETE FROM product_serials WHERE product_id=' . (int)$id . ' AND user_id=' . (int)$user_id);
     $stmt = mysqli_prepare($conn, 'DELETE FROM products WHERE id=? AND user_id=?');
     mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);
     if (!mysqli_stmt_execute($stmt) || mysqli_stmt_affected_rows($stmt)!==1) throw new RuntimeException('Delete failed');

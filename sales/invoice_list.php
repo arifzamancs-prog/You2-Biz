@@ -103,6 +103,29 @@ $invoice_page_url = function($page) use ($date_from, $date_to, $invoice_search){
 
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
+$invoice_rows = mysqli_fetch_all($result, MYSQLI_ASSOC);
+
+// Products of the loaded invoices ("Name x qty"), read in one query.
+$invoice_products = [];
+$invoice_ids = array_map('intval', array_column($invoice_rows, 'id'));
+if($invoice_ids){
+    $product_sql = "SELECT ii.invoice_id, ii.variant_name, ii.quantity, p.product_name
+                    FROM invoice_items ii
+                    LEFT JOIN products p ON p.id=ii.product_id AND p.user_id=?
+                    WHERE ii.invoice_id IN (" . implode(',', $invoice_ids) . ")
+                    ORDER BY ii.invoice_id, ii.id";
+    $product_stmt = mysqli_prepare($conn, $product_sql);
+    mysqli_stmt_bind_param($product_stmt, "i", $user_id);
+    mysqli_stmt_execute($product_stmt);
+    foreach(mysqli_fetch_all(mysqli_stmt_get_result($product_stmt), MYSQLI_ASSOC) as $item){
+        $name = trim((string)($item['product_name'] ?? '')) !== '' ? (string)$item['product_name'] : 'Deleted product';
+        $variant = trim((string)($item['variant_name'] ?? ''));
+        if($variant !== '' && $variant !== '0'){
+            $name .= ' (' . $variant . ')';
+        }
+        $invoice_products[(int)$item['invoice_id']][] = $name . ' x ' . (int)$item['quantity'];
+    }
+}
 
 ?>
 
@@ -189,6 +212,7 @@ $result = mysqli_stmt_get_result($stmt);
 
                             <th class="invoice-list-no">Invoice No</th>
                             <th class="invoice-list-date">Date</th>
+                            <th class="invoice-list-products">Product</th>
                             <?php if($show_customer_due_columns){ ?><th>Customer</th><?php } ?>
                             <?php if(!$restaurant_invoice_layout){ ?><th class="invoice-list-amount">Total</th><?php } ?>
                             <th class="invoice-list-amount"><?= $restaurant_invoice_layout ? 'Amount' : 'Paid' ?></th>
@@ -207,7 +231,7 @@ $result = mysqli_stmt_get_result($stmt);
                         <?php
                         $sl = 1;
 
-                        while($row = mysqli_fetch_assoc($result)){
+                        foreach($invoice_rows as $row){
                             $can_modify_invoice = can_modify_customer_invoice(
                                 $conn,
                                 $user_id,
@@ -234,6 +258,12 @@ $result = mysqli_stmt_get_result($stmt);
 
                             <td>
                                 <?php echo app_date($row['invoice_date']); ?>
+                            </td>
+
+                            <td class="invoice-list-products">
+                                <?php foreach($invoice_products[(int)$row['id']] ?? [] as $product_line){ ?>
+                                    <div><?= htmlspecialchars($product_line, ENT_QUOTES, 'UTF-8'); ?></div>
+                                <?php } ?>
                             </td>
 
                             <?php if($show_customer_due_columns){ ?><td>
@@ -417,7 +447,8 @@ $result = mysqli_stmt_get_result($stmt);
                     <?php } ?>
 
                     <style>
-                        #example1 .invoice-list-no { min-width: 260px; }
+                        #example1 .invoice-list-no { min-width: 200px; }
+                        #example1 .invoice-list-products { min-width: 180px; }
                         #example1 .invoice-list-status { width: 170px; }
                         #example1 .invoice-list-date { width: 150px; min-width: 130px; white-space: nowrap; }
                         #example1 .invoice-list-amount { width: 120px; min-width: 100px; }

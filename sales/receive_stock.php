@@ -6,6 +6,7 @@ require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_image_helper.php';
 require_once '../includes/distribution_display_helper.php';
 require_once '../includes/stock_request_helper.php';
+require_once '../includes/product_serial_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $warehouse_receipt_mode = !empty($warehouse_receipt_mode) && stock_can_manage_warehouse($conn);
@@ -127,6 +128,7 @@ if ($post_action === '' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $receipts = $_POST['distribution_received'] ?? [];
         if(!is_array($receipts) || empty($receipts)){ throw new RuntimeException('Reload this page and select a stock receipt.'); }
         $damages = [];
+        $serial_receipts = [];
         $total_sent_quantity = 0.0;
         $total_received_quantity = 0.0;
         foreach($receipts as $distribution_id => $received_quantity){
@@ -142,12 +144,17 @@ if ($post_action === '' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $total_sent_quantity += $sent_quantity;
             $total_received_quantity += $received_quantity;
             $damages[$distribution_id] = $sent_quantity - $received_quantity;
+            // Serials sent with this row: the ticked ones arrive good.
+            $sent_serials = product_serial_in_transit($conn, $user_id, [$distribution_id])[$distribution_id] ?? [];
+            if($sent_serials){
+                $serial_receipts[$distribution_id] = product_serial_check_receipt($sent_serials, $_POST['distribution_serials'][$distribution_id] ?? [], $sent_quantity, $received_quantity, $variant_label !== '' ? $variant_label : 'Serials');
+            }
         }
         if($total_received_quantity > $total_sent_quantity){
             throw new RuntimeException('Total received quantity cannot exceed total sent quantity.');
         }
         foreach($damages as $distribution_id => $damaged_quantity){
-            fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, $damaged_quantity, $branch_id);
+            fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, $damaged_quantity, $branch_id, $serial_receipts[$distribution_id] ?? null);
         }
         $_SESSION['stock_receive_message'] = 'Product stock received successfully.';
         header('Location: receive_stock.php');
@@ -193,6 +200,10 @@ foreach ($pending_groups as &$group) {
     $group['row'] = $group['items'][0];
 }
 unset($group);
+// Serials on the way to this location, per transfer row.
+$pending_serials = [];
+foreach ($pending_groups as $group) { foreach ($group['items'] as $item) { $pending_serials[] = (int)$item['id']; } }
+$pending_serials = product_serial_in_transit($conn, $user_id, $pending_serials);
 
 $sent_pending = mysqli_query($conn, "SELECT d.*,p.product_name,p.sku,p.photo_path,tb.branch_name AS to_branch_name,tb.branch_code AS to_branch_code,tb.is_head_office AS to_head_office
     FROM stock_distributions d
@@ -464,12 +475,12 @@ $my_pending = count(array_filter($my_requests, static fn($request) => $request['
     <div class="card-body">
         <?php if ($warehouse_receipt_mode) { ?><a href="index.php" class="btn btn-outline-secondary mb-3">Back to Main Warehouse</a><?php } ?>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0">
-    <thead><tr><th>Photo</th><th>Reference</th><th>From</th><th>Product</th><th>Code</th><th>Sent Qty</th><th>Good Received Qty</th><th>Action</th></tr></thead>
+    <thead><tr><th>Photo</th><th>Reference</th><th>From</th><th style="min-width:220px">Product</th><th>Good Received Qty</th><th>Action</th></tr></thead>
             <tbody>
             <?php if (!empty($pending_groups)) { foreach ($pending_groups as $group_key => $group) { $row = $group['row']; $is_selected_request = $group_key === $selected_group_key; ?>
                 <tr id="receive-request-<?= (int)$row['id']; ?>" class="<?= $is_selected_request ? 'table-primary' : ''; ?>"><td><img src="<?= htmlspecialchars(product_image_url($conn, $row['photo_path'] ?? '')); ?>" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:3px"></td>
                     <td><?= htmlspecialchars(trim((string)($row['reference_no'] ?? '')) ?: ('D-' . date('dmy', strtotime($row['created_at'])) . (int)$row['id'])); ?></td><td><?= htmlspecialchars($row['from_head_office'] ? 'Head Office' : $row['from_branch_name']); ?><div class="mt-1"><?= $direction_badge($row['from_branch_id'], $row['to_branch_id']); ?></div></td>
-                    <td><?= distribution_product_blocks($group['product_summary']); ?></td><td><?= htmlspecialchars($group['code_summary']); ?></td><td><?= number_format($group['quantity'], 0); ?></td>
+                    <td><?= distribution_product_blocks(array_map(static fn($product) => [$product[0], 'Sent: ' . $product[1]], $group['product_summary'])); ?></td>
                     <td>
                         <?php $form_id = 'receipt-' . (int)$row['id']; ?>
                         <form id="<?= $form_id; ?>" method="post">
@@ -485,13 +496,24 @@ $my_pending = count(array_filter($my_requests, static fn($request) => $request['
                                             <input id="<?= $input_id; ?>" type="number" class="form-control receipt-quantity" name="distribution_received[<?= (int)$item['id']; ?>]" min="0" max="<?= (int)$item['quantity']; ?>" step="1" value="<?= (int)$item['quantity']; ?>" required>
                                             <small class="w-100 text-muted receipt-damage">Damaged: 0</small>
                                         </div>
+                                        <?php if (!empty($pending_serials[(int)$item['id']])) { $item_serials = $pending_serials[(int)$item['id']]; ?>
+                                            <div class="receipt-serials border rounded px-2 pt-1 mb-2" data-for="<?= $input_id; ?>" data-total="<?= count($item_serials); ?>" data-sent="<?= (int)$item['quantity']; ?>">
+                                                <small class="d-block text-muted mb-1"><i class="fas fa-barcode mr-1"></i>Serial / IMEI — untick a serial that is damaged or missing</small>
+                                                <?php foreach ($item_serials as $serial_id => $serial_no) { $check_id = 'rs-' . (int)$serial_id; ?>
+                                                    <div class="custom-control custom-checkbox">
+                                                        <input type="checkbox" class="custom-control-input receipt-serial" id="<?= $check_id; ?>" name="distribution_serials[<?= (int)$item['id']; ?>][]" value="<?= (int)$serial_id; ?>" checked>
+                                                        <label class="custom-control-label" for="<?= $check_id; ?>"><?= htmlspecialchars($serial_no); ?></label>
+                                                    </div>
+                                                <?php } ?>
+                                            </div>
+                                        <?php } ?>
                                     <?php } ?>
                                 </fieldset>
                             <?php } ?>
                         </form>
                     </td>
                     <td><button form="<?= $form_id; ?>" class="btn btn-success btn-sm" type="submit"<?= $is_selected_request ? ' autofocus' : ''; ?>><i class="fas fa-check mr-1"></i>Receive</button></td></tr>
-            <?php } } else { ?><tr><td colspan="8" class="text-center text-muted py-4">No product receive request is pending for this branch.</td></tr><?php } ?>
+            <?php } } else { ?><tr><td colspan="6" class="text-center text-muted py-4">No product receive request is pending for this branch.</td></tr><?php } ?>
             </tbody>
         </table></div>
     </div>
@@ -583,6 +605,34 @@ document.querySelectorAll('form[id^="receipt-"]').forEach(function(form){
             if(invalidItem) invalidItem.focus();
         }
     });
+});
+// Serial receive: ticked serials are the good pieces. When every piece has a serial the
+// good quantity follows the ticks.
+document.querySelectorAll('.receipt-serials').forEach(function(box){
+    const input = document.getElementById(box.dataset.for);
+    const total = Number(box.dataset.total), sent = Number(box.dataset.sent);
+    const follow = total >= sent;
+    const sync = function(){
+        if(!follow) return;
+        input.value = box.querySelectorAll('.receipt-serial:checked').length;
+        input.dispatchEvent(new Event('input'));
+    };
+    if(follow){ input.readOnly = true; input.title = 'Follows the ticked serials'; }
+    box.addEventListener('change', sync);
+    sync();
+});
+document.querySelectorAll('form[id^="receipt-"]').forEach(function(form){
+    form.addEventListener('submit', function(event){
+        const bad = Array.from(form.querySelectorAll('.receipt-serials')).find(function(box){
+            const qty = Number(document.getElementById(box.dataset.for).value || 0);
+            const ticked = box.querySelectorAll('.receipt-serial:checked').length;
+            return ticked > qty || Number(box.dataset.total) - ticked > Number(box.dataset.sent) - qty;
+        });
+        if(bad){
+            event.preventDefault(); event.stopImmediatePropagation();
+            alert('Tick the serials that arrived good: the number of ticked serials must match the good received quantity.');
+        }
+    }, true);
 });
 // Send Product: products and variants available at this location.
 (function () {

@@ -107,6 +107,10 @@ try {
 |--------------------------------------------------
 */
 
+// Serials sold on this invoice are back in stock.
+require_once '../includes/product_serial_helper.php';
+product_serial_release_invoice($conn, $user_id, $invoice_id);
+
 $sql = "
 SELECT *
 FROM invoice_items

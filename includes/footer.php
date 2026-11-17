@@ -463,5 +463,36 @@ $(function () {
     });
 })();
 </script>
+<?php $photo_placeholder_src = function_exists('branding_logo_url') ? branding_logo_url($conn ?? null) : ''; ?>
+<script>
+// photo-col-auto-hide: a table "Photo" column is hidden when no row has a real product
+// photo (every image is the default logo).
+(function(){
+    var placeholder = <?= json_encode((string)$photo_placeholder_src) ?>;
+    if (!placeholder) return;
+    var css = [];
+    document.querySelectorAll('table').forEach(function(table, t){
+        var head = table.tHead && table.tHead.rows[table.tHead.rows.length - 1];
+        if (!head) return;
+        var index = Array.prototype.findIndex.call(head.cells, function(th){ return th.textContent.trim().toLowerCase() === 'photo'; });
+        if (index < 0 || head.cells[index].classList.contains('photo-column') || table.hasAttribute('data-keep-photo')) return;
+        var images = [];
+        Array.prototype.forEach.call(table.tBodies, function(body){
+            Array.prototype.forEach.call(body.rows, function(row){
+                if (row.cells.length === 1 && row.cells[0].colSpan > 1) return;
+                var cell = row.cells[index];
+                if (cell) cell.querySelectorAll('img').forEach(function(img){ images.push(img.getAttribute('src') || ''); });
+            });
+        });
+        if (images.some(function(src){ return src !== '' && src !== placeholder; })) return;
+        var key = 'photo-col-hidden-' + t;
+        table.classList.add(key);
+        var col = table.querySelector('colgroup col:nth-child(' + (index + 1) + ')');
+        if (col) col.remove();
+        css.push('table.' + key + ' > * > tr > *:nth-child(' + (index + 1) + '):not(:only-child){display:none}');
+    });
+    if (css.length) { var style = document.createElement('style'); style.textContent = css.join('\n'); document.head.appendChild(style); }
+})();
+</script>
 </body>
 </html>

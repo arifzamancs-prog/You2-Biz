@@ -26,6 +26,8 @@ require_once '../includes/eshop_variant_image_helper.php';
 $variant_photos_enabled = eshop_variant_images_enabled($conn, (int)$user_id);
 $show_warranty = product_warranty_enabled();
 if ($show_warranty) product_warranty_schema($conn);
+require_once '../includes/product_serial_helper.php';
+$show_serial = product_serial_schema($conn);
 
 $message = '';
 $message_type = '';
@@ -147,10 +149,27 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
         $variant_opening = array_fill_keys($category_variants, 0);
     }
 
-    $status =
-    $_POST['status'];
+    // A new product starts active; it can be made inactive from Edit.
+    $status = 'active';
+
+    // Product Serial: one serial per opening-stock piece.
+    $serial_on = $show_serial && $is_stock_product && !empty($_POST['serial_enabled']);
+    $opening_serials = [];
+    if($serial_on && $message === ''){
+        try{
+            $opening_serials = product_serial_parse_groups($_POST['opening_serials'] ?? []);
+            $serial_quantities = empty($category_variants) ? ['' => $opening_stock] : $variant_opening;
+            product_serial_check_counts($opening_serials, $serial_quantities, 'Opening stock');
+        }catch(RuntimeException $e){
+            $message = $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
 
     $photo_error = '';
+    if($message !== ''){
+        // Serial check failed: nothing is saved.
+    }else{
     $photo_path = $product_photos_enabled
         ? product_save_compressed_photo($_FILES['product_photo'] ?? [], $photo_error)
         : '';
@@ -212,7 +231,8 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
     if(mysqli_stmt_execute($stmt)){
         $product_id = (int)mysqli_insert_id($conn);
         $stock_saved = true;
-        product_warranty_save($conn, $user_id, $product_id, $_POST['warranty_months'] ?? 0);
+        // Warranty belongs to the Product Serial option; off means no warranty.
+        product_warranty_save($conn, $user_id, $product_id, $serial_on ? ($_POST['warranty_months'] ?? 0) : 0);
         if(!empty($category_variants)){
             $variant_stmt = mysqli_prepare($conn, 'INSERT INTO product_variants(user_id,product_id,variant_name) VALUES (?,?,?)');
             foreach($variant_opening as $variant => $variant_qty){
@@ -227,10 +247,24 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
             );
         }
 
+        $serial_error = '';
+        if($stock_saved && $serial_on){
+            try{
+                product_serial_set_enabled($conn, $user_id, $product_id, true);
+                $serial_branch_id = $catalog_branch_id > 0 ? $catalog_branch_id : stock_purchase_location_id($conn, (int)$user_id);
+                foreach($opening_serials as $serial_variant => $serial_list){
+                    product_serial_add($conn, $user_id, $product_id, $serial_variant, $serial_list, $serial_branch_id, 'opening', $product_id);
+                }
+            }catch(RuntimeException $e){
+                $serial_error = $e->getMessage();
+                $stock_saved = false;
+            }
+        }
+
         if(!$stock_saved){
             mysqli_rollback($conn);
             product_delete_photo_file($photo_path);
-            $message = "Product opening stock batch could not be saved.";
+            $message = $serial_error !== '' ? $serial_error : "Product opening stock batch could not be saved.";
             $message_type = "danger";
         }else{
             mysqli_commit($conn);
@@ -266,6 +300,7 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
         $message_type =
         "danger";
+    }
     }
     }
     }
@@ -521,43 +556,41 @@ require_once '../includes/sidebar.php';
 
                 </div>
 
-                <?php if($show_warranty){ ?>
-                <div class="form-group">
-                    <label>Warranty (months)</label>
-                    <input type="number" step="1" min="0" max="600" name="warranty_months" class="form-control" value="<?= (int)($form_data['warranty_months'] ?? 0) ?>">
-                    <small class="text-muted">0 = no warranty. Used by Warranty Receive.</small>
+
+            </div>
+
+                <?php if($show_serial){ ?>
+                <div class="col-md-4" id="serial-switch-col">
+                    <div class="form-group">
+                        <label class="d-block">Product Serial / Warranty</label>
+                        <div class="custom-control custom-switch mt-2">
+                            <input type="checkbox" class="custom-control-input" id="serial_enabled" name="serial_enabled" value="1" <?= !empty($form_data['serial_enabled']) ? 'checked' : '' ?>>
+                            <label class="custom-control-label" for="serial_enabled"><span class="sr-only">Product Serial / Warranty</span></label>
+                        </div>
+                    </div>
                 </div>
                 <?php } ?>
 
             </div>
 
+            <?php if($show_serial){ ?>
+            <!-- Shown only while Product Serial is on: warranty on the left, the serials on its right. -->
+            <div class="row d-none" id="opening-serial-wrap">
                 <div class="col-md-4">
-
                     <div class="form-group">
-
-                        <label>
-                            Status
-                        </label>
-
-                        <select
-                            name="status"
-                            class="form-control">
-
-                            <option value="active" <?= ($form_data['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>
-                                Active
-                            </option>
-
-                            <option value="inactive" <?= ($form_data['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>
-                                Inactive
-                            </option>
-
-                        </select>
-
+                        <label>Warranty (months)</label>
+                        <input type="number" step="1" min="0" max="600" name="warranty_months" class="form-control" value="<?= (int)($form_data['warranty_months'] ?? 0) ?>">
+                        <small class="text-muted">0 = no warranty. Used by Warranty Receive.</small>
                     </div>
-
                 </div>
-
+                <div class="col-md-8">
+                    <div class="form-group">
+                        <label>Opening Stock Serials <small class="text-muted">(type or scan, then Enter — one per piece)</small></label>
+                        <div id="opening-serial-boxes"></div>
+                    </div>
+                </div>
             </div>
+            <?php } ?>
 
             <button
                 type="submit"
@@ -626,9 +659,11 @@ category.addEventListener('change',syncVariants); syncVariants();
     ['purchase_price','sale_price','current_stock'].forEach(n=>{const f=form.querySelector('[name="'+n+'"]');if(f)f.value='0';});
     const min=form.querySelector('[name="minimum_stock"]'); if(min)min.value='5';
     const exp=form.querySelector('[name="expired_on"]'); if(exp)exp.value='';
+    const war=form.querySelector('[name="warranty_months"]'); if(war)war.value='0';
     const status=form.querySelector('[name="status"]'); if(status)status.value='active';
     const photo=document.getElementById('product_photo'); if(photo){photo.value='';photo.dispatchEvent(new Event('change'));}
     form.querySelectorAll('#variant-opening-fields input').forEach(f=>{f.value='0';f.dispatchEvent(new Event('input'));});
+    if(window.productSerialReset)window.productSerialReset();
     const name=form.querySelector('[name="product_name"]'); if(name)name.focus();
   };
   form.addEventListener('submit',async function(e){
@@ -660,6 +695,47 @@ category.addEventListener('change',syncVariants); syncVariants();
 })();
 </script>
 
+<?php if($show_serial){ echo product_serial_taken_script($conn, (int)$user_id) . product_serial_box_script(); ?>
+<script>
+// Product Serial: one serial box for the opening stock (or one per variant).
+(function(){
+  const sw=document.getElementById('serial_enabled'); if(!sw) return;
+  const wrap=document.getElementById('opening-serial-wrap'), boxes=document.getElementById('opening-serial-boxes');
+  const category=document.getElementById('category_id'), opening=document.querySelector('[name="current_stock"]'), fields=document.getElementById('variant-opening-fields');
+  function targets(){
+    const inputs=[...fields.querySelectorAll('input[type=number]')];
+    if(inputs.length) return inputs.map(i=>{const key=i.name.replace(/^variant_opening_qty\[(.*)\]$/,'$1');return {key:key,label:key,qty:Math.max(0,parseInt(i.value,10)||0),variant:true};});
+    return [{key:'__none__',label:'',qty:Math.max(0,parseInt(opening.value,10)||0),variant:false}];
+  }
+  function sync(){
+    const option=category.options[category.selectedIndex];
+    const nonStock=option&&option.dataset.productType==='non_stock';
+    document.getElementById('serial-switch-col').classList.toggle('d-none',!!nonStock);
+    const on=sw.checked&&!nonStock;
+    wrap.classList.toggle('d-none',!on);
+    if(!on){ boxes.innerHTML=''; return; }
+    const list=targets(), keep={}; list.forEach(x=>keep[x.key]=1);
+    [...boxes.children].forEach(c=>{ if(!keep[c.dataset.key]) c.remove(); });
+    list.forEach(x=>{
+      let col=[...boxes.children].find(c=>c.dataset.key===x.key);
+      if(!col){
+        col=document.createElement('div'); col.className='mb-2'; col.dataset.key=x.key;
+        if(x.label){ const l=document.createElement('label'); l.className='small mb-1'; l.textContent=x.label; col.append(l); }
+        const b=document.createElement('div'); b.className='ps-box'; b.dataset.name='opening_serials['+x.key+']'; col.append(b);
+        boxes.append(col); window.psBoxInit(col);
+      }
+      col.classList.toggle('d-none', x.variant && x.qty===0 && !col.querySelector('.ps-tag'));
+      window.psBoxSetNeed(col.querySelector('.ps-box'), x.qty);
+    });
+  }
+  sw.addEventListener('change',sync);
+  category.addEventListener('change',sync);
+  document.getElementById('product-form').addEventListener('input',function(e){ if(e.target.type==='number') sync(); });
+  window.productSerialReset=function(){ if(window.psTakenSerials) boxes.querySelectorAll('.ps-tag').forEach(t=>{ window.psTakenSerials[t.dataset.serial.toLowerCase()]=1; }); boxes.innerHTML=''; sync(); };
+  sync();
+})();
+</script>
+<?php } ?>
 <?php
 if($variant_photos_enabled) echo eshop_variant_photo_script('#variant-opening-fields input[type=number]', ['^variant_opening_qty', 'variant_photo']);
 require_once '../includes/footer.php';

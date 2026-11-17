@@ -24,26 +24,34 @@ function ensure_product_management_columns($conn)
     ensure_product_expiry_column($conn);
 
     $result = mysqli_query($conn, "SHOW COLUMNS FROM users LIKE 'product_expiry_option'");
+    $column = $result ? mysqli_fetch_assoc($result) : null;
 
-    if($result && mysqli_num_rows($result) === 0){
+    // New companies start with the expiry option Inactive; companies that already exist keep their saved choice.
+    if($result && !$column){
         mysqli_query(
             $conn,
             "ALTER TABLE users
-             ADD COLUMN product_expiry_option VARCHAR(20) NOT NULL DEFAULT 'active'"
+             ADD COLUMN product_expiry_option VARCHAR(20) NOT NULL DEFAULT 'inactive'"
+        );
+    }elseif($column && ($column['Default'] ?? '') !== 'inactive'){
+        mysqli_query(
+            $conn,
+            "ALTER TABLE users
+             ALTER COLUMN product_expiry_option SET DEFAULT 'inactive'"
         );
     }
 }
 
 function normalize_product_expiry_option($option)
 {
-    return $option === 'inactive' ? 'inactive' : 'active';
+    return $option === 'active' ? 'active' : 'inactive';
 }
 
 function current_product_expiry_option($conn)
 {
     if(is_super_admin_user()){
         return normalize_product_expiry_option(
-            $_SESSION['product_expiry_option'] ?? 'active'
+            $_SESSION['product_expiry_option'] ?? 'inactive'
         );
     }
 
@@ -53,7 +61,7 @@ function current_product_expiry_option($conn)
     $user_id = (int)($_SESSION['user_id'] ?? 0);
 
     if($user_id <= 0){
-        return 'active';
+        return 'inactive';
     }
 
     $stmt = mysqli_prepare(
@@ -65,7 +73,7 @@ function current_product_expiry_option($conn)
     );
 
     if(!$stmt){
-        return 'active';
+        return 'inactive';
     }
 
     mysqli_stmt_bind_param($stmt, "i", $user_id);
@@ -76,7 +84,7 @@ function current_product_expiry_option($conn)
         return 'inactive';
     }
 
-    return normalize_product_expiry_option($row['product_expiry_option'] ?? 'active');
+    return normalize_product_expiry_option($row['product_expiry_option'] ?? 'inactive');
 }
 
 function is_product_expiry_enabled($conn)

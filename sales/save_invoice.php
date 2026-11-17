@@ -812,7 +812,9 @@ foreach($product_ids as $key => $product_id){
 
     // Warranty and serial of this sold line (Inventory & Sales).
     if($invoice_warranty_enabled){
-        invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $_POST['item_serial'][$key] ?? '');
+        // Serials in stock leave stock with this line; other serials are kept for warranty.
+        $line_serial_text = product_serial_invoice_line($conn, $user_id, $invoice_id, $invoice_item_id, $product_id, $variant_name, $qty, $_POST['item_serial'][$key] ?? '');
+        invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $_POST['item_warranty'][$key] ?? null, $line_serial_text);
     }
 
     if(isset($item_charge_breakdown[$key])){

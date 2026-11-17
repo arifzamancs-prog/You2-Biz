@@ -21,13 +21,18 @@ if($_SERVER['REQUEST_METHOD'] != 'POST'){
 
 $purchase_id = (int)($_POST['purchase_id'] ?? 0);
 
+// Inventory & Sales: warranty and product serials (schema changes run before the transaction).
+require_once '../includes/service_warranty_helper.php';
+$purchase_serial_enabled = product_serial_schema($conn);
+if($purchase_serial_enabled) product_warranty_schema($conn);
+
 mysqli_begin_transaction($conn);
 
 try{
 
     // Expand the grouped editor into individual variant lines for stock storage.
     if(isset($_POST['variant_quantity'])){
-        $expanded = ['product_id'=>[], 'qty'=>[], 'cost_price'=>[], 'variant_name'=>[]];
+        $expanded = ['product_id'=>[], 'qty'=>[], 'cost_price'=>[], 'variant_name'=>[], 'line_serials'=>[], 'line_warranty'=>[]];
         foreach(($_POST['product_id'] ?? []) as $index=>$pid){
             $quantities = $_POST['variant_quantity'][$index] ?? [''=>($_POST['qty'][$index] ?? 0)];
             if(!is_array($quantities)) throw new Exception('Invalid variant quantities.');
@@ -38,6 +43,8 @@ try{
                 $expanded['qty'][] = $quantity;
                 $expanded['cost_price'][] = $_POST['cost_price'][$index] ?? 0;
                 $expanded['variant_name'][] = (string)$variant;
+                $expanded['line_serials'][] = $_POST['line_serials'][$index] ?? '';
+                $expanded['line_warranty'][] = $_POST['line_warranty'][$index] ?? '';
             }
         }
         if(!$expanded['product_id']) throw new Exception('Enter at least one positive quantity.');
@@ -238,6 +245,11 @@ mysqli_query(
 
 );
 
+// The serials of this purchase are entered again with its lines (not possible once one is sold or sent).
+if($purchase_serial_enabled){
+    try{ product_serial_remove_source($conn, $user_id, 'purchase', $purchase_id); }
+    catch(RuntimeException $e){ throw new Exception($e->getMessage()); }
+}
 if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
     throw new Exception("Old FIFO batches could not be removed.");
 }
@@ -298,6 +310,9 @@ foreach($product_ids as $key=>$product_id){
     $qty = (int)$qtys[$key];
 
     $price = (float)$prices[$key];
+    if(!is_finite($price) || $price <= 0){
+        throw new Exception("Purchase price is required for every product.");
+    }
 
     $total = (float)$totals[$key];
     $variant_name = trim((string)($variant_names[$key] ?? ''));
@@ -343,6 +358,24 @@ foreach($product_ids as $key=>$product_id){
     );
 
     mysqli_stmt_execute($stmt);
+    $purchase_item_id = (int)mysqli_insert_id($conn);
+
+    if($purchase_serial_enabled && product_serial_is_enabled($conn, $user_id, (int)$product_id)){
+        // Warranty given here becomes the product's warranty for later sales.
+        $line_warranty = trim((string)($_POST['line_warranty'][$key] ?? ''));
+        if($line_warranty !== ''){
+            $line_warranty = max(0, min(600, (int)$line_warranty));
+            mysqli_query($conn, 'UPDATE purchase_items SET warranty_months=' . $line_warranty . ' WHERE id=' . $purchase_item_id);
+            product_warranty_save($conn, $user_id, (int)$product_id, $line_warranty);
+        }
+        // One serial for each piece received.
+        try{
+            $line_serial_groups = product_serial_parse_groups($_POST['line_serials'][$key] ?? '');
+            $line_serial_list = $line_serial_groups[$variant_name] ?? [];
+            product_serial_check_counts([$variant_name => $line_serial_list], [$variant_name => (int)$qty], 'Serials');
+            product_serial_add($conn, $user_id, (int)$product_id, $variant_name, $line_serial_list, stock_purchase_location_id($conn, (int)$user_id), 'purchase', $purchase_id);
+        }catch(RuntimeException $e){ throw new Exception($e->getMessage()); }
+    }
 
     if(($_SESSION['company_type'] ?? '') === 'Housing') continue;
     if(!fifo_inventory_create_batch(
@@ -490,6 +523,7 @@ $expense_delete = mysqli_prepare($conn, "DELETE FROM expenses WHERE user_id=? AN
 mysqli_stmt_bind_param($expense_delete, 'ii', $user_id, $purchase_id);
 mysqli_stmt_execute($expense_delete);
 if ($paid_amount > 0) record_supplier_payment_expense($conn, $user_id, $payment_wallet_id, $paid_amount, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
+
 mysqli_commit($conn);
 
 header("Location:index.php");

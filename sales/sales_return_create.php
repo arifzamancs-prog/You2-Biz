@@ -105,9 +105,9 @@ require_once '../includes/sidebar.php';
     <thead>
     <tr>
         <th>Product</th>
-        <th class="text-right">Sold</th>
-        <th class="text-right">Returned</th>
-        <th class="text-right">Refund / Unit</th>
+        <th class="text-right" style="width:80px">Sold</th>
+        <th class="text-right" style="width:100px">Returned</th>
+        <th class="text-right" style="width:120px">Refund / Unit</th>
         <th style="width:120px">Return Qty</th>
         <th style="width:170px">Condition</th>
         <th class="text-right" style="width:130px">Total</th>
@@ -116,7 +116,7 @@ require_once '../includes/sidebar.php';
     <tbody>
     <?php foreach($lines as $line){ ?>
         <tr class="return-line" data-price="<?= sales_return_h(number_format($line['refund_unit_price'], 2, '.', '')); ?>">
-            <td><?= sales_return_h(sales_return_line_label($line)); ?></td>
+            <td><?= sales_return_h(sales_return_line_label($line)); ?><?php if(trim((string)($line['serial_no'] ?? '')) !== ''){ ?><div class="small text-muted"><i class="fas fa-barcode mr-1"></i>Serial / IMEI: <?= sales_return_h($line['serial_no']); ?></div><?php } ?></td>
             <td class="text-right"><?= (int)$line['sold_qty']; ?></td>
             <td class="text-right"><?= (int)$line['returned_qty']; ?></td>
             <td class="text-right"><?= number_format($line['refund_unit_price'], 2); ?></td>

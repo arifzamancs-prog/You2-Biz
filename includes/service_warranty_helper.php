@@ -20,6 +20,7 @@
 //   - Cancel: the advance can be refunded ("service_refund").
 
 require_once __DIR__ . '/schema_cache_helper.php';
+require_once __DIR__ . '/product_serial_helper.php';
 
 function sw_module_active($conn = null)
 {
@@ -176,7 +177,9 @@ function product_warranty_save($conn, $user_id, $product_id, $months)
 function product_warranty_months($conn, $user_id, $product_id)
 {
     product_warranty_schema($conn);
-    $row = mysqli_fetch_row(mysqli_query($conn, 'SELECT warranty_months FROM products WHERE id=' . (int)$product_id . ' AND user_id=' . (int)$user_id));
+    // Warranty belongs to the Product Serial option: with the option off there is no warranty.
+    $serial_rule = product_serial_schema($conn) ? ' AND serial_enabled=1' : '';
+    $row = mysqli_fetch_row(mysqli_query($conn, 'SELECT warranty_months FROM products WHERE id=' . (int)$product_id . ' AND user_id=' . (int)$user_id . $serial_rule));
     return (int)($row[0] ?? 0);
 }
 
@@ -1053,11 +1056,13 @@ function invoice_warranty_prepare($conn)
     }
     product_warranty_schema($conn);
     invoice_item_warranty_schema($conn);
+    product_serial_schema($conn);
     return true;
 }
 
-// Warranty box under the product of one invoice line; shown by script only when the
-// product has a warranty (or the line already has one).
+// Box under the product of one invoice line. The script shows the warranty part only for a
+// product with a warranty and the serial part only for a product with Product Serial on
+// (or when a saved line already has a value); otherwise the box stays hidden.
 function invoice_warranty_fields_html($months = null, $serial = '')
 {
     if (!product_warranty_enabled()) {
@@ -1066,55 +1071,110 @@ function invoice_warranty_fields_html($months = null, $serial = '')
     $months_value = $months === null || $months === '' ? '' : (string)(int)$months;
     return '<div class="iw-box mt-1" style="display:none">'
         . '<div class="input-group input-group-sm flex-nowrap">'
-        . '<div class="input-group-prepend"><span class="input-group-text" title="Warranty"><i class="fas fa-shield-alt text-success"></i></span></div>'
-        . '<input type="number" min="0" max="600" step="1" name="item_warranty[]" class="form-control iw-months" value="' . htmlspecialchars($months_value) . '" style="max-width:72px" title="Warranty (months)">'
-        . '<div class="input-group-append"><span class="input-group-text">mo</span></div>'
-        . '<input type="text" name="item_serial[]" class="form-control iw-serial" value="' . htmlspecialchars((string)$serial) . '" maxlength="255" placeholder="Serial / IMEI (optional)" title="Serial / IMEI">'
+        . '<div class="input-group-prepend iw-m"><span class="input-group-text" title="Warranty"><i class="fas fa-shield-alt text-success"></i></span></div>'
+        . '<input type="number" min="0" max="600" step="1" name="item_warranty[]" class="form-control iw-months iw-m" value="' . htmlspecialchars($months_value) . '" style="flex:0 0 46px;width:46px;padding-left:4px;padding-right:4px" title="Warranty (months)">'
+        . '<div class="input-group-append iw-m"><span class="input-group-text px-1">mo</span></div>'
+        . '<div class="input-group-prepend iw-s"><span class="input-group-text" title="Serial"><i class="fas fa-barcode"></i></span></div>'
+        . '<input type="text" name="item_serial[]" class="form-control iw-serial iw-s" style="flex:1 1 auto;min-width:0" value="' . htmlspecialchars((string)$serial) . '" maxlength="2000" placeholder="Serial / IMEI" title="Serial / IMEI">'
         . '</div></div>';
 }
 
-function invoice_warranty_script($conn, $user_id)
+function invoice_warranty_script($conn, $user_id, $invoice_id = 0)
 {
     if (!product_warranty_enabled()) {
         return '';
     }
     product_warranty_schema($conn);
     $map = [];
-    $result = mysqli_query($conn, 'SELECT id, warranty_months FROM products WHERE user_id=' . (int)$user_id . ' AND warranty_months > 0');
+    product_serial_schema($conn);
+    // Only a product with Product Serial on carries a warranty.
+    $result = mysqli_query($conn, 'SELECT id, warranty_months FROM products WHERE user_id=' . (int)$user_id . ' AND warranty_months > 0 AND serial_enabled=1');
     while ($result && ($row = mysqli_fetch_assoc($result))) {
         $map[(int)$row['id']] = (int)$row['warranty_months'];
+    }
+    $serial_products = product_serial_product_flags($conn, $user_id);
+    // Serials that can be sold: in stock, plus those already on the invoice being edited.
+    $stock_serials = [];
+    $serial_result = mysqli_query($conn, "SELECT s.product_id, s.serial_no FROM product_serials s INNER JOIN products p ON p.id=s.product_id AND p.user_id=s.user_id AND p.serial_enabled=1 WHERE s.user_id=" . (int)$user_id . " AND (s.status='in_stock'" . ((int)$invoice_id > 0 ? " OR (s.status='sold' AND s.invoice_id=" . (int)$invoice_id . ")" : '') . ")");
+    while ($serial_result && ($row = mysqli_fetch_assoc($serial_result))) {
+        $stock_serials[(int)$row['product_id']][] = mb_strtoupper(trim((string)$row['serial_no']));
     }
     return '<script>
 document.addEventListener("DOMContentLoaded", function () {
     var warranty = ' . json_encode((object)$map) . ';
-    var show = function (row, on) { var box = row.querySelector(".iw-box"); if (box) box.style.display = on ? "" : "none"; };
-    // Initial state: a product with warranty, or a saved line that has one.
+    var serialProducts = ' . json_encode((object)$serial_products) . ';
+    var stockSerials = ' . json_encode((object)$stock_serials, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';
+    // Save is blocked until each serial product line has matching serials, one per piece
+    // (as many as are in stock when fewer).
+    document.addEventListener("submit", function (e) {
+        var table = e.target.querySelector && e.target.querySelector("#productTable"); if (!table) return;
+        var used = {}; var problem = ""; var badField = null;
+        table.querySelectorAll("tbody tr").forEach(function (row) {
+            if (problem) return;
+            var select = row.querySelector("select.product"); var pid = select ? select.value : "";
+            var field = row.querySelector(".iw-serial");
+            if (!pid || !serialProducts[pid] || !field) return;
+            var qty = parseInt((row.querySelector("input.qty") || {}).value, 10) || 0; if (qty <= 0) return;
+            var name = (select.options[select.selectedIndex] || {}).text || "Product";
+            name = name.replace(/\s*\[Code:.*$/, "").trim();
+            var list = field.value.split(/[\r\n,]+/).map(function (v) { return v.trim(); }).filter(Boolean);
+            var seen = {}; list = list.filter(function (v) { var k = v.toUpperCase(); if (seen[k]) return false; seen[k] = 1; return true; });
+            var stock = stockSerials[pid] || [];
+            var free = stock.filter(function (v) { return !used[v]; }).length;
+            var need = Math.min(qty, free);
+            if (list.length > qty) { problem = name + ": " + list.length + " serials entered but quantity is " + qty + "."; badField = field; return; }
+            for (var i = 0; i < list.length; i++) {
+                var key = list[i].toUpperCase();
+                if (stock.indexOf(key) === -1) { problem = "Serial \"" + list[i] + "\" is not in stock for " + name + "."; badField = field; return; }
+                if (used[key]) { problem = "Serial \"" + list[i] + "\" is on more than one line."; badField = field; return; }
+                used[key] = 1;
+            }
+            if (list.length < need) problem = name + ": enter " + need + " serial" + (need === 1 ? "" : "s") + " (one per piece); " + list.length + " entered.";
+            if (problem) badField = field;
+        });
+        if (problem) { e.preventDefault(); e.stopImmediatePropagation(); alert(problem); if (badField) badField.focus(); }
+    }, true);
+    // parts: warranty months, serial; the whole box hides when neither applies.
+    var show = function (row, m, s) {
+        var box = row.querySelector(".iw-box"); if (!box) return;
+        box.querySelectorAll(".iw-m").forEach(function (el) { el.style.display = m ? "" : "none"; });
+        box.querySelectorAll(".iw-s").forEach(function (el) { el.style.display = s ? "" : "none"; });
+        box.style.display = m || s ? "" : "none";
+    };
     document.querySelectorAll(".iw-box").forEach(function (box) {
         var row = box.closest("tr"); var select = row && row.querySelector("select.product");
         var months = box.querySelector(".iw-months");
         var pid = select ? select.value : "";
         if (pid && warranty[pid] && months.value === "") months.value = warranty[pid];
-        show(row, (pid && warranty[pid]) || Number(months.value) > 0 || box.querySelector(".iw-serial").value !== "");
+        show(row, (pid && warranty[pid]) || Number(months.value) > 0, (pid && serialProducts[pid]) || box.querySelector(".iw-serial").value !== "");
     });
     var changed = function (select) {
         var row = select.closest("tr"); if (!row || !row.querySelector(".iw-box")) return;
         var months = warranty[select.value] || 0;
         row.querySelector(".iw-months").value = months > 0 ? months : "";
-        if (!months) row.querySelector(".iw-serial").value = "";
-        show(row, months > 0);
+        row.querySelector(".iw-serial").value = "";
+        show(row, months > 0, !!serialProducts[select.value]);
     };
     document.addEventListener("change", function (e) { if (e.target.matches && e.target.matches("select.product")) changed(e.target); });
     if (window.jQuery) jQuery(document).on("change", "select.product", function () { changed(this); });
+    // Enter in the serial field (a scanner ends with Enter) starts the next serial instead of saving the invoice.
+    document.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" || !e.target.classList || !e.target.classList.contains("iw-serial")) return;
+        e.preventDefault(); e.stopPropagation();
+        var value = e.target.value.replace(/[\s,]+$/, "");
+        e.target.value = value === "" ? "" : value + ", ";
+    }, true);
     // A new line starts empty.
     var add = document.getElementById("addRow");
     if (add) add.addEventListener("click", function () { setTimeout(function () {
         var rows = document.querySelectorAll("#productTable tbody tr"); var row = rows[rows.length - 1];
-        if (row && row.querySelector(".iw-box")) { row.querySelector(".iw-months").value = ""; row.querySelector(".iw-serial").value = ""; show(row, false); }
+        var picked = row && row.querySelector("select.product");
+        // A scan may already have put a product on the new line; then its box stays.
+        if (row && row.querySelector(".iw-box") && !(picked && picked.value)) { row.querySelector(".iw-months").value = ""; row.querySelector(".iw-serial").value = ""; show(row, false, false); }
     }, 0); });
 });
 </script>';
 }
-
 // Save the warranty and serial of one sold line. An empty months value means the
 // product's warranty; lines of products without warranty get 0.
 function invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_id, $months_raw = null, $serial = '')
@@ -1125,7 +1185,7 @@ function invoice_item_warranty_save($conn, $user_id, $invoice_item_id, $product_
     $default = product_warranty_months($conn, $user_id, $product_id);
     $months_raw = $months_raw === null ? '' : trim((string)$months_raw);
     $months = $months_raw === '' ? $default : max(0, min(600, (int)$months_raw));
-    $serial = substr(trim((string)$serial), 0, 255);
+    $serial = mb_substr(trim((string)$serial), 0, 2000);
     $stmt = mysqli_prepare($conn, 'UPDATE invoice_items SET warranty_months=?, serial_no=? WHERE id=?');
     mysqli_stmt_bind_param($stmt, 'isi', $months, $serial, $invoice_item_id);
     mysqli_stmt_execute($stmt);

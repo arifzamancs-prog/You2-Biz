@@ -170,6 +170,12 @@ $initial_purchase_payment_amount = max(0, $paid_amount - $supplier_payment_total
     mysqli_free_result($items_result);
     mysqli_stmt_close($stmt);
 
+    // The serials this purchase brought in leave with it (not possible once one is sold or sent).
+    require_once '../includes/product_serial_helper.php';
+    if(product_serial_feature_enabled() && mysqli_num_rows(mysqli_query($conn, "SHOW TABLES LIKE 'product_serials'")) > 0){
+        product_serial_remove_source($conn, $user_id, 'purchase', $purchase_id);
+    }
+
     if(($_SESSION['company_type'] ?? '') !== 'Housing' && !fifo_inventory_remove_purchase_batches($conn, $purchase_id)){
         throw new Exception("FIFO batches could not be removed.");
     }

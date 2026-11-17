@@ -35,6 +35,9 @@ $sql = "SELECT p.id, p.product_name, p.sku, sb.variant_name,
     HAVING on_hand > 0
     ORDER BY p.product_name";
 
+require_once '../includes/product_serial_helper.php';
+product_serial_schema($conn);
+$serial_flags = product_serial_product_flags($conn, $user_id);
 $result = mysqli_query($conn, $sql);
 $products = [];
 while ($row = $result ? mysqli_fetch_assoc($result) : null) {
@@ -42,7 +45,7 @@ while ($row = $result ? mysqli_fetch_assoc($result) : null) {
     if ($available > 0) {
         $product_id = (int)$row['id'];
         if(!isset($products[$product_id])){
-            $products[$product_id] = ['id' => $product_id, 'name' => product_option_label($row['product_name'], $row['sku'] ?? ''), 'available' => 0, 'variants' => []];
+            $products[$product_id] = ['id' => $product_id, 'name' => product_option_label($row['product_name'], $row['sku'] ?? ''), 'available' => 0, 'variants' => [], 'serial' => !empty($serial_flags[$product_id])];
         }
         $products[$product_id]['available'] += $available;
         $variant_name = (string)($row['variant_name'] ?? '');

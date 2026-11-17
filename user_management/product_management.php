@@ -12,7 +12,7 @@ $message = '';
 $message_type = '';
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
-    $option = normalize_product_expiry_option($_POST['product_expiry_option'] ?? 'active');
+    $option = normalize_product_expiry_option($_POST['product_expiry_option'] ?? 'inactive');
 
     if(save_product_expiry_option($conn, $option)){
         if($is_inventory_sales){

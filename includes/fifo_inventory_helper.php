@@ -157,7 +157,7 @@ function fifo_inventory_distribute($conn, $user_id, $to_branch, $product_id, $qu
     } catch (Throwable $e) { if ($manage_transaction) mysqli_rollback($conn); throw $e; }
 }
 
-function fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, $damaged_quantity = 0, $receiving_branch_id = null)
+function fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, $damaged_quantity = 0, $receiving_branch_id = null, $received_serial_ids = null)
 {
     $user_id = (int)$user_id;
     $distribution_id = (int)$distribution_id;
@@ -194,6 +194,9 @@ function fifo_inventory_receive_distribution($conn, $user_id, $distribution_id, 
         mysqli_stmt_bind_param($update, 'dii', $damaged_quantity, $receiver, $distribution_id);
         mysqli_stmt_execute($update);
         if (mysqli_stmt_affected_rows($update) !== 1) throw new RuntimeException('Stock receipt could not be saved.');
+        // Product serials sent with this transfer are now in stock at the receiving location.
+        require_once __DIR__ . '/product_serial_helper.php';
+        product_serial_receive_distribution($conn, $distribution_id, $branch_id, $received_serial_ids);
         mysqli_commit($conn);
     } catch (Throwable $e) { mysqli_rollback($conn); throw $e; }
 }

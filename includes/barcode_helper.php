@@ -160,6 +160,13 @@ function product_barcode_lookup_map($conn, $user_id, $products, $variant_map)
         }
     }
 
+    // Serials in stock (Product Serial): scanning one adds its product with that serial.
+    if(function_exists('product_serial_scan_map')){
+        foreach(product_serial_scan_map($conn, $user_id) as $code => $hit){
+            if(!isset($map[$code])) $map[$code] = $hit;
+        }
+    }
+
     return $map;
 }
 
@@ -216,6 +223,7 @@ function barcode_scan_script($map)
         const hit = barcodeMap[code];
         const productId = hit ? String(hit[0]) : "";
         const variant = hit ? hit[1] : null;
+        const serial = hit && hit[2] ? String(hit[2]) : "";
         const option = productId ? $("#productTable tbody tr:first .product option[value=\"" + productId + "\"]") : $();
         if(!hit || !option.length){
             say(false, ["No product found for barcode", code]);
@@ -223,6 +231,13 @@ function barcode_scan_script($map)
         }
         const name = $.trim(option.first().text()) + (variant ? " - " + variant : "");
         const rows = $("#productTable tbody tr");
+        // A scanned serial is written in the serial field of its line.
+        const serialsOf = function(row){ return String(row.find(".iw-serial").val() || "").split(/[\r\n,]+/).map(function(v){ return v.trim(); }).filter(Boolean); };
+        const putSerial = function(row){ if(!serial) return; const list = serialsOf(row); list.push(serial); row.find(".iw-serial").val(list.join(", ")); };
+        if(serial){
+            const used = rows.filter(function(){ return serialsOf($(this)).some(function(v){ return v.toLowerCase() === serial.toLowerCase(); }); });
+            if(used.length){ say(false, ["Serial already on this invoice:", serial]); return; }
+        }
 
         // Same product (and same variant) already on the invoice: one more of it.
         const same = rows.filter(function(){
@@ -234,8 +249,10 @@ function barcode_scan_script($map)
         }).first();
         if(same.length){
             const qty = same.find(".qty");
-            qty.val((parseFloat(qty.val()) || 0) + 1).trigger("change");
-            say(true, [name, "Qty", qty.val()]);
+            // With serials, the quantity grows only when every piece already has its serial.
+            if(!serial || serialsOf(same).length >= (parseFloat(qty.val()) || 0)) qty.val((parseFloat(qty.val()) || 0) + 1).trigger("change");
+            putSerial(same);
+            say(true, serial ? [name, "Qty", qty.val(), "SN", serial] : [name, "Qty", qty.val()]);
             return;
         }
 
@@ -247,7 +264,8 @@ function barcode_scan_script($map)
         row.find(".qty").val(1);
         row.find(".product").val(productId).trigger("change");
         if(variant !== null && variant !== "") pickVariant(row, variant, 100);
-        say(true, variant === null ? ["Added:", name, "Select the variant."] : ["Added:", name]);
+        putSerial(row);
+        say(true, variant === null ? ["Added:", name, "Select the variant."] : (serial ? ["Added:", name, "SN", serial] : ["Added:", name]));
     }
 
     input.addEventListener("keydown", function(event){
@@ -266,7 +284,8 @@ function barcode_scan_script($map)
         if(now - last > 60) buffer = "";
         last = now;
         if(event.key === "Enter"){
-            if(buffer.length >= 3){ event.preventDefault(); addScanned(buffer); }
+            // Short product Codes (e.g. "02") count when they are a known barcode.
+            if(buffer.length >= 3 || (buffer && barcodeMap[buffer.trim().toUpperCase()])){ event.preventDefault(); addScanned(buffer); }
             buffer = "";
         }else if(event.key.length === 1){
             buffer += event.key;

@@ -25,6 +25,12 @@ if ($central && $multi_branch) {
     $receipt_count = mysqli_query($conn, "SELECT COUNT(DISTINCT COALESCE(transfer_group, CONCAT('legacy-',id))) AS total FROM stock_distributions WHERE user_id={$company_id} AND to_branch_id={$warehouse_id} AND from_branch_id<>{$warehouse_id} AND status='pending'");
     $pending_warehouse_receipts = (int)(mysqli_fetch_assoc($receipt_count)['total'] ?? 0);
 }
+// Product requests that branches sent to the Main Warehouse.
+$pending_warehouse_requests = 0;
+if ($central && $multi_branch) {
+    require_once '../includes/stock_request_helper.php';
+    $pending_warehouse_requests = stock_request_pending_count($conn, $company_id, $warehouse_id);
+}
 $scope_id = $central ? 0 : selected_branch_id($conn, true);
 if (!$central && $scope_id <= 0) { http_response_code(403); exit('Staff branch is not configured.'); }
 $message = $_SESSION['stock_distribution_message'] ?? '';
@@ -54,11 +60,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
         $variant_names = $_POST['variant_name'] ?? [];
         if(!is_array($product_ids) || !preg_match('/^[a-f0-9]{32,64}$/', $base_request_key)) throw new RuntimeException('Invalid distribution request.');
         $distribution_ids = [];
+        require_once '../includes/product_serial_helper.php';
+        $serial_transfer = product_serial_schema($conn);
         mysqli_begin_transaction($conn);
         $distribution_transaction = true;
         foreach($product_ids as $line_index => $product_id){
             $product_id = (int)$product_id;
             if($product_id <= 0) continue;
+            $line_first_distribution = count($distribution_ids);
             $line_variants = $variant_quantities[$line_index] ?? [];
             if(is_array($line_variants) && $line_variants){
                 foreach($line_variants as $variant_index => $quantity){
@@ -73,6 +82,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
                 if($quantity <= 0) continue;
                 $request_key = substr(hash('sha256', $base_request_key . '|' . $line_index), 0, 48);
                 $distribution_ids[] = fifo_inventory_distribute($conn, $company_id, (int)($_POST['to_branch_id'] ?? 0), $product_id, $quantity, $request_key, (string)($_POST['note'] ?? ''), (int)($_POST['from_branch_id'] ?? 0), '', $base_request_key, false);
+            }
+            // Product serials picked for this line travel with it.
+            if($serial_transfer && trim((string)($_POST['distribution_serials'][$line_index] ?? '')) !== ''){
+                product_serial_send($conn, $company_id, array_slice($distribution_ids, $line_first_distribution), (int)($_POST['from_branch_id'] ?? 0), $product_id, $_POST['distribution_serials'][$line_index]);
             }
         }
         if(empty($distribution_ids)){ throw new RuntimeException('Add a product and enter at least one quantity.'); }
@@ -163,6 +176,9 @@ require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
 ?>
+<?php if ($central && $multi_branch && $pending_warehouse_requests > 0) { ?>
+<div class="mb-3"><a href="receive_stock.php#product-requests" class="btn btn-warning"><i class="fas fa-inbox mr-1"></i>Branch Product Requests <span class="badge badge-light ml-2"><?= $pending_warehouse_requests; ?></span></a></div>
+<?php } ?>
 <?php if ($central && $multi_branch && $pending_warehouse_receipts > 0) { ?>
 <div class="mb-3"><a href="receive_stock.php" class="btn btn-primary"><i class="fas fa-truck-loading mr-1"></i>Product Receive Request <span class="badge badge-light ml-2"><?= $pending_warehouse_receipts; ?></span></a></div>
 <?php } ?>
@@ -449,7 +465,7 @@ function loadSourceProducts() {
             productSelects.forEach((select,index) => {
                 products.forEach(product => {
                     const option = new Option(product.name + ' — Available: ' + Number(product.available).toLocaleString(), product.id);
-                    option.dataset.available=product.available;option.dataset.sourceBranch=requestedSourceId;option.dataset.variants=JSON.stringify(product.variants||[]);select.add(option);
+                    option.dataset.available=product.available;option.dataset.sourceBranch=requestedSourceId;option.dataset.variants=JSON.stringify(product.variants||[]);option.dataset.serial=product.serial?'1':'';select.add(option);
                 });
                 if(!products.length) select.add(new Option('No stock available in this location',''));
                 select.disabled=false;
@@ -481,6 +497,7 @@ function renderDistributionQuantityInputs(productSelect) {
     if(!variants.length){
         const available = Number(selectedOption?.dataset.available || 0);
         wrap.innerHTML='<div class="input-group"><div class="input-group-prepend"><span class="input-group-text">Available: '+available+'</span></div><input class="form-control" type="number" name="quantity['+lineIndex+']" min="1" max="'+available+'" value="" step="1" required></div>';
+        appendDistributionSerialField(wrap, selectedOption, lineIndex);
         return;
     }
     wrap.innerHTML='';
@@ -491,6 +508,18 @@ function renderDistributionQuantityInputs(productSelect) {
         const input=document.createElement('input'); input.type='number'; input.className='form-control'; input.name='variant_quantity['+lineIndex+']['+variantIndex+']'; input.min='0'; input.max=variant.available; input.step='1'; input.value='';
         group.append(label,variantName,input); wrap.append(group);
     });
+    appendDistributionSerialField(wrap, selectedOption, lineIndex);
+}
+// Serial product: the serials being sent (scan or type; Enter starts the next one).
+function appendDistributionSerialField(wrap, option, lineIndex){
+    if(!option || option.dataset.serial !== '1') return;
+    // A serial box that takes exactly as many serials as the quantity being sent.
+    const field=document.createElement('div'); field.className='ps-box mt-1'; field.dataset.name='distribution_serials['+lineIndex+']'; field.dataset.optional='1';
+    wrap.append(field);
+    if(window.psBoxInit) window.psBoxInit(wrap);
+    const syncNeed=function(){ let total=0; wrap.querySelectorAll('input[type=number]').forEach(function(i){ total+=Math.max(0,parseInt(i.value,10)||0); }); if(window.psBoxSetNeed) window.psBoxSetNeed(field,total); };
+    wrap.addEventListener('input',function(e){ if(e.target.type==='number') syncNeed(); });
+    syncNeed();
 }
 function addDistributionLine(){
     const row=distributionLineTemplate.cloneNode(true);
@@ -562,4 +591,5 @@ $(document).on('click', '.warehouse-photo-preview', function () {
 SCRIPT;
 $page_script .= '<script src="../assets/js/ajax_page_actions.js?v=' . filemtime(__DIR__ . '/../assets/js/ajax_page_actions.js') . '"></script>';
 ?>
+<?php require_once '../includes/product_serial_helper.php'; if(product_serial_feature_enabled()) echo product_serial_box_script(); ?>
 <?php require_once '../includes/footer.php'; ?>

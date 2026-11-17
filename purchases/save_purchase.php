@@ -13,6 +13,10 @@ require_once '../includes/expense_helper.php';
 require_once '../includes/supplier_helper.php';
 require_once '../includes/activity_notification_helper.php';
 require_once '../includes/eshop_variant_image_helper.php';
+require_once '../includes/service_warranty_helper.php';
+// Inventory & Sales: warranty and product serials given while receiving.
+$purchase_serial_enabled = product_serial_schema($conn);
+if($purchase_serial_enabled) product_warranty_schema($conn);
 $purchase_line_products = [];
 
 $user_id = $_SESSION['user_id'];
@@ -238,6 +242,9 @@ function purchase_prepare_items($conn, $user_id)
         if($qty <= 0 || (float)($qtys[$key] ?? 0) !== (float)$qty){
             throw new Exception("Quantity must be at least 1.");
         }
+        if(!is_finite($price) || $price <= 0){
+            throw new Exception("Purchase price is required for every product.");
+        }
 
         if(!is_finite($price) || $price < 0){
             throw new Exception("Purchase price cannot be negative.");
@@ -366,6 +373,7 @@ function purchase_prepare_items($conn, $user_id)
                     'sale_price' => $sale_price,
                     'total' => $variant_qty * $price,
                     'variant_name' => $variant,
+                    'line_key' => $key,
                 ];
             }
             if($variant_total <= 0 || $variant_total !== $qty){
@@ -385,6 +393,7 @@ function purchase_prepare_items($conn, $user_id)
             'sale_price' => $sale_price,
             'total' => $qty * $price,
             'variant_name' => $variant_name,
+            'line_key' => $key,
         ];
     }
 
@@ -526,6 +535,25 @@ try{
 
         mysqli_stmt_bind_param($stmt, "iisidd", $purchase_id, $product_id, $variant_name, $qty, $price, $total);
         mysqli_stmt_execute($stmt);
+        $purchase_item_id = (int)mysqli_insert_id($conn);
+
+        if($purchase_serial_enabled){
+            $line_key = $item['line_key'] ?? null;
+            // Warranty given here becomes the product's warranty for later sales.
+            $line_warranty = trim((string)($_POST['line_warranty'][$line_key] ?? ''));
+            if($line_warranty !== '' && product_serial_is_enabled($conn, $user_id, $product_id)){
+                $line_warranty = max(0, min(600, (int)$line_warranty));
+                mysqli_query($conn, 'UPDATE purchase_items SET warranty_months=' . $line_warranty . ' WHERE id=' . $purchase_item_id);
+                product_warranty_save($conn, $user_id, $product_id, $line_warranty);
+            }
+            // Product Serial: one serial for each piece received.
+            if(product_serial_is_enabled($conn, $user_id, $product_id)){
+                $line_serial_groups = product_serial_parse_groups($_POST['line_serials'][$line_key] ?? '');
+                $line_serial_list = $line_serial_groups[$variant_name] ?? [];
+                product_serial_check_counts([$variant_name => $line_serial_list], [$variant_name => $qty], 'Serials');
+                product_serial_add($conn, $user_id, $product_id, $variant_name, $line_serial_list, $branch_id, 'purchase', $purchase_id);
+            }
+        }
 
         if(($_SESSION['company_type'] ?? '') !== 'Housing'){
         if(!fifo_inventory_create_batch(
@@ -633,6 +661,8 @@ try{
     }
 
     $_SESSION['success'] = "Purchase Saved Successfully.";
+    // Save Purchase & Print: the purchase page opens the print view of this purchase.
+    $_SESSION['purchase_print_id'] = (int)$purchase_id;
     header("Location:create.php?success=1");
     exit;
 }catch(Exception $e){

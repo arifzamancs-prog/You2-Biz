@@ -296,6 +296,19 @@ function sidebar_group_active($items)
     return false;
 }
 
+// Pending product requests from branches to the Main Warehouse (sidebar badge).
+function sidebar_warehouse_request_count($conn)
+{
+    static $count = null;
+    if ($count !== null) return $count;
+    $count = 0;
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if ($company_id <= 0 || !function_exists('stock_warehouse_id') || !function_exists('stock_can_manage_warehouse') || !stock_can_manage_warehouse($conn)) return $count;
+    require_once __DIR__ . '/stock_request_helper.php';
+    $count = stock_request_pending_count($conn, $company_id, stock_warehouse_id($conn, $company_id));
+    return $count;
+}
+
 function sidebar_item($href, $label, $icon = 'far fa-circle', $class = '', $badge = 0)
 {
     $has_pending_receipt = $href === app_path('sales/receive_stock.php') && (int)$badge > 0;
@@ -741,7 +754,7 @@ if(
                     if(products_module_enabled()){
                         if(manager_has_permission('products')) sidebar_tree('Products', 'fas fa-boxes', $sidebar_product_items);
                         if(manager_has_permission('suppliers') && (restaurant_module_active() || stock_can_manage_warehouse($conn))) sidebar_tree(supplier_display_text('Suppliers'), 'fas fa-truck', array_merge([['href'=>app_path('suppliers/index.php'),'label'=>supplier_display_text('Suppliers')],['href'=>app_path('purchases/index.php'),'label'=>'Purchases'],['href'=>app_path('purchases/purchase_return.php'),'label'=>'Purchase Return'],['href'=>app_path('suppliers/supplier_payment.php'),'label'=>supplier_display_text('Supplier Due Payment')]], $sidebar_vendor_due_history_item));
-                        if(!restaurant_module_active() && manager_has_permission('warehouse') && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                        if(!restaurant_module_active() && manager_has_permission('warehouse') && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse', '', sidebar_warehouse_request_count($conn));
                         if(manager_has_permission('stock_live_report') && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                         if(manager_has_permission('stock_sales')) {
                             $stock_sales_items = [
@@ -962,7 +975,7 @@ if(
                     ], $sidebar_vendor_due_history_item)
                 );
 
-                if(!restaurant_module_active() && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse');
+                if(!restaurant_module_active() && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/index.php'), 'Main Warehouse', 'fas fa-warehouse', '', sidebar_warehouse_request_count($conn));
                 if(in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true) && company_multi_branch_enabled($conn, (int)$_SESSION['user_id'])) sidebar_item(app_path('warehouse/live_report.php'), 'Stock Live Report', 'fas fa-chart-bar');
                 }
 
