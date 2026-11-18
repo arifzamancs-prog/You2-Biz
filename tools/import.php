@@ -113,6 +113,7 @@ function import_restore_reference_maps()
         'charge_type_id' => 'invoice_charge_types',
         'stock_batch_id' => 'stock_batches',
         'opening_due_id' => 'customer_opening_dues',
+        'form_id' => 'visa_process_forms',
     ];
 }
 
@@ -133,6 +134,7 @@ function import_restore_priority($table)
         'categories' => 20,
         'staff' => 30,
         'customers' => 40,
+        'visa_process_forms' => 42,
         'suppliers' => 45,
         'projects' => 50,
         'products' => 55,

@@ -4,13 +4,19 @@ require_once __DIR__ . '/_init.php';
 require_once __DIR__ . '/../includes/visa_processing_helper.php';
 
 if (!is_admin_user()) {
-    header('Location: visa_processing.php');
+    header('Location: visa_processing.php' . ((int)($_GET['form'] ?? 0) > 0 ? '?form=' . (int)$_GET['form'] : ''));
     exit;
 }
 if (!visa_process_schema($conn)) {
     exit('Visa processing tables could not be prepared.');
 }
-visa_process_seed_fields($conn, $user_id);
+$vp_form = visa_process_current_form($conn, $user_id);
+if (!$vp_form) {
+    header('Location: forms.php');
+    exit;
+}
+$form_id = (int)$vp_form['id'];
+$settings_url = 'visa_processing_settings.php?form=' . $form_id;
 $h = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 $types = visa_process_field_types();
 
@@ -18,12 +24,12 @@ $flash = $_SESSION['visa_field_flash'] ?? null;
 unset($_SESSION['visa_field_flash']);
 $back = static function ($type, $text) {
     $_SESSION['visa_field_flash'] = [$type, $text];
-    header('Location: visa_processing_settings.php');
+    header('Location: ' . $settings_url);
     exit;
 };
-$field_by_id = static function ($id) use ($conn, $user_id) {
-    $stmt = mysqli_prepare($conn, "SELECT * FROM visa_process_fields WHERE id=? AND user_id=? LIMIT 1");
-    mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);
+$field_by_id = static function ($id) use ($conn, $user_id, $form_id) {
+    $stmt = mysqli_prepare($conn, "SELECT * FROM visa_process_fields WHERE id=? AND user_id=? AND form_id=? LIMIT 1");
+    mysqli_stmt_bind_param($stmt, 'iii', $id, $user_id, $form_id);
     mysqli_stmt_execute($stmt);
     return mysqli_fetch_assoc(mysqli_stmt_get_result($stmt)) ?: null;
 };
@@ -43,20 +49,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         if ((int)$field['is_default'] === 1) {
             $back('danger', 'A starting field cannot be deleted; set it Inactive to hide it.');
         }
-        $stmt = mysqli_prepare($conn, "DELETE FROM visa_process_fields WHERE id=? AND user_id=? AND is_default=0");
-        mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);
+        $stmt = mysqli_prepare($conn, "DELETE FROM visa_process_fields WHERE id=? AND user_id=? AND form_id=? AND is_default=0");
+        mysqli_stmt_bind_param($stmt, 'iii', $id, $user_id, $form_id);
         mysqli_stmt_execute($stmt);
         $back('success', '"' . $field['label'] . '" deleted. Values already saved in entries are kept.');
     }
 
     if ($action === 'up' || $action === 'down') {
         // Renumber in steps of 10, then swap with the neighbour.
-        $list = visa_process_fields($conn, $user_id, false);
+        $list = visa_process_fields($conn, $user_id, $form_id, false);
         $index = array_search($id, array_map(static fn($f) => (int)$f['id'], $list), true);
         $other = $action === 'up' ? $index - 1 : $index + 1;
         if ($index !== false && isset($list[$other])) {
             [$list[$index], $list[$other]] = [$list[$other], $list[$index]];
-            $stmt = mysqli_prepare($conn, "UPDATE visa_process_fields SET sort_order=? WHERE id=? AND user_id=?");
+            $stmt = mysqli_prepare($conn, "UPDATE visa_process_fields SET sort_order=? WHERE id=? AND user_id=? AND form_id=" . $form_id);
             foreach ($list as $n => $item) {
                 $sort = ($n + 1) * 10;
                 $item_id = (int)$item['id'];
@@ -64,7 +70,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 mysqli_stmt_execute($stmt);
             }
         }
-        header('Location: visa_processing_settings.php');
+        header('Location: ' . $settings_url);
         exit;
     }
 
@@ -88,17 +94,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
         if ($field) {
             // The key stays the same so values already saved under it keep showing.
-            $stmt = mysqli_prepare($conn, "UPDATE visa_process_fields SET label=?, field_type=?, options=?, is_required=?, show_in_list=?, status=? WHERE id=? AND user_id=?");
+            $stmt = mysqli_prepare($conn, "UPDATE visa_process_fields SET label=?, field_type=?, options=?, is_required=?, show_in_list=?, status=? WHERE id=? AND user_id=? AND form_id=" . $form_id);
             mysqli_stmt_bind_param($stmt, 'sssiisii', $form['label'], $form['field_type'], $form['options'], $form['is_required'], $form['show_in_list'], $form['status'], $id, $user_id);
             mysqli_stmt_execute($stmt);
             $back('success', '"' . $form['label'] . '" updated.');
         }
-        $key = visa_process_unique_key($conn, $user_id, $form['label']);
-        $sort = (int)(mysqli_fetch_assoc(mysqli_query($conn, "SELECT COALESCE(MAX(sort_order),0)+10 n FROM visa_process_fields WHERE user_id={$user_id}"))['n'] ?? 10);
-        $stmt = mysqli_prepare($conn, "INSERT INTO visa_process_fields (user_id, field_key, label, field_type, options, is_required, show_in_list, sort_order, status) VALUES (?,?,?,?,?,?,?,?,?)");
-        mysqli_stmt_bind_param($stmt, 'issssiiis', $user_id, $key, $form['label'], $form['field_type'], $form['options'], $form['is_required'], $form['show_in_list'], $sort, $form['status']);
+        $key = visa_process_unique_key($conn, $user_id, $form_id, $form['label']);
+        $sort = (int)(mysqli_fetch_assoc(mysqli_query($conn, "SELECT COALESCE(MAX(sort_order),0)+10 n FROM visa_process_fields WHERE user_id={$user_id} AND form_id={$form_id}"))['n'] ?? 10);
+        $stmt = mysqli_prepare($conn, "INSERT INTO visa_process_fields (user_id, form_id, field_key, label, field_type, options, is_required, show_in_list, sort_order, status) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        mysqli_stmt_bind_param($stmt, 'iissssiiis', $user_id, $form_id, $key, $form['label'], $form['field_type'], $form['options'], $form['is_required'], $form['show_in_list'], $sort, $form['status']);
         mysqli_stmt_execute($stmt);
-        $back('success', '"' . $form['label'] . '" added to the form.');
+        $back('success', '"' . $form['label'] . '" added to the sheet.');
     }
 }
 
@@ -106,7 +112,7 @@ if (!$form && (int)($_GET['edit'] ?? 0) > 0) {
     $form = $field_by_id((int)$_GET['edit']);
 }
 $form = $form ?: ['id' => 0, 'label' => '', 'field_type' => 'text', 'options' => '', 'is_required' => 0, 'show_in_list' => 1, 'status' => 'active', 'is_default' => 0];
-$fields = visa_process_fields($conn, $user_id, false);
+$fields = visa_process_fields($conn, $user_id, $form_id, false);
 
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../includes/navbar.php';
@@ -133,7 +139,7 @@ require_once __DIR__ . '/../includes/sidebar.php';
                             <small class="text-muted">Write each option on a new line.</small></div>
                         <div class="form-group"><label for="vfs-status">Status</label>
                             <select id="vfs-status" name="status" class="form-control">
-                                <option value="active"<?= $form['status'] === 'active' ? ' selected' : ''; ?>>Active (shown on the form)</option>
+                                <option value="active"<?= $form['status'] === 'active' ? ' selected' : ''; ?>>Active (shown on the sheet)</option>
                                 <option value="inactive"<?= $form['status'] === 'inactive' ? ' selected' : ''; ?>>Inactive (hidden)</option>
                             </select></div>
                         <div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="vfs-required" name="is_required" value="1"<?= (int)$form['is_required'] === 1 ? ' checked' : ''; ?>><label class="custom-control-label" for="vfs-required">Required</label></div>
@@ -141,15 +147,15 @@ require_once __DIR__ . '/../includes/sidebar.php';
                     </div>
                     <div class="card-footer">
                         <button class="btn btn-primary"><i class="fas fa-save mr-1"></i><?= (int)$form['id'] > 0 ? 'Update Field' : 'Add Field'; ?></button>
-                        <?php if ((int)$form['id'] > 0) { ?><a href="visa_processing_settings.php" class="btn btn-secondary">Cancel</a><?php } ?>
+                        <?php if ((int)$form['id'] > 0) { ?><a href="<?= $h($settings_url); ?>" class="btn btn-secondary">Cancel</a><?php } ?>
                     </div>
                 </form>
             </div>
         </div>
         <div class="col-lg-8">
             <div class="card">
-                <div class="card-header"><h3 class="card-title"><i class="fas fa-cog mr-2"></i>Visa Processing Form Settings</h3>
-                    <div class="card-tools"><a href="visa_processing.php" class="btn btn-sm btn-outline-secondary"><i class="fas fa-list mr-1"></i>Entry List</a></div></div>
+                <div class="card-header"><h3 class="card-title"><i class="fas fa-cog mr-2"></i><?= $h($vp_form['form_name']); ?> — Sheet Settings</h3>
+                    <div class="card-tools"><a href="forms.php" class="btn btn-sm btn-outline-secondary mr-1"><i class="fas fa-clipboard-list mr-1"></i>All Sheets</a><a href="visa_processing.php?form=<?= $form_id; ?>" class="btn btn-sm btn-outline-secondary"><i class="fas fa-list mr-1"></i>Entry List</a></div></div>
                 <div class="card-body table-responsive p-0">
                     <table class="table table-bordered table-striped table-sm mb-0">
                         <thead><tr><th style="width:70px">Order</th><th>Label</th><th>Type</th><th>Required</th><th>In List</th><th>Status</th><th style="width:100px">Action</th></tr></thead>
@@ -167,7 +173,7 @@ require_once __DIR__ . '/../includes/sidebar.php';
                                     <td><?= (int)$field['show_in_list'] === 1 ? 'Yes' : 'No'; ?></td>
                                     <td><span class="badge badge-<?= $field['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= $h(ucfirst($field['status'])); ?></span></td>
                                     <td class="text-nowrap">
-                                        <a href="?edit=<?= (int)$field['id']; ?>" class="btn btn-xs btn-warning" title="Edit"><i class="fas fa-edit"></i></a>
+                                        <a href="?form=<?= $form_id; ?>&amp;edit=<?= (int)$field['id']; ?>" class="btn btn-xs btn-warning" title="Edit"><i class="fas fa-edit"></i></a>
                                         <?php if ((int)$field['is_default'] !== 1) { ?>
                                             <form method="post" class="d-inline" onsubmit="return confirm('Delete this field? Values already saved in entries stay in the database.');"><?= travel_csrf_field(); ?><input type="hidden" name="field_id" value="<?= (int)$field['id']; ?>"><button class="btn btn-xs btn-danger" name="action" value="delete" title="Delete"><i class="fas fa-trash"></i></button></form>
                                         <?php } ?>

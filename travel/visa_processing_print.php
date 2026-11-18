@@ -1,5 +1,5 @@
 <?php
-// Print of Visa Processing entries: one entry (?id=) as a full form, or a list
+// Print of a form's entries (?form=ID): one entry (?id=) as a full form, or a list
 // (?ids=1,2,3 for selected rows, else every entry matching ?q=) as a table.
 require_once __DIR__ . '/_init.php';
 require_once __DIR__ . '/../includes/visa_processing_helper.php';
@@ -8,7 +8,13 @@ if (!visa_process_schema($conn)) {
     exit('Visa processing tables could not be prepared.');
 }
 $h = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-$fields = visa_process_fields($conn, $user_id);
+$vp_form = visa_process_current_form($conn, $user_id);
+if (!$vp_form) {
+    exit('Sheet not found.');
+}
+$form_id = (int)$vp_form['id'];
+$print_title = visa_process_print_title($vp_form);
+$fields = visa_process_fields($conn, $user_id, $form_id);
 $company = mysqli_fetch_assoc(mysqli_query($conn, "SELECT name, phone, email, address, avatar FROM users WHERE id={$user_id}")) ?: [];
 $logo = '';
 if (!empty($company['avatar']) && is_file(__DIR__ . '/../uploads/avatars/' . basename($company['avatar']))) {
@@ -18,7 +24,7 @@ if (!empty($company['avatar']) && is_file(__DIR__ . '/../uploads/avatars/' . bas
 $single = null;
 $rows = [];
 if ((int)($_GET['id'] ?? 0) > 0) {
-    $single = visa_process_entry($conn, $user_id, (int)$_GET['id']);
+    $single = visa_process_entry($conn, $user_id, $form_id, (int)$_GET['id']);
     if (!$single) {
         exit('Entry not found.');
     }
@@ -26,7 +32,7 @@ if ((int)($_GET['id'] ?? 0) > 0) {
     $ids = array_filter(array_map('intval', explode(',', (string)($_GET['ids'] ?? ''))));
     $search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);
     // A printed list reads from SL 1 upwards.
-    $rows = array_reverse(visa_process_search($conn, $user_id, $ids ? '' : $search, 5000, $ids));
+    $rows = array_reverse(visa_process_search($conn, $user_id, $form_id, $ids ? '' : $search, 5000, $ids));
     $fields = array_values(array_filter($fields, static fn($f) => (int)$f['show_in_list'] === 1));
 }
 $wide = !$single && count($fields) > 7;
@@ -51,7 +57,7 @@ $address = trim(implode(' | ', array_filter([$company['address'] ?? '', !empty($
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title><?= $single ? 'Visa Processing - SL ' . (int)$single['serial_no'] : 'Visa Processing List'; ?></title>
+<title><?= $h($vp_form['form_name']) . ($single ? ' - SL ' . (int)$single['serial_no'] : ' List'); ?></title>
 <style>
 @page{size:A4 <?= $wide ? 'landscape' : 'portrait'; ?>;margin:12mm}
 :root{--ink:#1d2b3a;--accent:#14466e;--soft:#eef3f8;--line:#c9d3dd}
@@ -96,7 +102,7 @@ table{width:100%;border-collapse:collapse}
 <body>
 <div class="tools">
     <button type="button" onclick="window.print()">Print</button>
-    <a href="visa_processing.php">Back to list</a>
+    <a href="visa_processing.php?form=<?= $form_id; ?>">Back to list</a>
 </div>
 <div class="sheet">
     <div class="head">
@@ -108,13 +114,13 @@ table{width:100%;border-collapse:collapse}
     </div>
 
 <?php if ($single) { ?>
-    <div class="band">VISA PROCESSING FORM</div>
+    <div class="band"><?= $h($print_title); ?></div>
     <div class="facts">
         <div class="fact"><div class="k">SL No.</div><div class="v"><?= (int)$single['serial_no']; ?></div></div>
         <div class="fact"><div class="k">Entry Date</div><div class="v"><?= $h(date('d M Y', strtotime($single['created_at']))); ?></div></div>
         <div class="fact"><div class="k">Printed On</div><div class="v"><?= date('d M Y'); ?></div></div>
     </div>
-    <div class="section">Applicant Details</div>
+    <div class="section">Details</div>
     <table class="details">
         <?php foreach ($pairs as $pair) { ?>
             <tr>
@@ -129,7 +135,7 @@ table{width:100%;border-collapse:collapse}
     </table>
     <div class="sign"><div>Applicant Signature</div><div>Prepared By</div><div>Authorized Signature</div></div>
 <?php } else { ?>
-    <div class="band">VISA PROCESSING LIST</div>
+    <div class="band"><?= $h($print_title); ?> LIST</div>
     <div class="list-meta"><span>Total: <strong><?= count($rows); ?></strong> entr<?= count($rows) === 1 ? 'y' : 'ies'; ?><?= !empty($search) && empty($ids) ? ' &nbsp;|&nbsp; Search: ' . $h($search) : ''; ?></span><span>Printed: <?= date('d M Y, h:i A'); ?></span></div>
     <table class="list">
         <thead><tr><th style="text-align:center">SL</th><?php foreach ($fields as $field) { ?><th><?= $h($field['label']); ?></th><?php } ?></tr></thead>
