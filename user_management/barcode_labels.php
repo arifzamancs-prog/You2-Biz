@@ -173,6 +173,16 @@ require_once '../includes/sidebar.php';
                 </div>
                 <small class="text-muted">If the print lands off the label. Minus moves left / up.</small>
             </div>
+            <div class="col-md-3 form-group thermal-only">
+                <label for="label-rotate">Rotate Print</label>
+                <select id="label-rotate" class="form-control print-setting">
+                    <option value="0">No rotation</option>
+                    <option value="90">90° (turn right)</option>
+                    <option value="270">90° (turn left)</option>
+                    <option value="180">180° (upside down)</option>
+                </select>
+                <small class="text-muted">If the label prints sideways or upside down.</small>
+            </div>
             <div class="col-md-3 form-group a4-only d-none">
                 <label>Sheet Margin: Top × Left (mm)</label>
                 <div class="input-group">
@@ -305,6 +315,7 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
     }
     function printerDpi(){ return parseInt($("#printer-dpi").val(), 10) || 203; }
+    function printRotation(){ const r = parseInt($("#label-rotate").val(), 10); return [90, 180, 270].indexOf(r) >= 0 ? r : 0; }
     function printOffset(){ return {x: numberSetting("offset-x", 0, -10, 10), y: numberSetting("offset-y", 0, -10, 10)}; }
 
     function layout(){
@@ -386,6 +397,12 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         return {svg: svgCache[cacheKey].svg.cloneNode(true), quality: svgCache[cacheKey].quality};
     }
 
+    // The thermal page: the label size, or turned (h × w) when the print is rotated 90° either way.
+    function pageSize(size){
+        const r = printRotation();
+        return (r === 90 || r === 270) ? {w: size.h, h: size.w} : {w: size.w, h: size.h};
+    }
+
     // The printable sheets: one page per thermal label, or A4 pages of labels.
     function buildSheets(){
         const size = layout();
@@ -396,13 +413,27 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         const sheets = [];
         const offset = printOffset();
         if(size.type === "thermal"){
+            // Rotation turns the label on the page; at 90° the page itself is h × w, for printers
+            // (drivers) that feed the label the other way and would otherwise print it sideways.
+            const rotate = printRotation();
+            const page = pageSize(size);
+            const turn = {0: "", 90: "translate(" + size.h + "mm,0) rotate(90deg)",
+                180: "translate(" + size.w + "mm," + size.h + "mm) rotate(180deg)", 270: "translate(0," + size.w + "mm) rotate(-90deg)"}[rotate];
             labels.forEach(function(row){
                 const sheet = el("div", "barcode-sheet");
-                sheet.style.width = size.w + "mm";
+                sheet.style.position = "relative";
+                sheet.style.width = page.w + "mm";
                 // A hair under the page height, so rounding never pushes a blank label out between labels.
-                sheet.style.height = (size.h - 0.2) + "mm";
+                sheet.style.height = (page.h - 0.2) + "mm";
                 const label = makeLabel(row.item, size);
-                if(offset.x || offset.y) label.style.transform = "translate(" + offset.x + "mm," + offset.y + "mm)";
+                const transform = ((offset.x || offset.y) ? "translate(" + offset.x + "mm," + offset.y + "mm) " : "") + turn;
+                if(transform.trim()){
+                    label.style.position = "absolute";
+                    label.style.left = "0";
+                    label.style.top = "0";
+                    label.style.transformOrigin = "0 0";
+                    label.style.transform = transform;
+                }
                 sheet.appendChild(label);
                 sheets.push(sheet);
             });
@@ -543,7 +574,7 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
     $("#barcode-clear").on("click", function(){ rows.length = 0; renderTable(); render(); });
 
     // Print settings are remembered in this browser (paper, size, printer, shift, sheet margins).
-    const settingIds = ["print-type", "thermal-size", "thermal-width", "thermal-height", "a4-layout", "printer-dpi", "offset-x", "offset-y", "a4-margin-top", "a4-margin-left", "a4-gap-x", "a4-gap-y"];
+    const settingIds = ["print-type", "thermal-size", "thermal-width", "thermal-height", "a4-layout", "printer-dpi", "offset-x", "offset-y", "label-rotate", "a4-margin-top", "a4-margin-left", "a4-gap-x", "a4-gap-y"];
     try {
         const saved = JSON.parse(localStorage.getItem("barcode_label_print_settings") || "{}");
         settingIds.forEach(function(id){ if(saved[id] !== undefined && saved[id] !== null) $("#" + id).val(saved[id]); });
@@ -554,13 +585,14 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
         try { localStorage.setItem("barcode_label_print_settings", JSON.stringify(values)); } catch(e) {}
     }
     $("#" + settingIds.join(", #")).on("change", saveSettings);
-    $("#printer-dpi, #offset-x, #offset-y, #a4-margin-top, #a4-margin-left, #a4-gap-x, #a4-gap-y").on("input change", render);
+    $("#printer-dpi, #offset-x, #offset-y, #label-rotate, #a4-margin-top, #a4-margin-left, #a4-gap-x, #a4-gap-y").on("input change", render);
 
     $("#print-type").on("change", function(event){
         const a4 = this.value === "a4";
         $("#thermal-size-group").toggleClass("d-none", a4);
         $("#thermal-custom-group").toggleClass("d-none", a4 || $("#thermal-size").val() !== "custom");
         $("#a4-layout-group, #a4-start-group, .a4-only").toggleClass("d-none", !a4);
+        $(".thermal-only").toggleClass("d-none", a4);
         // A user switch of paper also suggests the usual printer: thermal 203 dpi, sheet printers 600 dpi.
         if(event.originalEvent){
             $("#printer-dpi").val(a4 ? "600" : "203");
@@ -589,7 +621,8 @@ $page_script = '<script src="' . htmlspecialchars($barcode_script_url) . '"></sc
     printButton.addEventListener("click", function(){
         const built = buildSheets();
         const size = built.size;
-        const page = size.type === "a4" ? "210mm 297mm" : size.w + "mm " + size.h + "mm";
+        const thermalPage = pageSize(size);
+        const page = size.type === "a4" ? "210mm 297mm" : thermalPage.w + "mm " + thermalPage.h + "mm";
         const css = document.getElementById("barcode-label-style").textContent
             + "@page{size:" + page + ";margin:0}"
             + "html,body{margin:0;padding:0;background:#fff}"
