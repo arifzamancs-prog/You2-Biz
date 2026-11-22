@@ -181,47 +181,26 @@ function my_stock_rows_html($conn, $user_id, $branch_id)
             <td><?= number_format((float)$row['stock_cost'], 2); ?></td>
             <td><?= number_format((float)$row['on_hand'] * (float)$row['sale_price'], 2); ?></td>
         </tr>
-    <?php } } else { ?><tr><td colspan="<?= $show_photo ? 9 : 8 ?>" class="text-center text-muted py-4">No stock is available in this branch.</td></tr><?php }
+    <?php } }
     return ob_get_clean();
 }
 
-// Only the company administrator may edit or delete Stock Add History.
-function branch_stock_can_manage_history()
+// Only the company administrator may add or remove branch stock here.
+function branch_stock_can_adjust()
 {
     return is_admin_user() && !is_manager_user();
 }
 
-// Loads one adjustment with its items and their FIFO batches (locked when $for_update).
-function branch_stock_load_adjustment($conn, $user_id, $branch_id, $adjustment_id, $for_update = false)
+// The company administrator's login password confirms every stock add/remove.
+function branch_stock_admin_password_ok($conn, $user_id, $password)
 {
-    $lock = $for_update ? ' FOR UPDATE' : '';
-    $stmt = mysqli_prepare($conn, 'SELECT id,reference_no,note FROM branch_stock_adjustments WHERE id=? AND user_id=? AND branch_id=? LIMIT 1' . $lock);
-    mysqli_stmt_bind_param($stmt, 'iii', $adjustment_id, $user_id, $branch_id);
+    if ($password === '') return false;
+    $stmt = mysqli_prepare($conn, "SELECT password FROM users WHERE id=? AND role='admin' LIMIT 1");
+    mysqli_stmt_bind_param($stmt, 'i', $user_id);
     mysqli_stmt_execute($stmt);
-    $adjustment = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    $admin = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
     mysqli_stmt_close($stmt);
-    if (!$adjustment) throw new RuntimeException('Stock entry not found in this branch.');
-    $stmt = mysqli_prepare($conn, 'SELECT ai.id,ai.product_id,ai.variant_name,ai.quantity,ai.unit_cost,p.product_name,p.sku FROM branch_stock_adjustment_items ai LEFT JOIN products p ON p.id=ai.product_id AND p.user_id=ai.user_id WHERE ai.adjustment_id=? AND ai.user_id=? ORDER BY ai.id' . $lock);
-    mysqli_stmt_bind_param($stmt, 'ii', $adjustment_id, $user_id);
-    mysqli_stmt_execute($stmt);
-    $items = mysqli_fetch_all(mysqli_stmt_get_result($stmt), MYSQLI_ASSOC);
-    mysqli_stmt_close($stmt);
-    $batch_stmt = mysqli_prepare($conn, "SELECT id,quantity,remaining_quantity FROM stock_batches WHERE user_id=? AND branch_id=? AND source_type='branch_adjustment' AND source_id=? LIMIT 1" . $lock);
-    foreach ($items as &$item) {
-        $item_id = (int)$item['id'];
-        mysqli_stmt_bind_param($batch_stmt, 'iii', $user_id, $branch_id, $item_id);
-        mysqli_stmt_execute($batch_stmt);
-        $item['batch'] = mysqli_fetch_assoc(mysqli_stmt_get_result($batch_stmt)) ?: null;
-        $item['label'] = ($item['product_name'] ?? 'Deleted product') . (trim((string)($item['sku'] ?? '')) !== '' ? ' [' . $item['sku'] . ']' : '') . ($item['variant_name'] !== '' ? ' — ' . $item['variant_name'] : '');
-        $item['used'] = $item['batch'] ? max(0, (float)$item['batch']['quantity'] - (float)$item['batch']['remaining_quantity']) : 0;
-        if ((float)$item['quantity'] <= 0 || !$item['batch']) {
-            throw new RuntimeException('This older stock entry cannot be changed.');
-        }
-    }
-    unset($item);
-    mysqli_stmt_close($batch_stmt);
-    $adjustment['items'] = $items;
-    return $adjustment;
+    return $admin && password_verify($password, (string)$admin['password']);
 }
 
 function my_stock_history_html($conn, $user_id, $branch_id)
@@ -250,28 +229,23 @@ function my_stock_history_html($conn, $user_id, $branch_id)
         }
         $qty = (float)$row['quantity'];
         if ($row['variant_name'] !== '') {
-            $entries[$id]['products'][$pid]['variants'][] = $row['variant_name'] . '-' . number_format($qty, 0);
+            $entries[$id]['products'][$pid]['variants'][] = $row['variant_name'] . ' ' . ($qty > 0 ? '+' : '') . number_format($qty, 0);
         }
         $entries[$id]['products'][$pid]['qty'] += $qty;
         $entries[$id]['total'] += $qty;
     }
     mysqli_stmt_close($stmt);
     ob_start();
-    $can_manage = branch_stock_can_manage_history();
-    if ($entries) { foreach ($entries as $entry_id => $entry) {
+    if ($entries) { foreach ($entries as $entry) {
         ?>
         <tr<?= array_filter(array_column($entry['products'], 'variants')) ? ' data-has-variant="1"' : ''; ?>>
             <td class="text-nowrap"><?= htmlspecialchars(app_date($entry['date'])); ?></td>
             <td class="text-nowrap"><?= htmlspecialchars($entry['ref']); ?></td>
             <td><?php foreach ($entry['products'] as $product) { ?><div><?= htmlspecialchars($product['label']); ?></div><?php } ?></td>
             <td><?php foreach ($entry['products'] as $product) { ?><div><?= $product['variants'] ? htmlspecialchars(implode(', ', $product['variants'])) : '—'; ?></div><?php } ?></td>
-            <td class="font-weight-bold"><?php foreach ($entry['products'] as $product) { ?><div><?= number_format($product['qty'], 0); ?></div><?php } ?></td>
+            <td class="font-weight-bold text-nowrap"><?php foreach ($entry['products'] as $product) { ?><div class="<?= $product['qty'] < 0 ? 'text-danger' : 'text-success'; ?>"><?= ($product['qty'] > 0 ? '+' : '') . number_format($product['qty'], 0); ?></div><?php } ?></td>
             <td><?= htmlspecialchars($entry['by'] ?? ''); ?></td>
             <td><?= htmlspecialchars($entry['note'] ?? ''); ?></td>
-            <?php if ($can_manage) { ?><td class="text-nowrap">
-                <button type="button" class="btn btn-warning btn-sm adjust-edit" data-id="<?= (int)$entry_id; ?>" title="Edit"><i class="fas fa-edit"></i></button>
-                <button type="button" class="btn btn-danger btn-sm adjust-remove" data-id="<?= (int)$entry_id; ?>" data-ref="<?= htmlspecialchars($entry['ref'], ENT_QUOTES, 'UTF-8'); ?>" title="Delete"><i class="fas fa-trash"></i></button>
-            </td><?php } ?>
         </tr>
     <?php } }
     // No placeholder row: DataTables shows its own "empty" message.
@@ -304,6 +278,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     }
 
     if ($action === 'save_adjustment') {
+        if (!branch_stock_can_adjust()) {
+            echo json_encode(['ok' => false, 'message' => 'Only the company administrator can add or remove stock.']);
+            exit;
+        }
+        if (!branch_stock_admin_password_ok($conn, $user_id, (string)($_POST['admin_password'] ?? ''))) {
+            echo json_encode(['ok' => false, 'password_error' => true, 'message' => 'Admin password is incorrect.']);
+            exit;
+        }
         try {
             $product_ids = $_POST['product_id'] ?? [];
             $variant_names = $_POST['variant_name'] ?? [];
@@ -319,8 +301,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $product_id = (int)$raw_product_id;
                 if ($product_id <= 0) continue;
                 $raw_qty = trim((string)($quantities[$key] ?? ''));
-                if (!preg_match('/^\d+$/', $raw_qty) || (int)$raw_qty <= 0 || (int)$raw_qty > 1000000) {
-                    throw new RuntimeException('Quantity must be a whole number greater than 0.');
+                // A plus number adds stock, a minus number removes it.
+                if (!preg_match('/^-?\d+$/', $raw_qty) || (int)$raw_qty === 0 || abs((int)$raw_qty) > 1000000) {
+                    throw new RuntimeException('Quantity must be a whole number other than 0 (use minus to remove).');
                 }
                 $product = branch_stock_product($conn, $user_id, $product_id);
                 if (!$product) throw new RuntimeException('One of the selected products is not available.');
@@ -409,7 +392,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             echo json_encode([
                 'ok' => true,
-                'message' => 'Stock saved (' . $reference_no . '). ' . count($lines) . ' product' . (count($lines) === 1 ? '' : 's') . ' updated in ' . $GLOBALS['current_branch_label'] . '.',
+                'message' => 'Stock updated (' . $reference_no . '). ' . count($lines) . ' product' . (count($lines) === 1 ? '' : 's') . ' updated in ' . $GLOBALS['current_branch_label'] . '.',
                 'stock_html' => my_stock_rows_html($conn, $user_id, $branch_id),
                 'history_html' => my_stock_history_html($conn, $user_id, $branch_id),
             ]);
@@ -418,83 +401,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $message = $e instanceof RuntimeException ? $e->getMessage() : 'Stock could not be saved. Please try again.';
             if (!($e instanceof RuntimeException)) error_log('Branch stock adjustment: ' . $e->getMessage());
             echo json_encode(['ok' => false, 'message' => $message]);
-        }
-        exit;
-    }
-
-    if (in_array($action, ['adjustment_detail', 'update_adjustment', 'delete_adjustment'], true)) {
-        if (!branch_stock_can_manage_history()) {
-            echo json_encode(['ok' => false, 'message' => 'Only the company administrator can edit or delete stock entries.']);
-            exit;
-        }
-        $adjustment_id = (int)($_POST['adjustment_id'] ?? 0);
-        try {
-            if ($action === 'adjustment_detail') {
-                $adjustment = branch_stock_load_adjustment($conn, $user_id, $branch_id, $adjustment_id);
-                echo json_encode(['ok' => true, 'reference_no' => $adjustment['reference_no'], 'note' => (string)$adjustment['note'], 'items' => array_map(function ($item) {
-                    return ['id' => (int)$item['id'], 'label' => $item['label'], 'quantity' => (float)$item['quantity'], 'used' => (float)$item['used']];
-                }, $adjustment['items'])]);
-                exit;
-            }
-
-            mysqli_begin_transaction($conn);
-            $adjustment = branch_stock_load_adjustment($conn, $user_id, $branch_id, $adjustment_id, true);
-            $batch_update = mysqli_prepare($conn, 'UPDATE stock_batches SET quantity=?, remaining_quantity=? WHERE id=?');
-            $item_update = mysqli_prepare($conn, 'UPDATE branch_stock_adjustment_items SET quantity=?, total_cost=ROUND(?*unit_cost,2) WHERE id=?');
-
-            if ($action === 'delete_adjustment') {
-                // Stock already sold from this entry cannot be taken back.
-                foreach ($adjustment['items'] as $item) {
-                    if ($item['used'] > 0.0001) {
-                        throw new RuntimeException(number_format($item['used'], 0) . ' of ' . $item['label'] . ' from this entry has already been sold or moved, so it cannot be deleted.');
-                    }
-                }
-                $delete_batch = mysqli_prepare($conn, 'DELETE FROM stock_batches WHERE id=?');
-                foreach ($adjustment['items'] as $item) {
-                    $batch_id = (int)$item['batch']['id'];
-                    mysqli_stmt_bind_param($delete_batch, 'i', $batch_id);
-                    mysqli_stmt_execute($delete_batch);
-                }
-                $stmt = mysqli_prepare($conn, 'DELETE FROM branch_stock_adjustment_items WHERE adjustment_id=? AND user_id=?');
-                mysqli_stmt_bind_param($stmt, 'ii', $adjustment_id, $user_id);
-                mysqli_stmt_execute($stmt);
-                $stmt = mysqli_prepare($conn, 'DELETE FROM branch_stock_adjustments WHERE id=? AND user_id=? AND branch_id=?');
-                mysqli_stmt_bind_param($stmt, 'iii', $adjustment_id, $user_id, $branch_id);
-                mysqli_stmt_execute($stmt);
-                $message = 'Stock entry ' . $adjustment['reference_no'] . ' deleted. Branch stock has been reduced.';
-            } else {
-                $quantities = $_POST['item_qty'] ?? [];
-                if (!is_array($quantities)) throw new RuntimeException('Invalid quantities.');
-                foreach ($adjustment['items'] as $item) {
-                    $item_id = (int)$item['id'];
-                    $raw_qty = trim((string)($quantities[$item_id] ?? ''));
-                    if (!preg_match('/^\d+$/', $raw_qty) || (int)$raw_qty <= 0 || (int)$raw_qty > 1000000) {
-                        throw new RuntimeException('Quantity must be a whole number greater than 0.');
-                    }
-                    $new_qty = (float)(int)$raw_qty;
-                    if ($new_qty + 0.0001 < $item['used']) {
-                        throw new RuntimeException($item['label'] . ': ' . number_format($item['used'], 0) . ' already sold or moved, so the quantity cannot be less than that.');
-                    }
-                    if (abs($new_qty - (float)$item['quantity']) < 0.0001) continue;
-                    $new_remaining = $new_qty - $item['used'];
-                    $batch_id = (int)$item['batch']['id'];
-                    mysqli_stmt_bind_param($batch_update, 'ddi', $new_qty, $new_remaining, $batch_id);
-                    mysqli_stmt_execute($batch_update);
-                    mysqli_stmt_bind_param($item_update, 'ddi', $new_qty, $new_qty, $item_id);
-                    mysqli_stmt_execute($item_update);
-                }
-                $note = mb_substr(trim((string)($_POST['note'] ?? '')), 0, 255);
-                $stmt = mysqli_prepare($conn, 'UPDATE branch_stock_adjustments SET note=? WHERE id=? AND user_id=?');
-                mysqli_stmt_bind_param($stmt, 'sii', $note, $adjustment_id, $user_id);
-                mysqli_stmt_execute($stmt);
-                $message = 'Stock entry ' . $adjustment['reference_no'] . ' updated. Branch stock has been adjusted.';
-            }
-            mysqli_commit($conn);
-            echo json_encode(['ok' => true, 'message' => $message, 'stock_html' => my_stock_rows_html($conn, $user_id, $branch_id), 'history_html' => my_stock_history_html($conn, $user_id, $branch_id)]);
-        } catch (Throwable $e) {
-            try { mysqli_rollback($conn); } catch (Throwable $ignored) {}
-            if (!($e instanceof RuntimeException)) error_log('Branch stock history: ' . $e->getMessage());
-            echo json_encode(['ok' => false, 'message' => $e instanceof RuntimeException ? $e->getMessage() : 'The stock entry could not be saved. Please try again.']);
         }
         exit;
     }
@@ -516,10 +422,11 @@ require_once '../includes/sidebar.php';
 ?>
 <section class="content"><div class="container-fluid">
 
+<?php if (branch_stock_can_adjust()) { ?>
 <div class="card card-outline card-success">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-plus-square mr-2"></i>Add Stock — <?= htmlspecialchars($current_branch_label); ?></h3></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-plus-square mr-2"></i>Add/Remove Stock — <?= htmlspecialchars($current_branch_label); ?></h3></div>
     <div class="card-body">
-        <p class="text-muted mb-3">Select a product and enter the quantity to add (for each variant if the product has variants). Branch Stock shows the new total as you type.</p>
+        <p class="text-muted mb-3">Select a product and enter the quantity (for each variant if the product has variants). A plus number adds stock, a minus number (e.g. -5) removes it. Branch Stock shows the new total as you type. The admin password is needed to save.</p>
         <div id="adjust-message" aria-live="polite"></div>
         <style>
             #adjustTable td{vertical-align:middle}
@@ -545,6 +452,19 @@ require_once '../includes/sidebar.php';
         </form>
     </div>
 </div>
+<div class="modal fade" id="adjust-password-modal" tabindex="-1" role="dialog" aria-labelledby="adjust-password-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document"><form class="modal-content" id="adjust-password-form" autocomplete="off">
+        <div class="modal-header"><h5 class="modal-title" id="adjust-password-title">Confirm With Admin Password</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+        <div class="modal-body">
+            <div id="adjust-password-message"></div>
+            <p class="mb-2" id="adjust-password-summary"></p>
+            <label for="adjust-admin-password">Admin Password</label>
+            <input type="password" id="adjust-admin-password" class="form-control" autocomplete="current-password">
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary" id="adjust-password-confirm"><i class="fas fa-check mr-1"></i>Confirm &amp; Save</button></div>
+    </form></div>
+</div>
+<?php } ?>
 
 <div class="card card-outline card-primary">
     <div class="card-header"><h3 class="card-title"><i class="fas fa-boxes mr-2"></i>My Stock — <?= htmlspecialchars($current_branch_label); ?></h3><div class="card-tools"><div class="input-group input-group-sm" style="width:260px"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input type="search" id="my-stock-search" class="form-control" placeholder="Search product or Code" aria-label="Search stock"></div></div></div>
@@ -554,15 +474,14 @@ require_once '../includes/sidebar.php';
             <thead><tr><?php if (my_stock_show_photo($conn, $user_id)) { ?><th>Photo</th><?php } ?><th>Product</th><th>Code</th><th>On Hand</th><th>Reserved</th><th>Damaged</th><th>Available</th><th>Stock Cost</th><th>Sale Value</th></tr></thead>
             <tbody id="my-stock-body"><?= my_stock_rows_html($conn, $user_id, $branch_id); ?></tbody>
         </table></div>
-        <div id="my-stock-no-results" class="text-center text-muted py-4 d-none">No matching product was found.</div>
     </div>
 </div>
 
 <div class="card">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Stock Add History — <?= htmlspecialchars($current_branch_label); ?></h3></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-history mr-2"></i>Stock Add/Remove History — <?= htmlspecialchars($current_branch_label); ?></h3></div>
     <div class="card-body p-0">
         <div class="table-responsive p-3"><table class="table table-bordered table-striped mb-0" id="adjust-history-table">
-            <thead><tr><th class="text-nowrap" style="width:105px">Date</th><th class="text-nowrap" style="width:200px">Ref No</th><th style="width:30%">Product</th><th style="width:20%">Variant</th><th style="width:80px">Qty</th><th style="width:140px">By</th><th>Note</th><?php if (branch_stock_can_manage_history()) { ?><th style="width:90px">Action</th><?php } ?></tr></thead>
+            <thead><tr><th class="text-nowrap" style="width:105px">Date</th><th class="text-nowrap" style="width:170px">Ref No</th><th style="width:22%">Product</th><th style="width:14%">Variant</th><th style="width:70px">Qty</th><th style="width:120px">By</th><th style="width:30%">Note</th></tr></thead>
             <tbody id="adjust-history-body"><?= my_stock_history_html($conn, $user_id, $branch_id); ?></tbody>
         </table></div>
         <small class="text-muted d-block px-3 pb-2">The latest 100 stock entries are loaded.</small>
@@ -573,7 +492,7 @@ require_once '../includes/sidebar.php';
 <template id="adjust-row-template">
     <tr>
         <td><select class="form-control adjust-product"><?= $product_options_html; ?></select></td>
-        <td class="adjust-qty-cell"><div class="adjust-lines"><div class="adjust-line"><input type="number" step="1" min="1" class="form-control adjust-qty" data-variant="" placeholder="Qty"></div></div></td>
+        <td class="adjust-qty-cell"><div class="adjust-lines"><div class="adjust-line"><input type="text" inputmode="numeric" class="form-control adjust-qty" data-variant="" placeholder="Qty"></div></div></td>
         <td class="adjust-stock-cell"><div class="stock-lines"><div class="stock-line text-muted">—</div></div></td>
         <td><button type="button" class="btn btn-danger adjust-remove-row" title="Remove row">X</button></td>
     </tr>
@@ -600,20 +519,6 @@ document.addEventListener('click', function (event) {
     jQuery('#stock-photo-preview-modal').modal('show');
 });
 </script>
-<?php if (branch_stock_can_manage_history()) { ?>
-<div class="modal fade" id="adjust-edit-modal" tabindex="-1" role="dialog" aria-labelledby="adjust-edit-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg" role="document"><div class="modal-content">
-        <div class="modal-header"><h5 class="modal-title" id="adjust-edit-title">Edit Stock Entry</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
-        <div class="modal-body">
-            <div id="adjust-edit-message"></div>
-            <input type="hidden" id="adjust-edit-id" value="">
-            <table class="table table-bordered mb-3"><thead><tr><th>Product</th><th style="width:150px">Qty</th></tr></thead><tbody id="adjust-edit-items"></tbody></table>
-            <div class="form-group mb-0"><label for="adjust-edit-note">Note <small class="text-muted">(optional)</small></label><input type="text" id="adjust-edit-note" maxlength="255" class="form-control"></div>
-        </div>
-        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="adjust-edit-save"><i class="fas fa-save mr-1"></i>Save Changes</button></div>
-    </div></div>
-</div>
-<?php } ?>
 <?php
 $adjust_csrf_json = json_encode(stock_csrf_token());
 $page_script = <<<HTML
@@ -626,12 +531,12 @@ $page_script = <<<HTML
     const form = document.getElementById('adjust-form');
     const saveButton = document.getElementById('adjust-save');
     const messageBox = document.getElementById('adjust-message');
-    const saveButtonHtml = saveButton.innerHTML;
-    let variantSequence = 0;
+    const saveButtonHtml = saveButton ? saveButton.innerHTML : '';
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt = n => Number(n || 0).toLocaleString(undefined, {maximumFractionDigits: 2});
 
     function showMessage(ok, text){
+        if(!messageBox) return;
         messageBox.innerHTML = '<div class="alert alert-' + (ok ? 'success' : 'danger') + ' alert-dismissible fade show">' + esc(text) + '<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>';
     }
     async function post(data){
@@ -647,14 +552,16 @@ $page_script = <<<HTML
         const base = Number(stockLine.dataset.base || 0);
         let added = 0;
         row.querySelectorAll('.adjust-qty').forEach(function(input){
-            input.value = input.value.replace(/[^0-9]/g, '');
-            if(input.value !== '' && parseInt(input.value, 10) <= 0) input.value = '';
-            if(input.value !== '') added += parseInt(input.value, 10);
+            // Digits with an optional leading minus (minus removes stock).
+            const clean = input.value.replace(/[^0-9-]/g, '').replace(/(?!^)-/g, '');
+            if(clean !== input.value) input.value = clean;
+            if(/^-?\d+$/.test(clean)) added += parseInt(clean, 10);
         });
         stockLine.textContent = fmt(base + added);
-        stockLine.title = added ? fmt(base) + ' + ' + fmt(added) : '';
+        stockLine.title = added ? fmt(base) + (added > 0 ? ' + ' : ' − ') + fmt(Math.abs(added)) : '';
         stockLine.classList.toggle('text-success', added > 0);
-        stockLine.classList.toggle('font-weight-bold', added > 0);
+        stockLine.classList.toggle('text-danger', added < 0);
+        stockLine.classList.toggle('font-weight-bold', added !== 0);
     }
     // Qty / Variant cell: one Qty box per variant, or a single Qty box.
     function renderLines(row, variants, stock){
@@ -669,7 +576,7 @@ $page_script = <<<HTML
                 line.appendChild(label);
             }
             const input = document.createElement('input');
-            input.type = 'number'; input.step = '1'; input.min = '1'; input.className = 'form-control adjust-qty';
+            input.type = 'text'; input.inputMode = 'numeric'; input.className = 'form-control adjust-qty';
             input.dataset.variant = name; input.placeholder = 'Qty';
             line.appendChild(input);
             lines.appendChild(line);
@@ -685,7 +592,7 @@ $page_script = <<<HTML
     }
     function resetLines(row, text){
         row.dataset.hasVariants = '0';
-        row.querySelector('.adjust-lines').innerHTML = '<div class="adjust-line"><input type="number" step="1" min="1" class="form-control adjust-qty" data-variant="" placeholder="Qty"></div>';
+        row.querySelector('.adjust-lines').innerHTML = '<div class="adjust-line"><input type="text" inputmode="numeric" class="form-control adjust-qty" data-variant="" placeholder="Qty"></div>';
         row.querySelector('.stock-lines').innerHTML = '<div class="stock-line text-muted">' + esc(text || '—') + '</div>';
     }
     async function loadProduct(row){
@@ -720,11 +627,11 @@ $page_script = <<<HTML
         tbody.innerHTML = '';
         addRow();
     }
-    document.getElementById('adjust-add-row').addEventListener('click', function(){
+    form && document.getElementById('adjust-add-row').addEventListener('click', function(){
         const row = addRow();
         if(\$ && \$.fn.select2) \$(row).find('.adjust-product').select2('open');
     });
-    tbody.addEventListener('click', function(e){
+    tbody && tbody.addEventListener('click', function(e){
         const button = e.target.closest('.adjust-remove-row');
         if(!button) return;
         const row = button.closest('tr');
@@ -732,23 +639,31 @@ $page_script = <<<HTML
         if(\$ && \$.fn.select2) \$(row).find('.adjust-product').select2('destroy');
         row.remove();
     });
-    form.addEventListener('submit', async function(e){
+    let pendingSave = null;
+    const passwordModal = document.getElementById('adjust-password-modal');
+    const passwordInput = document.getElementById('adjust-admin-password');
+    const passwordMessage = document.getElementById('adjust-password-message');
+    const passwordConfirm = document.getElementById('adjust-password-confirm');
+    const passwordConfirmHtml = passwordConfirm ? passwordConfirm.innerHTML : '';
+    form && form.addEventListener('submit', function(e){
         e.preventDefault();
         if(saveButton.disabled) return;
         const rows = Array.from(tbody.rows).filter(r => r.querySelector('.adjust-product').value);
         if(!rows.length){ showMessage(false, 'Select at least one product.'); return; }
         const data = new FormData();
-        let lineCount = 0;
+        let lineCount = 0, addQty = 0, removeQty = 0;
         for(const row of rows){
             const productId = row.querySelector('.adjust-product').value;
             let rowHasQty = false;
             for(const input of row.querySelectorAll('.adjust-qty')){
                 const qty = input.value.trim();
                 if(qty === '') continue;
-                if(!/^\d+$/.test(qty) || parseInt(qty, 10) <= 0){ showMessage(false, 'Quantity must be a whole number greater than 0.'); input.focus(); return; }
+                if(!/^-?\d+$/.test(qty) || parseInt(qty, 10) === 0){ showMessage(false, 'Quantity must be a whole number other than 0. Use minus (e.g. -5) to remove stock.'); input.focus(); return; }
+                const n = parseInt(qty, 10);
+                if(n > 0) addQty += n; else removeQty -= n;
                 data.append('product_id[]', productId);
                 data.append('variant_name[]', input.dataset.variant || '');
-                data.append('qty[]', qty);
+                data.append('qty[]', String(n));
                 rowHasQty = true; lineCount++;
             }
             if(!rowHasQty){
@@ -759,134 +674,94 @@ $page_script = <<<HTML
         }
         if(!lineCount){ showMessage(false, 'Enter at least one quantity.'); return; }
         data.append('note', document.getElementById('adjust-note').value);
-        saveButton.disabled = true;
-        saveButton.innerHTML = '<span class="spinner-border spinner-border-sm mr-1" role="status"></span>Saving…';
-        try {
+        pendingSave = data;
+        const parts = [];
+        if(addQty) parts.push('add ' + fmt(addQty));
+        if(removeQty) parts.push('remove ' + fmt(removeQty));
+        document.getElementById('adjust-password-summary').textContent = 'You are about to ' + parts.join(' and ') + ' item(s) in this branch stock.';
+        passwordMessage.innerHTML = '';
+        passwordInput.value = '';
+        \$(passwordModal).modal('show');
+    });
+    if(passwordModal){
+        \$(passwordModal).on('shown.bs.modal', function(){ passwordInput.focus(); });
+        document.getElementById('adjust-password-form').addEventListener('submit', async function(e){
+            e.preventDefault();
+            if(!pendingSave || passwordConfirm.disabled) return;
+            if(passwordInput.value === ''){ passwordMessage.innerHTML = '<div class="alert alert-danger py-2">Enter the admin password.</div>'; passwordInput.focus(); return; }
+            // A fresh copy each try, so a wrong password can be retried.
+            const data = new FormData();
+            for(const pair of pendingSave.entries()) data.append(pair[0], pair[1]);
+            data.append('admin_password', passwordInput.value);
             data.append('action', 'save_adjustment');
-            const result = await post(data);
-            showMessage(!!result.ok, result.message || 'Stock could not be saved.');
-            if(result.ok){
-                document.getElementById('my-stock-body').innerHTML = result.stock_html;
-                destroyHistoryTable();
-                document.getElementById('adjust-history-body').innerHTML = result.history_html;
-                initHistoryTable();
-                document.getElementById('adjust-note').value = '';
-                resetRows();
-                document.getElementById('my-stock-search').dispatchEvent(new Event('input'));
+            passwordConfirm.disabled = true; saveButton.disabled = true;
+            passwordConfirm.innerHTML = '<span class="spinner-border spinner-border-sm mr-1" role="status"></span>Saving…';
+            try {
+                const result = await post(data);
+                if(result.password_error){
+                    passwordMessage.innerHTML = '<div class="alert alert-danger py-2">' + esc(result.message || 'Admin password is incorrect.') + '</div>';
+                    passwordInput.value = ''; passwordInput.focus();
+                    return;
+                }
+                \$(passwordModal).modal('hide');
+                pendingSave = null;
+                showMessage(!!result.ok, result.message || 'Stock could not be saved.');
+                if(result.ok){
+                    destroyStockTable();
+                    document.getElementById('my-stock-body').innerHTML = result.stock_html;
+                    initStockTable();
+                    destroyHistoryTable();
+                    document.getElementById('adjust-history-body').innerHTML = result.history_html;
+                    initHistoryTable();
+                    document.getElementById('adjust-note').value = '';
+                    resetRows();
+                    document.getElementById('my-stock-search').dispatchEvent(new Event('input'));
+                }
+                messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            } catch (err) {
+                passwordMessage.innerHTML = '<div class="alert alert-danger py-2">' + esc(err.message || 'Stock could not be saved. Please check your connection and try again.') + '</div>';
+            } finally {
+                passwordInput.value = '';
+                passwordConfirm.disabled = false; saveButton.disabled = false;
+                passwordConfirm.innerHTML = passwordConfirmHtml;
             }
-        } catch (err) {
-            showMessage(false, err.message || 'Stock could not be saved. Please check your connection and try again.');
-        } finally {
-            saveButton.disabled = false;
-            saveButton.innerHTML = saveButtonHtml;
-            messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        });
+    }
+
+    // My Stock: Show entries + paging; the search box in the card header filters the table.
+    const search = document.getElementById('my-stock-search');
+    function initStockTable(){
+        if(!\$ || !\$.fn.DataTable) return;
+        \$('#my-stock-table').DataTable({
+            pageLength: 10,
+            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+            dom: "<'row'<'col-sm-12'l>>" + "<'row'<'col-sm-12'tr>>" + "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>",
+            order: [],
+            autoWidth: false,
+            language: {emptyTable: 'No stock is available in this branch.', zeroRecords: 'No matching product was found.'}
+        });
+        \$('#my-stock-table').DataTable().search(search.value.trim()).draw();
+    }
+    function destroyStockTable(){
+        if(\$ && \$.fn.DataTable && \$.fn.DataTable.isDataTable('#my-stock-table')){
+            \$('#my-stock-table').DataTable().destroy();
+        }
+    }
+    search.addEventListener('input', function(){
+        if(\$ && \$.fn.DataTable && \$.fn.DataTable.isDataTable('#my-stock-table')){
+            \$('#my-stock-table').DataTable().search(search.value.trim()).draw();
         }
     });
+    initStockTable();
 
-    // My Stock quick search (rows can be replaced after a save).
-    const search = document.getElementById('my-stock-search');
-    const noResults = document.getElementById('my-stock-no-results');
-    search.addEventListener('input', function(){
-        const term = search.value.trim().toLowerCase();
-        const rows = Array.from(document.querySelectorAll('#my-stock-body tr[data-stock-search]'));
-        let matched = 0;
-        rows.forEach(function(row){
-            const visible = !term || row.dataset.stockSearch.includes(term);
-            row.classList.toggle('d-none', !visible);
-            if(visible) matched++;
-        });
-        noResults.classList.toggle('d-none', !rows.length || matched > 0);
-    });
-
-    // Admin: edit / delete a Stock Add History entry.
-    function refreshAfterChange(result){
-        document.getElementById('my-stock-body').innerHTML = result.stock_html;
-        destroyHistoryTable();
-        document.getElementById('adjust-history-body').innerHTML = result.history_html;
-        initHistoryTable();
-        document.getElementById('my-stock-search').dispatchEvent(new Event('input'));
-    }
-    const historyTable = document.getElementById('adjust-history-table');
-    const editModal = document.getElementById('adjust-edit-modal');
-    if(historyTable && editModal){
-        const editItems = document.getElementById('adjust-edit-items');
-        const editMessage = document.getElementById('adjust-edit-message');
-        const editSave = document.getElementById('adjust-edit-save');
-        const editSaveHtml = editSave.innerHTML;
-        const showEditMessage = text => { editMessage.innerHTML = '<div class="alert alert-danger py-2">' + esc(text) + '</div>'; };
-        historyTable.addEventListener('click', async function(e){
-            const editButton = e.target.closest('.adjust-edit');
-            const removeButton = e.target.closest('.adjust-remove');
-            if(removeButton){
-                if(!window.confirm('Delete stock entry ' + removeButton.dataset.ref + '? The added quantity will be removed from this branch stock.')) return;
-                removeButton.disabled = true;
-                try {
-                    const data = new FormData(); data.append('action', 'delete_adjustment'); data.append('adjustment_id', removeButton.dataset.id);
-                    const result = await post(data);
-                    showMessage(!!result.ok, result.message || 'The stock entry could not be deleted.');
-                    if(result.ok) refreshAfterChange(result); else removeButton.disabled = false;
-                } catch (err) { showMessage(false, err.message || 'The stock entry could not be deleted.'); removeButton.disabled = false; }
-                messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-                return;
-            }
-            if(!editButton) return;
-            editButton.disabled = true;
-            try {
-                const data = new FormData(); data.append('action', 'adjustment_detail'); data.append('adjustment_id', editButton.dataset.id);
-                const result = await post(data);
-                if(!result.ok){ showMessage(false, result.message || 'The stock entry could not be loaded.'); messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'}); return; }
-                document.getElementById('adjust-edit-id').value = editButton.dataset.id;
-                document.getElementById('adjust-edit-title').textContent = 'Edit Stock Entry — ' + result.reference_no;
-                document.getElementById('adjust-edit-note').value = result.note || '';
-                editMessage.innerHTML = '';
-                editItems.innerHTML = result.items.map(function(item){
-                    const used = Number(item.used || 0);
-                    return '<tr><td>' + esc(item.label) + (used > 0 ? '<small class="d-block text-muted">' + fmt(used) + ' already sold or moved — minimum ' + fmt(used) + '</small>' : '') + '</td>'
-                        + '<td><input type="number" step="1" min="' + Math.max(1, used) + '" class="form-control adjust-edit-qty" data-item="' + item.id + '" value="' + Number(item.quantity) + '"></td></tr>';
-                }).join('');
-                \$(editModal).modal('show');
-            } catch (err) {
-                showMessage(false, err.message || 'The stock entry could not be loaded.');
-            } finally {
-                editButton.disabled = false;
-            }
-        });
-        editSave.addEventListener('click', async function(){
-            const data = new FormData();
-            data.append('action', 'update_adjustment');
-            data.append('adjustment_id', document.getElementById('adjust-edit-id').value);
-            data.append('note', document.getElementById('adjust-edit-note').value);
-            for(const input of editItems.querySelectorAll('.adjust-edit-qty')){
-                const qty = input.value.trim();
-                if(!/^\d+$/.test(qty) || parseInt(qty, 10) <= 0){ showEditMessage('Quantity must be a whole number greater than 0.'); input.focus(); return; }
-                data.append('item_qty[' + input.dataset.item + ']', qty);
-            }
-            editSave.disabled = true;
-            editSave.innerHTML = '<span class="spinner-border spinner-border-sm mr-1" role="status"></span>Saving…';
-            try {
-                const result = await post(data);
-                if(!result.ok){ showEditMessage(result.message || 'The stock entry could not be saved.'); return; }
-                \$(editModal).modal('hide');
-                showMessage(true, result.message);
-                refreshAfterChange(result);
-                messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-            } catch (err) {
-                showEditMessage(err.message || 'The stock entry could not be saved.');
-            } finally {
-                editSave.disabled = false;
-                editSave.innerHTML = editSaveHtml;
-            }
-        });
-    }
-
-    // Stock Add History: 10 entries per page with search.
+    // Stock Add/Remove History: 10 entries per page with search.
     function initHistoryTable(){
         if(!\$ || !\$.fn.DataTable) return;
         \$('#adjust-history-table').DataTable({
             pageLength: 10,
             order: [],
             autoWidth: false,
-            language: {emptyTable: 'No stock has been added in this branch yet.'}
+            language: {emptyTable: 'No stock has been added or removed in this branch yet.'}
         });
         // The Variant column only shows when an entry has variants.
         \$('#adjust-history-table').DataTable().column(3).visible(!!document.querySelector('#adjust-history-body tr[data-has-variant]'));
@@ -898,7 +773,7 @@ $page_script = <<<HTML
     }
     initHistoryTable();
 
-    addRow();
+    if(form) addRow();
 })();
 </script>
 HTML;
