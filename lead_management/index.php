@@ -223,12 +223,20 @@ require_once '../includes/sidebar.php';
             <?= htmlspecialchars(lead_management_title($filter)); ?>
         </h3>
 
-        <?php if($filter === 'lead'){ ?>
+        <?php if($filter === 'lead' || is_admin_user()){ ?>
             <div class="card-tools">
-                <a href="create.php" class="btn btn-primary btn-sm">
-                    <i class="fas fa-plus"></i>
-                    Add Lead
-                </a>
+                <?php if(is_admin_user()){ ?>
+                    <a href="locations.php" class="btn btn-info btn-sm">
+                        <i class="fas fa-map-marker-alt"></i>
+                        Locations
+                    </a>
+                <?php } ?>
+                <?php if($filter === 'lead'){ ?>
+                    <a href="create.php" class="btn btn-primary btn-sm">
+                        <i class="fas fa-plus"></i>
+                        Add Lead
+                    </a>
+                <?php } ?>
             </div>
         <?php } ?>
 
@@ -246,6 +254,7 @@ require_once '../includes/sidebar.php';
                     <th width="90">Lead ID</th>
                     <th width="220">Name</th>
                     <th width="145">Phone</th>
+                    <th width="150">Location</th>
                     <?php if($show_lead_reference){ ?><th width="160">Ref</th><?php } ?>
                     <th width="145">Followup Date</th>
                     <th width="300">Note</th>
@@ -256,7 +265,7 @@ require_once '../includes/sidebar.php';
             <tbody>
                 <?php if(empty($leads)){ ?>
                     <tr>
-                        <td colspan="<?= $show_lead_reference ? 7 : 6; ?>" class="text-center text-muted">
+                        <td colspan="<?= $show_lead_reference ? 8 : 7; ?>" class="text-center text-muted">
                             No data available in table
                         </td>
                     </tr>
@@ -278,6 +287,7 @@ require_once '../includes/sidebar.php';
                                         : $lead['phone']
                                 ); ?>
                             </td>
+                            <td><?= htmlspecialchars(trim((string)($lead['location'] ?? '')) !== '' ? $lead['location'] : '-'); ?></td>
                             <?php if($show_lead_reference){ ?>
                                 <td>
                                     <?= htmlspecialchars($lead['reference_name'] ?: $lead['created_by_name'] ?: '-'); ?>

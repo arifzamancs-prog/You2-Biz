@@ -23,6 +23,8 @@ $today = date('Y-m-d');
 $name = trim($_POST['name'] ?? '');
 $phone = trim($_POST['phone'] ?? '');
 $email = trim($_POST['email'] ?? '');
+$location = trim((string)($_POST['location'] ?? ''));
+$location_options = lead_location_options($conn, $user_id);
 $note = trim($_POST['note'] ?? '');
 $followup_date = trim($_POST['followup_date'] ?? '');
 
@@ -42,15 +44,16 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$existing_lead['id']) . '.';
         }else{
             $date_value = $followup_date;
+            $location = lead_save_location($conn, $user_id, $location, $creator_user_id);
 
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO leads
-                 (user_id, name, phone, email, note, followup_date, status, created_by_user_id, created_by_name, reference_user_id, reference_name)
+                 (user_id, name, phone, email, location, note, followup_date, status, created_by_user_id, created_by_name, reference_user_id, reference_name)
                  VALUES
-                 (?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?, ?)"
+                 (?, ?, ?, ?, ?, ?, ?, 'lead', ?, ?, ?, ?)"
             );
-            mysqli_stmt_bind_param($stmt, 'isssssisis', $user_id, $name, $phone, $email, $note, $date_value, $creator_user_id, $creator_name, $reference_user_id, $reference_name);
+            mysqli_stmt_bind_param($stmt, 'issssssisis', $user_id, $name, $phone, $email, $location, $note, $date_value, $creator_user_id, $creator_name, $reference_user_id, $reference_name);
 
             if(mysqli_stmt_execute($stmt)){
                 header('Location: index.php?filter=lead');
@@ -107,6 +110,8 @@ require_once '../includes/sidebar.php';
                 <input type="email" name="email" class="form-control" value="<?= htmlspecialchars($email); ?>">
             </div>
 
+            <?= lead_location_field($location_options, $location); ?>
+
             <div class="form-group">
                 <label>Note</label>
                 <textarea name="note" class="form-control" rows="3"><?= htmlspecialchars($note); ?></textarea>
@@ -127,5 +132,6 @@ require_once '../includes/sidebar.php';
 </div>
 
 <?php
+$page_script = lead_location_script();
 require_once '../includes/footer.php';
 ?>

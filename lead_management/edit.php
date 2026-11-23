@@ -32,6 +32,8 @@ if(!$lead){
 $name = trim($_POST['name'] ?? $lead['name']);
 $phone = trim($_POST['phone'] ?? $lead['phone']);
 $email = trim($_POST['email'] ?? $lead['email']);
+$location = trim((string)($_POST['location'] ?? $lead['location'] ?? ''));
+$location_options = lead_location_options($conn, $user_id);
 $note = trim($_POST['note'] ?? $lead['note']);
 $followup_date = trim($_POST['followup_date'] ?? $lead['followup_date']);
 $reference_options = lead_reference_options($conn, $user_id);
@@ -53,16 +55,17 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if($duplicate_phone_lead){
             $message = 'This phone number is already used by Lead ID ' . lead_code_from_id((int)$duplicate_phone_lead['id']) . '.';
         }else{
+            $location = lead_save_location($conn, $user_id, $location, (int)($_SESSION['login_user_id'] ?? $user_id));
             $update_stmt = mysqli_prepare(
                 $conn,
                 "UPDATE leads
-                 SET name=?, phone=?, email=?, note=?, followup_date=?, reference_user_id=?, reference_name=?
+                 SET name=?, phone=?, email=?, location=?, note=?, followup_date=?, reference_user_id=?, reference_name=?
                  WHERE id=? AND user_id=?{$lead_scope_sql}"
             );
             if(is_manager_user()){
-                mysqli_stmt_bind_param($update_stmt, 'sssssisiiis', $name, $phone, $email, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id, $lead_owner_id, $lead_owner_name);
+                mysqli_stmt_bind_param($update_stmt, 'ssssssisiiis', $name, $phone, $email, $location, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id, $lead_owner_id, $lead_owner_name);
             }else{
-                mysqli_stmt_bind_param($update_stmt, 'sssssisii', $name, $phone, $email, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id);
+                mysqli_stmt_bind_param($update_stmt, 'ssssssisii', $name, $phone, $email, $location, $note, $followup_date, $reference_user_id, $reference_name, $id, $user_id);
             }
 
             if(mysqli_stmt_execute($update_stmt)){
@@ -91,6 +94,7 @@ require_once '../includes/sidebar.php';
             <div class="form-group"><label>Ref.</label><select name="reference_user_id" class="form-control" required><option value="">Select Ref.</option><?php foreach($reference_options as $option){ ?><option value="<?= (int)$option['login_user_id']; ?>" <?= $reference_user_id === (int)$option['login_user_id'] ? 'selected' : ''; ?>><?= htmlspecialchars($option['name'] . (!empty($option['designation']) ? ' (' . $option['designation'] . ')' : '')); ?></option><?php } ?></select></div>
             <div class="form-group"><label>Phone</label><input type="text" name="phone" class="form-control" value="<?= htmlspecialchars($phone); ?>" required></div>
             <div class="form-group"><label>Email</label><input type="email" name="email" class="form-control" value="<?= htmlspecialchars($email); ?>"></div>
+            <?= lead_location_field($location_options, $location); ?>
             <div class="form-group"><label>Note</label><textarea name="note" class="form-control" rows="3"><?= htmlspecialchars($note); ?></textarea></div>
             <div class="form-group"><label>Followup Date</label><input type="date" name="followup_date" class="form-control" value="<?= htmlspecialchars($followup_date); ?>" min="<?= htmlspecialchars($today); ?>" required></div>
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Update Lead</button>
@@ -99,4 +103,4 @@ require_once '../includes/sidebar.php';
     </div>
 </div>
 
-<?php require_once '../includes/footer.php'; ?>
+<?php $page_script = lead_location_script(); require_once '../includes/footer.php'; ?>

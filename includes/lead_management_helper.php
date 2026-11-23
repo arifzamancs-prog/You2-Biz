@@ -63,6 +63,13 @@ function ensure_lead_management_table($conn)
         mysqli_query($conn, "ALTER TABLE leads ADD COLUMN reference_name VARCHAR(150) NULL AFTER created_by_name");
     }
 
+    $location_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'location'");
+    if($location_column && mysqli_num_rows($location_column) === 0){
+        mysqli_query($conn, "ALTER TABLE leads ADD COLUMN location VARCHAR(150) NULL AFTER email");
+    }
+
+    ensure_lead_location_table($conn);
+
     $converted_column = mysqli_query($conn, "SHOW COLUMNS FROM leads LIKE 'converted_customer_id'");
     if($converted_column && mysqli_num_rows($converted_column) === 0){
         mysqli_query($conn, "ALTER TABLE leads ADD COLUMN converted_customer_id BIGINT UNSIGNED NULL AFTER created_by_name");
@@ -99,6 +106,116 @@ function ensure_lead_management_table($conn)
          WHERE (reference_user_id IS NULL OR reference_user_id=0)
            AND (reference_name IS NULL OR TRIM(reference_name)='')"
     );
+}
+
+// Lead locations are shared by everyone in the same company: a location added
+// by one user appears in every other user's Lead Location dropdown.
+function ensure_lead_location_table($conn)
+{
+    if(!schema_once('ensure_lead_location_table')) return;
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS lead_locations (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT UNSIGNED NOT NULL,
+            name VARCHAR(150) NOT NULL,
+            created_by_user_id BIGINT UNSIGNED NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_lead_locations_user_name (user_id, name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
+}
+
+function lead_location_options($conn, $company_user_id)
+{
+    ensure_lead_location_table($conn);
+    $options = [];
+    $stmt = mysqli_prepare($conn, "SELECT name FROM lead_locations WHERE user_id=? ORDER BY name ASC");
+    if($stmt){
+        mysqli_stmt_bind_param($stmt, 'i', $company_user_id);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        while($result && $row = mysqli_fetch_assoc($result)){
+            $options[] = (string)$row['name'];
+        }
+        mysqli_stmt_close($stmt);
+    }
+
+    return $options;
+}
+
+// Returns the stored spelling of the location, adding it to the shared list
+// when it is new. An existing name matches case-insensitively.
+function lead_save_location($conn, $company_user_id, $location, $created_by_user_id = 0)
+{
+    $location = mb_substr(trim(preg_replace('/\s+/u', ' ', (string)$location)), 0, 150);
+    if($location === ''){
+        return '';
+    }
+
+    ensure_lead_location_table($conn);
+    $stmt = mysqli_prepare($conn, "INSERT IGNORE INTO lead_locations (user_id, name, created_by_user_id) VALUES (?, ?, ?)");
+    mysqli_stmt_bind_param($stmt, 'isi', $company_user_id, $location, $created_by_user_id);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+
+    $find = mysqli_prepare($conn, "SELECT name FROM lead_locations WHERE user_id=? AND name=? LIMIT 1");
+    mysqli_stmt_bind_param($find, 'is', $company_user_id, $location);
+    mysqli_stmt_execute($find);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($find));
+    mysqli_stmt_close($find);
+
+    return $row ? (string)$row['name'] : $location;
+}
+
+function lead_location_field($location_options, $selected)
+{
+    $selected = (string)$selected;
+    if($selected !== '' && !in_array($selected, $location_options, true)){
+        $location_options[] = $selected;
+    }
+    ob_start();
+    ?>
+    <div class="form-group">
+        <label>Lead Location</label>
+        <select name="location" class="form-control lead-location-select" data-placeholder="Select or type a new location">
+            <option value=""></option>
+            <?php foreach($location_options as $option){ ?>
+                <option value="<?= htmlspecialchars($option); ?>" <?= $selected === $option ? 'selected' : ''; ?>><?= htmlspecialchars($option); ?></option>
+            <?php } ?>
+        </select>
+        <small class="form-text text-muted">
+            Select from the list, or type a new location and press Enter.
+            <?php if(function_exists('is_admin_user') && is_admin_user()){ ?>
+                <a href="locations.php" target="_blank">Manage Locations</a>
+            <?php } ?>
+        </small>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function lead_location_script()
+{
+    return <<<'HTML'
+<script>
+jQuery(function($){
+    if(!$.fn.select2) return;
+    $('.lead-location-select').select2({
+        theme: 'bootstrap4',
+        width: '100%',
+        tags: true,
+        allowClear: true,
+        placeholder: 'Select or type a new location',
+        createTag: function(params){
+            var term = $.trim(params.term);
+            if(term === '') return null;
+            return {id: term, text: term + ' (Add new)', newTag: true};
+        }
+    });
+});
+</script>
+HTML;
 }
 
 function lead_reference_options($conn, $company_user_id, $current_login_user_id = 0, $current_login_name = '')
