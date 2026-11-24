@@ -197,6 +197,7 @@ function sidebar_default_layout_items_base($project_package_labels = [], $compan
         sidebar_setting_item('printing_option', 'Printing Option', app_path('user_management/printing_option.php'), 'admin', 136),
         sidebar_setting_item('barcode_labels', 'Barcode Labels', app_path('user_management/barcode_labels.php'), 'admin', 136),
         sidebar_setting_item('profit_cash_out', 'Wallet Cash Out', app_path('profit_cash_out/index.php'), 'admin', 137),
+        sidebar_setting_item('theme_settings', 'Theme', app_path('user_management/theme.php'), 'admin', 138),
         sidebar_setting_item('sidebar_settings', 'Slidebar Settings', app_path('user_management/sidebar_settings.php'), 'admin', 138),
         sidebar_setting_item('tools', 'Tools', '', '', 140),
         sidebar_setting_item('export_data', 'Export Data', app_path('tools/export.php'), 'tools', 141),
@@ -317,6 +318,7 @@ function sidebar_load_layout($conn, $user_id, $project_package_labels = [])
         'invoice_charges',
         'printing_option',
         'profit_cash_out',
+        'theme_settings',
         'sidebar_settings',
     ];
     if(isset($default_map['admin'])){

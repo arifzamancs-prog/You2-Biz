@@ -32,6 +32,17 @@ if($product){
         : null;
     $product['variants'] = product_variant_names($conn, $product_id, $user_id);
 
+    // Each variant's available stock (same branch and pending-invoice rules), so an invoice line can
+    // show the stock of all variants and of the ticked one.
+    $product['variant_stock'] = [];
+    if($product['is_stock_product']){
+        foreach($product['variants'] as $variant_option){
+            $variant_snapshot = product_stock_snapshot_for_invoice($conn, $user_id, $product_id, $exclude_invoice_id, $variant_option);
+            $product['variant_stock'][(string)$variant_option] = (float)($variant_snapshot['available_stock'] ?? 0);
+        }
+    }
+    $product['variant_stock'] = (object)$product['variant_stock'];
+
     echo json_encode([
         'success' => true,
         'product' => $product

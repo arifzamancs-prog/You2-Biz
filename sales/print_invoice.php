@@ -451,6 +451,18 @@ function invoice_product_display($product_name, $quantity, $unit_price)
     return $product_name;
 }
 
+// Printed item name: "Shirt (Size: M)". The "(Size: M)" part never breaks, so a long name
+// pushes it whole onto the next line.
+function invoice_print_item_name_html($item)
+{
+    $variant = trim((string)($item['variant_name'] ?? ''));
+    $suffix = invoice_product_display('', $item['quantity'], $item['unit_price']);
+
+    return htmlspecialchars((string)($item['product_name'] ?? ''))
+        . ($variant !== '' ? ' <span style="display:inline-block;white-space:nowrap">(Size: ' . htmlspecialchars($variant) . ')</span>' : '')
+        . htmlspecialchars($suffix);
+}
+
 // POS price: decimals only when needed (1,580 / 33.50).
 function pos_price_text($value)
 {
@@ -771,7 +783,7 @@ window.addEventListener('load', preparePosPrintPage);
         <tbody>
         <?php foreach($items as $item){ ?>
             <tr>
-                <td class="item"><?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
+                <td class="item"><?= invoice_print_item_name_html($item); ?><?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?></td>
                 <td class="num"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>
                 <td class="num"><?= pos_price_text($item['pos_price'] ?? $item['unit_price']); ?></td>
                 <?php if($pos_show_discount){ ?><td class="num"><?= ($item['pos_discount'] ?? 0) > 0.004 ? number_format($item['pos_discount'],2) : ''; ?></td><?php } ?>
@@ -1293,8 +1305,7 @@ window.addEventListener('load', function () {
         <tr>
             <td><?= $index + 1; ?></td>
             <td>
-                <?= htmlspecialchars(invoice_product_display($item['product_name'], $item['quantity'], $item['unit_price'])); ?>
-                <?php if(!empty($item['variant_name'])){ ?><br><small>Variant: <?= htmlspecialchars($item['variant_name']); ?></small><?php } ?>
+                <?= invoice_print_item_name_html($item); ?>
                 <?php $iw_text = function_exists('invoice_item_warranty_text') ? invoice_item_warranty_text($item, $invoice['invoice_date']) : ''; if($iw_text !== ''){ ?><br><small><?= htmlspecialchars($iw_text); ?></small><?php } ?>
             </td>
             <td class="text-right"><?= htmlspecialchars(invoice_qty_display($item['quantity'], $item['unit_price'])); ?></td>

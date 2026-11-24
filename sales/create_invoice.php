@@ -460,6 +460,15 @@ require_once '../includes/sidebar.php';
             </h5>
 
             <style>
+                /* Columns keep a usable width however many invoice charge columns there are;
+                   when they do not fit, the table scrolls sideways instead of squeezing them. */
+                #productTable th:first-child{min-width:240px}
+                #productTable .product-charge-column{min-width:120px}
+                #productTable .form-control.stock,
+                #productTable .form-control.price,
+                #productTable .form-control.item-charge,
+                #productTable .form-control.qty,
+                #productTable .form-control.line_total{min-width:100px}
                 .variant-choice-list{min-width:150px}
                 .variant-choice{display:flex;align-items:center;gap:7px;margin:0;padding:6px 8px;border:1px solid #ced4da;border-radius:4px;background:#fff;cursor:pointer;font-weight:400}
                 .variant-choice:hover{border-color:#78a8f8;background:#f4f8ff}
@@ -1255,21 +1264,41 @@ if($(this).val()=="instant"){
     });
 
     let invoiceVariantSequence = 0;
-    function renderVariantChoices(row, variants){
+    function renderVariantChoices(row, variants, variantStock){
         const list = row.find(".variant-choice-list").empty();
         const select = row.find(".product-variant");
         const group = "invoice_variant_" + (++invoiceVariantSequence);
+        variantStock = variantStock || {};
+        row.data("variant-stock", variantStock);
         variants.forEach(function(name){
             const id = group + "_" + invoiceVariantSequence + "_" + name.replace(/[^a-z0-9]/gi, "_");
             const label = $("<label>").addClass("variant-choice mb-1").attr("for", id);
             const input = $("<input>", {type:"checkbox", id:id, value:name}).addClass("variant-choice-input");
             input.on("change", function(){
                 if(this.checked) list.find(".variant-choice-input").not(this).prop("checked", false);
+                // A ticked variant hides the other variants of the line; unticking shows them all again.
+                list.find(".variant-choice").removeClass("d-none");
+                if(this.checked) list.find(".variant-choice").not(label).addClass("d-none");
                 select.val(this.checked ? this.value : "").trigger("change");
             });
             label.append(input).append($("<span>").text(name));
+            // Each variant shows its own stock next to its tick box.
+            if(Object.prototype.hasOwnProperty.call(variantStock, name)){
+                label.append($("<small>").addClass("text-muted ml-auto").text(parseFloat(variantStock[name]) || 0));
+            }
             list.append(label);
         });
+    }
+
+    // Stock box of a line with variants and none ticked: the stock of all its variants.
+    function variantLineTotalStock(row){
+        if(row.data("is-stock-product") === false){
+            return "Unlimited";
+        }
+        const variantStock = row.data("variant-stock") || {};
+        let total = 0;
+        Object.keys(variantStock).forEach(function(name){ total += parseFloat(variantStock[name]) || 0; });
+        return total;
     }
 
     /* Product Change */
@@ -1280,7 +1309,8 @@ if($(this).val()=="instant"){
 
         let product_id = $(this).val();
 
-        if(product_id==""){
+        // Clearing the product (the x in the box) empties the whole line and updates every total.
+        if(!product_id){
             row.find(".product-variant")
                 .html("<option value=\"\">No variant</option>")
                 .prop("disabled", false)
@@ -1288,7 +1318,15 @@ if($(this).val()=="instant"){
                 .addClass("d-none");
             row.find(".variant-choice-list").empty();
             row.removeData("has-variants");
+            row.removeData("is-stock-product");
+            row.find(".stock").val("");
+            row.find(".price").val("");
+            row.find(".qty").val(1);
+            row.find(".line_total").val("");
+            resetItemCharges(row);
+            updateStockColumnVisibility();
             updateVariantColumnVisibility();
+            calculateRow(row);
             return;
         }
 
@@ -1306,7 +1344,8 @@ if($(this).val()=="instant"){
 
     success: function(res){
 
-        if(res.success){
+        // Ignore a late answer for a product that is no longer on this line (e.g. cleared with the x).
+        if(res.success && String(row.find(".product").val() || "") === String(product_id)){
 
             row.find(".stock")
                 .val(res.product.is_stock_product ? res.product.available_stock : "Unlimited");
@@ -1316,9 +1355,11 @@ if($(this).val()=="instant"){
             if((res.product.variants || []).length){
                 variant.append("<option value=\"\">Select variant</option>");
                 res.product.variants.forEach(function(name){ variant.append($("<option>").val(name).text(name)); });
-                renderVariantChoices(row, res.product.variants);
+                row.data("is-stock-product", !!res.product.is_stock_product);
+                renderVariantChoices(row, res.product.variants, res.product.variant_stock);
                 variant.prop("disabled", false).prop("required", false).addClass("d-none");
-                row.find(".stock").val("Select variant");
+                // Until a variant is ticked, the Stock box shows the stock of all variants.
+                row.find(".stock").val(variantLineTotalStock(row));
                 row.data("has-variants", true);
             }else{
                 variant.append("<option value=\"\">No variant</option>")
@@ -1346,11 +1387,14 @@ if($(this).val()=="instant"){
 
     });
 
+    // The ticked variant shows its own stock; with none ticked, the stock of all variants.
     $(document).on("change", ".product-variant", function(){
         let row=$(this).closest("tr"), productId=row.find(".product").val(), variantName=$(this).val();
-        if(!productId || !variantName){ row.find(".stock").val("Select variant"); return; }
+        if(!productId){ row.find(".stock").val(""); return; }
+        if(!variantName){ row.find(".stock").val(row.data("has-variants") ? variantLineTotalStock(row) : "Select variant"); return; }
         $.ajax({url:"get_product.php",type:"POST",data:{product_id:productId,variant_name:variantName},dataType:"json",success:function(res){
-            if(res.success){ row.find(".stock").val(res.product.is_stock_product ? res.product.available_stock : "Unlimited"); }
+            // Ignore a late answer when another variant (or none) is ticked by now.
+            if(res.success && row.find(".product-variant").val() === variantName){ row.find(".stock").val(res.product.is_stock_product ? res.product.available_stock : "Unlimited"); }
         }});
     });
 

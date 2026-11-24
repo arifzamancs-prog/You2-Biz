@@ -1106,6 +1106,7 @@ if(
                     if(is_admin_user() && in_array(project_package_company_type($conn, (int)$_SESSION['user_id']), ['Stock Product', 'Fashion house'], true)) $sidebar_admin_items[] = ['href' => app_path('user_management/barcode_labels.php'), 'label' => 'Barcode Labels', 'icon' => 'fas fa-barcode'];
                     if(is_admin_user() && project_package_company_type($conn, (int)$_SESSION['user_id']) === 'Stock Product') $sidebar_admin_items[] = ['href' => app_path('user_management/product_management.php'), 'label' => 'Product Management', 'icon' => 'fas fa-boxes'];
                     if(!is_manager_user() || manager_has_selected_admin_sidebar_permission('profit_cash_out')) $sidebar_admin_items[] = ['href' => app_path('profit_cash_out/index.php'), 'label' => 'Wallet Cash Out', 'icon' => 'fas fa-coins'];
+                    if(is_admin_user() && !is_super_admin_user()) $sidebar_admin_items[] = ['href' => app_path('user_management/theme.php'), 'label' => 'Theme', 'icon' => 'fas fa-palette'];
                     if(is_admin_user() || manager_has_selected_admin_sidebar_permission('sidebar_settings')) $sidebar_admin_items[] = ['href' => app_path('user_management/sidebar_settings.php'), 'label' => 'Sidebar Settings', 'icon' => 'fas fa-sliders-h'];
                     if($sidebar_admin_items) sidebar_tree('Admin', 'fas fa-user-cog', $sidebar_admin_items);
                     if(is_admin_user() || manager_has_permission('tools')) {

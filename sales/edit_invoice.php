@@ -281,6 +281,7 @@ require_once '../includes/sidebar.php';
 
             <hr>
 
+            <div class="table-responsive">
             <table id="edit-invoice-items"
                 class="table table-bordered">
 
@@ -416,6 +417,7 @@ require_once '../includes/sidebar.php';
                 </tbody>
 
             </table>
+            </div>
 
             <button type="button" id="edit-add-product" class="btn btn-success btn-sm mb-2"><i class="fas fa-plus mr-1"></i>Add Product</button>
 
@@ -953,10 +955,11 @@ function updateEditVariantColumn(){
 }
 
 let editInvoiceVariantSequence = 0;
-function renderEditVariantChoices(row, variants, selected){
+function renderEditVariantChoices(row, variants, selected, variantStock){
     const list=row.find('.variant-choice-list').empty();
     const hidden=row.find('.product-variant');
     const group='edit_invoice_variant_'+(++editInvoiceVariantSequence);
+    variantStock=variantStock || {};
     variants.forEach(function(name){
         const id=group+'_'+name.replace(/[^a-z0-9]/gi,'_');
         const label=$('<label>').addClass('variant-choice mb-1').attr('for',id);
@@ -967,6 +970,10 @@ function renderEditVariantChoices(row, variants, selected){
             loadProduct(row);
         });
         label.append(input).append($('<span>').text(name));
+        // Each variant shows its own stock next to its tick box.
+        if(Object.prototype.hasOwnProperty.call(variantStock,name)){
+            label.append($('<small>').addClass('text-muted ml-auto').text(parseFloat(variantStock[name]) || 0));
+        }
         list.append(label);
     });
 }
@@ -976,10 +983,12 @@ function loadProduct(row){
     let product_id = row.find(".product").val();
     let variant_name = row.find('.product-variant').val() || '';
 
-    if(product_id==""){
+    if(!product_id){
 
+        // A cleared product empties the line; calculateInvoice() updates every total.
         row.find(".stock").val("");
         row.find(".price").val("");
+        row.find(".qty").val(1);
         row.data("has-variants", false);
         updateEditVariantColumn();
 
@@ -1004,7 +1013,8 @@ function loadProduct(row){
 
         success:function(res){
 
-            if(res.success){
+            // Ignore a late answer for a product (or variant) that is no longer on this line (e.g. cleared with the x).
+            if(res.success && String(row.find(".product").val() || "") === String(product_id) && (row.find('.product-variant').val() || '') === variant_name){
 
                 row.find(".stock")
                    .val(res.product.is_stock_product ? res.product.available_stock : "Unlimited");
@@ -1013,8 +1023,13 @@ function loadProduct(row){
                 row.data("has-variants", variants.length > 0);
                 updateEditVariantColumn();
                 if(variants.length){
-                    renderEditVariantChoices(row,variants,variant_name);
-                    if(!variant_name){ row.find('.stock').val('Select variant'); }
+                    renderEditVariantChoices(row,variants,variant_name,res.product.variant_stock);
+                    // Until a variant is ticked, the Stock box shows the stock of all variants.
+                    if(!variant_name){
+                        let total=0;
+                        Object.keys(res.product.variant_stock || {}).forEach(function(name){ total+=parseFloat(res.product.variant_stock[name]) || 0; });
+                        row.find('.stock').val(res.product.is_stock_product ? total : 'Unlimited');
+                    }
                 }else{
                     row.find('.variant-choice-list').empty();
                     row.find('.product-variant').val('');
@@ -1036,6 +1051,15 @@ function loadProduct(row){
 </script>
 
 <style>
+/* Columns keep a usable width however many invoice charge columns there are;
+   when they do not fit, the table scrolls sideways instead of squeezing them. */
+#edit-invoice-items th:first-child{min-width:240px}
+#edit-invoice-items .product-charge-column{min-width:120px}
+#edit-invoice-items .form-control.stock,
+#edit-invoice-items .form-control.price,
+#edit-invoice-items .form-control.item-charge,
+#edit-invoice-items .form-control.qty,
+#edit-invoice-items .form-control.line_total{min-width:100px}
 .variant-choice-list{min-width:150px}.variant-choice{display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid #ced4da;border-radius:4px;background:#fff;cursor:pointer;font-weight:400}.variant-choice:hover{border-color:#78a8f8;background:#f4f8ff}.variant-choice-input{width:15px;height:15px;margin:0;accent-color:#0d6efd}.variant-choice-input:checked+span{font-weight:700;color:#0d6efd}
 </style>
 
