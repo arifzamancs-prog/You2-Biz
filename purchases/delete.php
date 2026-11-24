@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/expense_helper.php';
 
@@ -19,6 +20,9 @@ if($purchase_id <= 0){
     die("Invalid Purchase");
 
 }
+
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -247,7 +251,14 @@ RESTORE WALLET
 ------------------------------------
 */
 
-if($paid_amount > 0){
+// Multi-wallet: each wallet gets back exactly the part it paid with the purchase.
+$payment_splits = wallet_splits_get($conn, $user_id, 'purchase', $purchase_id);
+
+if($paid_amount > 0 && $payment_splits && $initial_purchase_payment_amount > 0){
+
+    wallet_splits_apply_change($conn, $user_id, $payment_splits, [], false);
+
+}elseif($paid_amount > 0){
 
     if($payment_wallet_exists && $initial_purchase_payment_amount > 0){
         credit_wallet(
@@ -259,6 +270,8 @@ if($paid_amount > 0){
     }
 
 }
+
+wallet_splits_delete($conn, $user_id, 'purchase', $purchase_id);
 
 foreach($supplier_payments as $supplier_payment_row){
     $supplier_wallet_exists = false;

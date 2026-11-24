@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -154,6 +155,7 @@ Pay Amount
 type="number"
 step="0.01"
 name="amount"
+id="amount"
 max="<?= $purchase['due_amount']; ?>"
 value="<?= number_format((float)$purchase['due_amount'], 2, '.', ''); ?>"
 class="form-control"
@@ -190,7 +192,11 @@ data-balance="<?= number_format((float)$wallet['balance'], 2, '.', ''); ?>"
 
 <?php } ?>
 
+<?= multi_wallet_option_html($conn, $user_id); ?>
+
 </select>
+
+<?= multi_wallet_panel_html($conn, $user_id, 'payment_wallet_id', '#amount', true); ?>
 
 </div>
 
@@ -265,7 +271,8 @@ $(function(){
         var walletId = selected.val();
         var balance = parseFloat(selected.data("balance")) || 0;
 
-        if(walletId){
+        // Multi-wallet shows the balance of each wallet in its own panel.
+        if(walletId && walletId !== "multi"){
             $("#payment_wallet_balance")
                 .text("Present Balance: BDT " + balance.toFixed(2));
             $("#payment_wallet_balance_group").show();

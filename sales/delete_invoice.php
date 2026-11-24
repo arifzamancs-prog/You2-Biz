@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
@@ -83,7 +84,17 @@ $receive_wallet_id =
 // Validate the cash reversal before touching the invoice, stock, or payment
 // records. A sale cannot be deleted after its collected money has already
 // been spent from the receiving wallet.
-if ($is_posted && $paid_amount > 0) {
+// Multi-wallet: every wallet of the split must still hold its part.
+ensure_wallet_splits_table($conn);
+$receive_splits = wallet_splits_get($conn, $user_id, 'invoice', $invoice_id);
+
+if ($is_posted && $paid_amount > 0 && $receive_splits) {
+    $short_wallet = wallet_splits_shortfall($conn, $user_id, $receive_splits);
+    if ($short_wallet !== '') {
+        header('Location: invoice_list.php?error=' . urlencode('Invoice cannot be deleted because the received payment is no longer available in ' . $short_wallet . '.'));
+        exit;
+    }
+} elseif ($is_posted && $paid_amount > 0) {
     $wallet_stmt = mysqli_prepare($conn, 'SELECT balance FROM wallets WHERE id=? AND user_id=? AND status=\'active\' LIMIT 1');
     mysqli_stmt_bind_param($wallet_stmt, 'ii', $receive_wallet_id, $user_id);
     mysqli_stmt_execute($wallet_stmt);
@@ -265,7 +276,12 @@ UPDATE CASH BOX
 ------------------------------------------
 */
 
-if($is_posted && $paid_amount > 0){
+if($is_posted && $paid_amount > 0 && $receive_splits){
+
+    // Multi-wallet: each wallet gives back exactly the part it received.
+    wallet_splits_apply_change($conn, $user_id, $receive_splits, [], true);
+
+}elseif($is_posted && $paid_amount > 0){
 
     debit_wallet(
         $conn,
@@ -275,6 +291,8 @@ if($is_posted && $paid_amount > 0){
     );
 
 }
+
+wallet_splits_delete($conn, $user_id, 'invoice', $invoice_id);
 
 /*
 |--------------------------------------------------

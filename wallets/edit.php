@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $user_id = $_SESSION['user_id'];
 $branch_scope = branch_scope_sql($conn, 'wallets');
@@ -43,7 +44,12 @@ if ($wallet['is_system'] == 1) {
 
 /* Update */
 
-if($_SERVER['REQUEST_METHOD']=='POST'){
+if($_SERVER['REQUEST_METHOD']=='POST' && is_multi_wallet_name(trim($_POST['wallet_name'] ?? ''))){
+
+    // "Multi-wallet" is the option for splitting a payment over wallets.
+    $message = "\"" . MULTI_WALLET_NAME . "\" is reserved. Please use another wallet name.";
+
+}elseif($_SERVER['REQUEST_METHOD']=='POST'){
 
     $wallet_name = trim($_POST['wallet_name']);
     $description = trim($_POST['description'] ?? '');
@@ -87,6 +93,10 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
+
+        <?php if($message){ ?>
+            <div class="alert alert-danger"><?= htmlspecialchars($message); ?></div>
+        <?php } ?>
 
         <form method="post">
 

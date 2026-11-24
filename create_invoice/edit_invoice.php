@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/branch_context_helper.php';
 
@@ -34,6 +35,11 @@ $total_invoice_type_keys = booking_invoice_total_type_keys($conn, $user_id, $inv
 $is_housing_company = project_package_company_type($conn, $user_id) === 'Housing';
 $cash_wallet_id = ensure_default_cash_wallet($conn, $user_id);
 $message = '';
+// CREATE TABLE must not run inside the transaction below.
+ensure_wallet_splits_table($conn);
+// Multi-wallet: the saved split (or the one just posted) fills the wallet amount boxes.
+$wallet_multi = is_multi_wallet_value($_POST['wallet_id'] ?? '');
+$wallet_splits = [];
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $customer_id = (int)($_POST['customer_id'] ?? 0);
@@ -94,9 +100,18 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
         if($duplicate_plot) $message = 'This Project, Package and Plot Details are already assigned to File No. ' . trim((string)($duplicate_plot['file_no'] ?? '-')) . '.';
     }
 
+    if($message === '' && $wallet_multi && $final_amount > 0){
+        try {
+            // A refund type pays out, so each wallet needs the balance for its part.
+            $wallet_splits = multi_wallet_post_splits($conn, $user_id, $final_amount, booking_invoice_behavior($conn, $user_id, $invoice_type) === 'expense', (int)($invoice['branch_id'] ?? 0));
+        } catch(Throwable $error) {
+            $message = $error->getMessage();
+        }
+    }
+
     if($message !== ''){
         // Keep the File No. validation message.
-    } elseif($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || $wallet_id <= 0 || $amount <= 0 || $final_amount <= 0 || ($invoice_type_establishes_total && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || $normalized_invoice_date === ''){
+    } elseif($customer_id <= 0 || $project_id <= 0 || $package_id <= 0 || ($wallet_id <= 0 && !$wallet_splits) || $amount <= 0 || $final_amount <= 0 || ($invoice_type_establishes_total && $numeric_total_price <= 0) || !isset($invoice_types[$invoice_type]) || $normalized_invoice_date === ''){
         $message = 'Please complete all invoice fields correctly.';
     } elseif($is_housing_company && (!$property_values['block_name'] || !$property_values['road_no'] || !$property_values['plot_no'] || !$property_values['file_no'])){
         $message = 'Block, Road No., Plot No. and File No. are required for Housing invoices.';
@@ -128,6 +143,13 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $delete_charges = mysqli_prepare($conn, 'DELETE FROM booking_invoice_charges WHERE booking_invoice_id=?'); mysqli_stmt_bind_param($delete_charges, 'i', $invoice_id); mysqli_stmt_execute($delete_charges);
             $charge_insert = mysqli_prepare($conn, "INSERT INTO booking_invoice_charges (booking_invoice_id,charge_type_id,charge_name,charge_type,charge_value_type,input_value,charge_amount) VALUES (?,?,?,?,?,?,?)");
             foreach($charge_calculation['rows'] as $charge_row){ $c=$charge_row['charge']; mysqli_stmt_bind_param($charge_insert,'iisssdd',$invoice_id,$c['id'],$c['charge_name'],$c['charge_type'],$c['charge_value_type'],$charge_row['input_value'],$charge_row['amount']); mysqli_stmt_execute($charge_insert); }
+
+            // The old wallet effect is already reversed; the new posting below uses this split.
+            if($wallet_splits){
+                wallet_splits_save($conn, $user_id, 'booking', $invoice_id, $wallet_splits);
+            }else{
+                wallet_splits_delete($conn, $user_id, 'booking', $invoice_id);
+            }
 
             if($was_confirmed){
                 $updated_invoice = $locked_invoice;
@@ -181,6 +203,11 @@ if($current_wallet_id > 0 && !isset($wallets[$current_wallet_id])){
     }
 }
 $invoice_charges = booking_invoice_active_charges($conn, $user_id);
+$invoice_wallet_splits = $wallet_multi
+    ? array_map('floatval', (array)($_POST['wallet_split'] ?? []))
+    : ($_SERVER['REQUEST_METHOD'] === 'POST' ? [] : wallet_splits_get($conn, $user_id, 'booking', $invoice_id));
+// Inactive charges the invoice keeps: part of the saved amount the wallet boxes must add up to.
+$preserved_charge_net = (float)(mysqli_fetch_row(mysqli_query($conn, "SELECT COALESCE(SUM(CASE WHEN bic.charge_type='less' THEN -bic.charge_amount ELSE bic.charge_amount END),0) FROM booking_invoice_charges bic LEFT JOIN invoice_charge_types ict ON ict.id=bic.charge_type_id AND ict.user_id=" . (int)$user_id . " AND ict.status='active' AND ict.show_on_invoice=1 WHERE bic.booking_invoice_id=" . (int)$invoice_id . " AND ict.id IS NULL"))[0] ?? 0);
 $property_options = $is_housing_company ? booking_invoice_property_options($conn, $user_id) : [];
 $file_property_map = [];
 if($is_housing_company){
@@ -216,8 +243,8 @@ require_once '../includes/sidebar.php';
             <?php foreach(['block_name' => 'Block', 'road_no' => 'Road No.', 'plot_no' => 'Plot No.'] as $property_field => $property_label){ ?><div class="col-md-<?= $property_field === 'block_name' ? '3' : '4'; ?> form-group<?= !$is_housing_company ? ' d-none' : ''; ?>"><label><?= htmlspecialchars($property_label); ?></label><select id="<?= htmlspecialchars($property_field); ?>_select" name="<?= htmlspecialchars($property_field); ?>_select" class="form-control housing-property-select" data-property-field="<?= htmlspecialchars($property_field); ?>" <?= $is_housing_company ? 'required' : ''; ?>><option value="">Select <?= htmlspecialchars($property_label); ?></option><?php foreach(($property_options[$property_field] ?? []) as $property_option){ ?><option value="<?= htmlspecialchars($property_option); ?>" <?= (string)($invoice[$property_field] ?? '') === (string)$property_option ? 'selected' : ''; ?>><?= htmlspecialchars($property_option); ?></option><?php } ?></select><input type="hidden" id="<?= htmlspecialchars($property_field); ?>" name="<?= htmlspecialchars($property_field); ?>" value="<?= htmlspecialchars((string)($invoice[$property_field] ?? '')); ?>"></div><?php } ?>
             <div class="col-md-4 form-group" id="total-price-group" style="display:none;"><label>Total Price (BDT)</label><input id="total_price" type="number" min="0.01" step="0.01" name="total_price" class="form-control" value="<?= htmlspecialchars(($invoice['total_price'] ?? 0) > 0 ? $invoice['total_price'] : $invoice['amount']); ?>"></div>
             <div class="col-md-4 form-group"><label>Pay Amount (BDT)</label><input id="amount" type="number" min="0.01" step="0.01" name="amount" class="form-control" value="<?= htmlspecialchars($invoice['amount']); ?>" required><small id="file-balance-info" class="form-text text-muted"></small></div>
-            <div class="col-md-4 form-group"><label>Wallet</label><select name="wallet_id" class="form-control" required><?php foreach($wallets as $wallet){ ?><option value="<?= (int)$wallet['id']; ?>" <?= (int)$invoice['wallet_id'] === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option><?php } ?></select></div>
-            <?php while($charge=mysqli_fetch_assoc($invoice_charges)){ ?><div class="col-md-4 form-group"><label><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?><?= $charge['charge_value_type']==='percent'?', %':'' ?>)</label><input type="number" min="0" step="0.01" class="form-control" name="charge_value[<?= (int)$charge['id'] ?>]" value="<?=htmlspecialchars($saved_charge_values[$charge['id']] ?? '')?>"></div><?php } ?>
+            <div class="col-md-4 form-group"><label>Wallet</label><select name="wallet_id" id="wallet_id" class="form-control" required><?php foreach($wallets as $wallet){ ?><option value="<?= (int)$wallet['id']; ?>" <?= !$invoice_wallet_splits && (int)$invoice['wallet_id'] === (int)$wallet['id'] ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option><?php } ?><?= multi_wallet_option_html($conn, $user_id, (bool)$invoice_wallet_splits); ?></select><?= multi_wallet_panel_html($conn, $user_id, 'wallet_id', '#booking_wallet_total', false, $invoice_wallet_splits); ?><?= booking_wallet_total_html($preserved_charge_net); ?></div>
+            <?php while($charge=mysqli_fetch_assoc($invoice_charges)){ ?><div class="col-md-4 form-group"><label><?=htmlspecialchars($charge['charge_name'])?> (<?= $charge['charge_type']==='less'?'Less':'Add' ?><?= $charge['charge_value_type']==='percent'?', %':'' ?>)</label><input type="number" min="0" step="0.01" class="form-control invoice-charge-input" data-charge-type="<?= htmlspecialchars($charge['charge_type']) ?>" data-value-type="<?= htmlspecialchars($charge['charge_value_type']) ?>" name="charge_value[<?= (int)$charge['id'] ?>]" value="<?=htmlspecialchars($saved_charge_values[$charge['id']] ?? '')?>"></div><?php } ?>
             <?php foreach($inactive_invoice_charges as $inactive_charge){ ?><div class="col-md-4 form-group"><label><?= htmlspecialchars($inactive_charge['charge_name']) ?> <span class="badge badge-secondary">Inactive</span></label><input type="number" class="form-control" value="<?= htmlspecialchars($inactive_charge['input_value']) ?>" readonly><small class="text-muted">Historical charge — retained on update.</small></div><?php } ?>
             <div class="col-md-12 form-group"><label>Note</label><textarea name="notes" rows="3" class="form-control"><?= htmlspecialchars($invoice['notes'] ?? ''); ?></textarea></div>
         </div>

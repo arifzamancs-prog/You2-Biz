@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/header.php';
@@ -263,6 +264,7 @@ type="number"
 step="0.01"
 min="0.01"
 name="amount"
+id="amount"
 value="<?= htmlspecialchars(number_format($current_due, 2, '.', '')); ?>"
 max="<?= htmlspecialchars((string)$current_due); ?>"
 class="form-control"
@@ -278,6 +280,7 @@ Receive To Wallet
 
 <select
     name="receive_wallet_id"
+    id="receive_wallet_id"
     class="form-control"
     required>
 
@@ -291,7 +294,11 @@ value="<?= (int)$wallet['id']; ?>"
 
 <?php } ?>
 
+<?= multi_wallet_option_html($conn, $user_id); ?>
+
 </select>
+
+<?= multi_wallet_panel_html($conn, $user_id, 'receive_wallet_id', '#amount'); ?>
 
 </div>
 

@@ -3,6 +3,8 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/company_settings_helper.php';
+require_once '../includes/wallet_split_helper.php';
+ensure_wallet_splits_table($conn);
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
 require_once '../includes/sidebar.php';
@@ -22,7 +24,10 @@ $sql = "SELECT
 
             p.*,
             s.supplier_name,
-            (SELECT w.wallet_name FROM wallets w WHERE w.id = p.payment_wallet_id AND w.user_id = p.user_id) AS payment_wallet_name,
+            COALESCE(
+                (SELECT w.wallet_name FROM wallets w WHERE w.id = p.payment_wallet_id AND w.user_id = p.user_id),
+                (SELECT '" . MULTI_WALLET_NAME . "' FROM wallet_splits ws WHERE ws.user_id = p.user_id AND ws.doc_type = 'purchase' AND ws.doc_id = p.id LIMIT 1)
+            ) AS payment_wallet_name,
             COALESCE(SUM(pi.quantity), 0) AS total_quantity,
             GROUP_CONCAT(DISTINCT CONCAT(pr.product_name, ' [', COALESCE(NULLIF(pr.sku, ''), '—'), ']') ORDER BY pr.product_name SEPARATOR ', ') AS product_names,
             GROUP_CONCAT(DISTINCT NULLIF(pc.category_name, '') ORDER BY pc.category_name SEPARATOR ', ') AS category_names,

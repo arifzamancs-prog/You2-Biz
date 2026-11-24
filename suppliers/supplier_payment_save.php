@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
 require_once '../includes/expense_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $user_id = $_SESSION['user_id'];
 
@@ -24,6 +25,9 @@ $payment_wallet_id = (int)$_POST['payment_wallet_id'];
 $notes = trim($_POST['notes']);
 
 ensure_expense_support_tables($conn, $user_id);
+
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -85,6 +89,12 @@ try{
 
     }
 
+    // Multi-wallet: the payment comes from several wallets of this branch, each checked for its balance.
+    $payment_splits = is_multi_wallet_value($_POST['payment_wallet_id'] ?? '')
+        ? multi_wallet_post_splits($conn, $user_id, $amount, true, stock_customer_branch($conn))
+        : [];
+
+    if(!$payment_splits){
     $sql = "SELECT balance
             FROM wallets
             WHERE id=?
@@ -120,6 +130,7 @@ try{
 
         throw new Exception("Insufficient Wallet Balance");
 
+    }
     }
 
     /*
@@ -185,6 +196,15 @@ SAVE SUPPLIER PAYMENT
 ------------------------------------------
 */
 
+// One supplier payment row per wallet, so each keeps its own wallet (voucher, ledger, delete).
+$payment_wallet_map = $payment_splits ?: [$payment_wallet_id => $amount];
+$supplier_payment_ids = [];
+$payment_line = 0;
+
+foreach($payment_wallet_map as $payment_wallet_id => $wallet_amount){
+    // Transaction numbers are unique per company: the second wallet onwards gets "-2", "-3", ...
+    $payment_line++;
+    $line_txn_no = $payment_line === 1 ? $supplier_payment_txn_no : $supplier_payment_txn_no . '-' . $payment_line;
 $sql = "INSERT INTO supplier_payments
 (
     branch_id,
@@ -220,7 +240,7 @@ mysqli_stmt_bind_param(
     $purchase['supplier_id'],
     $purchase_id,
     $payment_wallet_id,
-    $amount,
+    $wallet_amount,
     $notes
 
 );
@@ -245,17 +265,17 @@ $supplier_payment_id = mysqli_insert_id($conn);
         $conn,
         $payment_wallet_id,
         $user_id,
-        $amount
+        $wallet_amount
     );
 
     record_wallet_transaction(
         $conn,
-        $supplier_payment_txn_no,
+        $line_txn_no,
         $user_id,
         $payment_wallet_id,
         'supplier_payment',
         $supplier_payment_id,
-        $amount,
+        $wallet_amount,
         supplier_display_text('Supplier Due Payment - ') . $purchase['purchase_no'],
         date('Y-m-d')
     );
@@ -264,16 +284,20 @@ $supplier_payment_id = mysqli_insert_id($conn);
         $conn,
         $user_id,
         $payment_wallet_id,
-        $amount,
+        $wallet_amount,
         date('Y-m-d'),
         supplier_display_text('Supplier Due Payment - ') . $purchase['purchase_no'],
         'supplier_payment',
         $supplier_payment_id
     );
+    $supplier_payment_ids[] = $supplier_payment_id;
+}
 
     mysqli_commit($conn);
 
-    header("Location:print_payment_voucher.php?id=" . $supplier_payment_id);
+    // A Multi-wallet payment shows all of its wallets on one voucher.
+    $first_payment_id = array_shift($supplier_payment_ids);
+    header("Location:print_payment_voucher.php?id=" . $first_payment_id . ($supplier_payment_ids ? "&with=" . implode(',', $supplier_payment_ids) : ''));
 
     exit;
 

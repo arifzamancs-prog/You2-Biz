@@ -18,6 +18,7 @@ require_once '../includes/branch_context_helper.php';
 require_once '../includes/sales_return_helper.php';
 require_once '../includes/activity_notification_helper.php';
 require_once '../includes/service_warranty_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $user_id = $_SESSION['user_id'];
 ensure_branch_accounting_columns($conn, $user_id);
@@ -80,6 +81,8 @@ if($_SERVER['REQUEST_METHOD']!='POST'){
 }
 
 $invoice_warranty_enabled = invoice_warranty_prepare($conn);
+
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -347,6 +350,9 @@ try{
     $receive_wallet_id =
     (int)($_POST['receive_wallet_id'] ?? 0);
     if ($receive_wallet_id > 0) stock_require_wallet($conn, $receive_wallet_id, (int)$user_id, $branch_id);
+    // Multi-wallet: the paid amount is split over this branch's wallets (receive_wallet_id stays 0).
+    $receive_multi_wallet = is_multi_wallet_value($_POST['receive_wallet_id'] ?? '');
+    $receive_splits = [];
 
     $due_amount =
         (float)$_POST['due_amount'];
@@ -498,6 +504,14 @@ try{
         }
 
         $paid_amount = round($cash_paid_amount + $exchange_used, 2);
+    }
+
+    if($receive_multi_wallet && $cash_paid_amount > 0){
+        if($exchange_return){
+            throw new Exception("Multi-wallet cannot be used for an exchange.");
+        }
+
+        $receive_splits = multi_wallet_post_splits($conn, $user_id, $cash_paid_amount, false, $branch_id);
     }
 
     $customer_balance_before_invoice = $customer_id > 0
@@ -690,6 +704,11 @@ try{
 
     $invoice_id =
         mysqli_insert_id($conn);
+
+    // Kept for posting a pending invoice later and for edits / deletes.
+    if($receive_splits){
+        wallet_splits_save($conn, $user_id, 'invoice', $invoice_id, $receive_splits);
+    }
 
     if($exchange_return){
         sales_refund_query($conn, 'UPDATE sales_refunds SET exchange_invoice_id=? WHERE id=? AND user_id=?', 'iii', [(int)$invoice_id, (int)$exchange_return['id'], (int)$user_id]);
@@ -1025,7 +1044,7 @@ CUSTOMER PAYMENT
 
 if($should_post && $paid_amount > 0){
 
-    if($receive_wallet_id <= 0 && ($cash_paid_amount > 0 || $exchange_refund > 0)){
+    if($receive_wallet_id <= 0 && !$receive_splits && ($cash_paid_amount > 0 || $exchange_refund > 0)){
         throw new Exception("Receive wallet is required.");
     }
 
@@ -1129,7 +1148,10 @@ if($should_post && $paid_amount > 0){
         }
     }
 
-    if($cash_paid_amount > 0){
+    if($cash_paid_amount > 0 && $receive_splits){
+        wallet_splits_apply_change($conn, $user_id, [], $receive_splits, true);
+        wallet_splits_record_transactions($conn, $invoice_no, $user_id, 'sales_invoice', $invoice_id, $receive_splits, 'Sales Invoice - '.$invoice_no, date('Y-m-d'), $branch_id);
+    }elseif($cash_paid_amount > 0){
 
     record_wallet_transaction(
         $conn,

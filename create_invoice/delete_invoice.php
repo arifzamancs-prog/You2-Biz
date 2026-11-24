@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/customer_portal_helper.php';
 
@@ -19,6 +20,8 @@ if($_SERVER['REQUEST_METHOD'] !== 'POST'){
 }
 
 $invoice_id = (int)($_POST['invoice_id'] ?? 0);
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 mysqli_begin_transaction($conn);
 try{
     $stmt = mysqli_prepare($conn, "SELECT * FROM booking_invoices WHERE id=? AND user_id=? {$branch_scope} FOR UPDATE");
@@ -30,6 +33,7 @@ try{
     }
 
     booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id);
+    wallet_splits_delete($conn, $user_id, 'booking', $invoice_id);
     $delete_stmt = mysqli_prepare($conn, 'DELETE FROM booking_invoices WHERE id=? AND user_id=?');
     mysqli_stmt_bind_param($delete_stmt, 'ii', $invoice_id, $user_id);
     if(!mysqli_stmt_execute($delete_stmt)){

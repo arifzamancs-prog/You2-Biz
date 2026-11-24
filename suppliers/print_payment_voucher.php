@@ -20,6 +20,38 @@ mysqli_stmt_execute($payment_stmt);
 $payment = mysqli_fetch_assoc(mysqli_stmt_get_result($payment_stmt));
 if(!$payment){ die('Payment voucher not found.'); }
 
+// Multi-wallet payment: the other wallets' rows of the same purchase and day are on this voucher too.
+$with_ids = array_filter(array_map('intval', explode(',', (string)($_GET['with'] ?? ''))));
+
+if($with_ids){
+    $with_list = implode(',', $with_ids);
+    $with_result = mysqli_query(
+        $conn,
+        "SELECT sp.amount, w.wallet_name
+         FROM supplier_payments sp
+         LEFT JOIN wallets w ON w.id=sp.wallet_id
+         WHERE sp.id IN ({$with_list})
+         AND sp.user_id=" . (int)$user_id . "
+         AND sp.purchase_id=" . (int)$payment['purchase_id'] . "
+         AND sp.payment_date='" . mysqli_real_escape_string($conn, (string)$payment['payment_date']) . "'
+         ORDER BY sp.id"
+    );
+    $wallet_parts = [];
+
+    while($with_result && $with_row = mysqli_fetch_assoc($with_result)){
+        if(!$wallet_parts){
+            $wallet_parts[] = (string)$payment['wallet_name'] . ': ' . number_format((float)$payment['amount'], 2);
+        }
+
+        $payment['amount'] = (float)$payment['amount'] + (float)$with_row['amount'];
+        $wallet_parts[] = (string)$with_row['wallet_name'] . ': ' . number_format((float)$with_row['amount'], 2);
+    }
+
+    if($wallet_parts){
+        $payment['wallet_name'] = implode(', ', $wallet_parts);
+    }
+}
+
 $company_stmt = mysqli_prepare($conn, 'SELECT name, address, phone, email FROM users WHERE id=? LIMIT 1');
 mysqli_stmt_bind_param($company_stmt, 'i', $user_id);
 mysqli_stmt_execute($company_stmt);

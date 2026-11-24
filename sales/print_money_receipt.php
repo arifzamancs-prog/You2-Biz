@@ -27,6 +27,33 @@ if($receipt_no === '' || !$receipt){
     die('Money Receipt Not Found');
 }
 
+// Multi-wallet payment: the other wallets' entries use the receipt number with "-2", "-3", ...
+$split_stmt = mysqli_prepare(
+    $conn,
+    "SELECT t.amount, w.wallet_name
+     FROM transactions t
+     LEFT JOIN wallets w ON w.id=t.wallet_id
+     WHERE t.user_id=? AND t.transaction_type='receive_payment' AND t.reference_id=?
+     AND t.txn_no REGEXP CONCAT('^', ?, '-[0-9]{1,2}$')
+     ORDER BY t.id"
+);
+$receipt_regex = preg_quote($receipt_no);
+$receipt_reference_id = (int)$receipt['reference_id'];
+mysqli_stmt_bind_param($split_stmt, "iis", $user_id, $receipt_reference_id, $receipt_regex);
+mysqli_stmt_execute($split_stmt);
+$split_rows = mysqli_fetch_all(mysqli_stmt_get_result($split_stmt), MYSQLI_ASSOC);
+
+if($split_rows){
+    $wallet_parts = [(string)$receipt['wallet_name'] . ': ' . number_format((float)$receipt['amount'], 2)];
+
+    foreach($split_rows as $split_row){
+        $receipt['amount'] = (float)$receipt['amount'] + (float)$split_row['amount'];
+        $wallet_parts[] = (string)$split_row['wallet_name'] . ': ' . number_format((float)$split_row['amount'], 2);
+    }
+
+    $receipt['wallet_name'] = implode(', ', $wallet_parts);
+}
+
 // Due entries this payment cleared (they may belong to different branches).
 $stmt = mysqli_prepare(
     $conn,

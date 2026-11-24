@@ -5,6 +5,7 @@ require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $stock_due_scope = stock_customer_scope($conn);
@@ -22,12 +23,19 @@ $received_invoice_no = '';
 // A registered customer's due is company-wide: it can be cleared from any branch.
 $customer_due_scope = '';
 $collect_branch_id = (int)stock_customer_branch($conn);
+// Multi-wallet: the payment is split over this branch's wallets, one transaction each.
+$receive_multi_wallet = is_multi_wallet_value($_POST['receive_wallet_id'] ?? '');
+
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
 try{
 
-    stock_require_wallet($conn, $receive_wallet_id, $user_id, stock_customer_branch($conn));
+    if(!$receive_multi_wallet){
+        stock_require_wallet($conn, $receive_wallet_id, $user_id, stock_customer_branch($conn));
+    }
     if(!is_finite($amount) || $amount < 0){
         throw new Exception("Amount cannot be negative.");
     }
@@ -35,6 +43,10 @@ try{
     if($amount <= 0){
         throw new Exception("Invalid Amount");
     }
+
+    $receive_splits = $receive_multi_wallet
+        ? multi_wallet_post_splits($conn, $user_id, $amount, false, $collect_branch_id)
+        : [];
 
     // One receipt number ties the wallet entry to every due entry this payment clears.
     $receipt_no = generate_short_unique_txn_no($conn, 'RCV');
@@ -405,6 +417,10 @@ try{
         throw new Exception("Payment allocation failed.");
     }
 
+    if($receive_splits){
+        wallet_splits_apply_change($conn, $user_id, [], $receive_splits, true);
+        wallet_splits_record_transactions($conn, $receipt_no, $user_id, 'receive_payment', $wallet_reference_id, $receive_splits, $wallet_note, $payment_date, $collect_branch_id);
+    }else{
     $sql = "UPDATE wallets
             SET balance = balance + ?
             WHERE id=?
@@ -435,6 +451,7 @@ try{
         $payment_date,
         $collect_branch_id
     );
+    }
 
     mysqli_commit($conn);
 

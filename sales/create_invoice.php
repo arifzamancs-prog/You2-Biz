@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/invoice_charge_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
@@ -781,7 +782,12 @@ require_once '../includes/sidebar.php';
 
             <?php } ?>
 
+            <?php // Exchange refunds come from one wallet, so the split is not offered there. ?>
+            <?= !$exchange_invoice ? multi_wallet_option_html($conn, $user_id) : ''; ?>
+
         </select>
+
+        <?= !$exchange_invoice ? multi_wallet_panel_html($conn, $user_id, 'receive_wallet_id', '#paid_amount') : ''; ?>
 
     </div><?php } ?>
 
@@ -814,7 +820,9 @@ require_once '../includes/sidebar.php';
                         <?php mysqli_data_seek($wallets, 0); while($wallet=mysqli_fetch_assoc($wallets)){ ?>
                             <option value="<?= $wallet['id']; ?>" <?= $wallet['is_system']==1 ? 'selected' : ''; ?>><?= htmlspecialchars($wallet['wallet_name']); ?></option>
                         <?php } ?>
+                        <?= !$exchange_invoice ? multi_wallet_option_html($conn, $user_id) : ''; ?>
                     </select>
+                    <?= !$exchange_invoice ? multi_wallet_panel_html($conn, $user_id, 'receive_wallet_id', '#paid_amount') : ''; ?>
                 </div>
                 <div class="col-md-6">
                     <label>Ref.</label>

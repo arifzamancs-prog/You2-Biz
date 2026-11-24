@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/invoice_charge_helper.php';
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
@@ -34,6 +35,9 @@ if($_SERVER['REQUEST_METHOD'] != 'POST'){
 
 require_once '../includes/service_warranty_helper.php';
 $invoice_warranty_enabled = invoice_warranty_prepare($conn);
+
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -82,6 +86,8 @@ try{
 
     $receive_wallet_id =
     (int)($_POST['receive_wallet_id']);
+    // Multi-wallet: the paid amount is split over wallets (receive_wallet_id stays 0).
+    $receive_multi_wallet = is_multi_wallet_value($_POST['receive_wallet_id'] ?? '');
     $due_amount     = (float)$_POST['due_amount'];
 
     $payment_status = $_POST['payment_status'];
@@ -154,6 +160,19 @@ $old_paid_amount = (float)$invoice_row['paid_amount'];
 $old_wallet_id =
     (int)$invoice_row['receive_wallet_id'];
 $is_posted = !invoice_is_pending($invoice_row);
+
+// What each wallet received before this edit, and the new split (if Multi-wallet).
+// The wallets of the split must belong to the invoice's branch.
+$old_receive_splits = wallet_splits_get($conn, $user_id, 'invoice', $invoice_id);
+$receive_splits = ($receive_multi_wallet && $paid_amount > 0)
+    ? multi_wallet_post_splits($conn, $user_id, $paid_amount, false, (int)$invoice_row['branch_id'])
+    : [];
+
+if($receive_splits){
+    wallet_splits_save($conn, $user_id, 'invoice', $invoice_id, $receive_splits);
+}elseif($old_receive_splits){
+    wallet_splits_delete($conn, $user_id, 'invoice', $invoice_id);
+}
 
 if($is_posted && $old_customer_id > 0){
     rollback_customer_previous_due_payment_allocation(
@@ -875,7 +894,24 @@ UPDATE WALLET
 ==========================================
 */
 
-if($is_posted){
+if($is_posted && ($old_receive_splits || $receive_splits)){
+
+    // Multi-wallet before or after the edit: each wallet moves only by its own difference.
+    $old_wallet_map = wallet_splits_or_single($old_receive_splits, $old_wallet_id, $old_paid_amount);
+    $new_wallet_map = wallet_splits_or_single($receive_splits, $receive_wallet_id, $paid_amount);
+    wallet_splits_apply_change($conn, $user_id, $old_wallet_map, $new_wallet_map, true);
+
+    mysqli_query(
+        $conn,
+        "DELETE FROM transactions
+         WHERE user_id={$user_id}
+         AND transaction_type='sales_invoice'
+         AND reference_id={$invoice_id}"
+    );
+
+    wallet_splits_record_transactions($conn, $invoice_no, $user_id, 'sales_invoice', $invoice_id, $new_wallet_map, 'Sales Invoice - ' . $invoice_no, $invoice_date, (int)$invoice_row['branch_id']);
+
+}elseif($is_posted){
 
 if($old_wallet_id == $receive_wallet_id){
 

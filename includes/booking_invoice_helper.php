@@ -436,6 +436,10 @@ function confirm_booking_invoice($conn, $invoice_id, $user_id)
 {
     require_once __DIR__ . '/wallet_helper.php';
     require_once __DIR__ . '/transaction_helper.php';
+    require_once __DIR__ . '/wallet_split_helper.php';
+
+    // CREATE TABLE must not run inside the transaction.
+    ensure_wallet_splits_table($conn);
 
     mysqli_begin_transaction($conn);
     try {
@@ -469,6 +473,7 @@ function booking_invoice_apply_wallet_effect($conn, $invoice, $user_id)
 {
     require_once __DIR__ . '/wallet_helper.php';
     require_once __DIR__ . '/transaction_helper.php';
+    require_once __DIR__ . '/wallet_split_helper.php';
 
     $invoice_id = (int)$invoice['id'];
     $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
@@ -478,16 +483,28 @@ function booking_invoice_apply_wallet_effect($conn, $invoice, $user_id)
         throw new Exception('Invoice amount must be greater than zero.');
     }
 
-    if($behavior === 'expense'){
-        debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
-    }else{
-        credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
-    }
-
     $transaction_type = $behavior === 'expense' ? 'invoice_expense' : 'invoice_income';
     $txn_no = generate_short_unique_txn_no($conn, 'INV', 'transactions', 'txn_no');
     $note = 'Invoice ' . $invoice['invoice_no'] . ' confirmed';
-    record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, $invoice_id, $amount, $note, $invoice['invoice_date'], (int)($invoice['branch_id'] ?? 0));
+    // Multi-wallet: each wallet gets (or, for a refund type, pays) its own part.
+    $splits = wallet_splits_get($conn, $user_id, 'booking', $invoice_id);
+
+    if($splits){
+        if(abs(array_sum($splits) - $amount) > 0.009){
+            throw new Exception('Multi-wallet amounts do not match the invoice amount. Edit the invoice and try again.');
+        }
+
+        wallet_splits_apply_change($conn, $user_id, [], $splits, $behavior !== 'expense');
+        wallet_splits_record_transactions($conn, $txn_no, $user_id, $transaction_type, $invoice_id, $splits, $note, $invoice['invoice_date'], (int)($invoice['branch_id'] ?? 0));
+    }else{
+        if($behavior === 'expense'){
+            debit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+        }else{
+            credit_wallet($conn, (int)$invoice['wallet_id'], $user_id, $amount);
+        }
+
+        record_wallet_transaction($conn, $txn_no, $user_id, (int)$invoice['wallet_id'], $transaction_type, $invoice_id, $amount, $note, $invoice['invoice_date'], (int)($invoice['branch_id'] ?? 0));
+    }
 
     $update_stmt = mysqli_prepare($conn, "UPDATE booking_invoices SET status='confirmed', wallet_effect_applied=1, confirmed_at=NOW() WHERE id=? AND user_id=?");
     mysqli_stmt_bind_param($update_stmt, 'ii', $invoice_id, $user_id);
@@ -499,6 +516,7 @@ function booking_invoice_apply_wallet_effect($conn, $invoice, $user_id)
 function booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id)
 {
     require_once __DIR__ . '/wallet_helper.php';
+    require_once __DIR__ . '/wallet_split_helper.php';
 
     if(($invoice['status'] ?? 'pending') !== 'confirmed' && empty($invoice['wallet_effect_applied'])){
         return;
@@ -507,6 +525,14 @@ function booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id)
     $behavior = booking_invoice_behavior($conn, $user_id, $invoice['invoice_type']);
     $amount = (float)$invoice['amount'];
     $wallet_id = (int)$invoice['wallet_id'];
+
+    // Multi-wallet: the same reversal, wallet by wallet, with the part each one got or paid.
+    $splits = wallet_splits_get($conn, $user_id, 'booking', (int)$invoice['id']);
+    $wallet_parts = $splits ?: [$wallet_id => $amount];
+
+    foreach($wallet_parts as $wallet_id => $amount){
+        $wallet_id = (int)$wallet_id;
+        $amount = (float)$amount;
 
     $wallet_stmt = mysqli_prepare(
         $conn,
@@ -530,6 +556,7 @@ function booking_invoice_reverse_wallet_effect($conn, $invoice, $user_id)
         }elseif($wallet_balance >= $amount){
             debit_wallet($conn, $wallet_id, $user_id, $amount);
         }
+    }
     }
 
     $transaction_stmt = mysqli_prepare(
@@ -568,3 +595,29 @@ function generate_booking_invoice_no($conn)
 
     return 'INV-' . date('ymdHis') . random_int(10000, 99999);
 }
+
+// Multi-wallet on booking invoices: a hidden #booking_wallet_total kept equal to the saved
+// amount (Pay Amount with the Add / Less charges, as booking_invoice_charge_total works it out),
+// so the wallet amount boxes can be checked against it. $preserved_net: inactive charges an
+// edited invoice keeps (+ for Add, - for Less).
+function booking_wallet_total_html($preserved_net = 0)
+{
+    return '<input type="hidden" id="booking_wallet_total" value="0">'
+        . '<script>(function(){'
+        . 'function calc(){'
+        . 'var amount=document.getElementById("amount");'
+        . 'var base=Math.max(0,parseFloat(amount&&amount.value)||0);'
+        . 'var net=base+(' . json_encode(round((float)$preserved_net, 2)) . ');'
+        . 'document.querySelectorAll(".invoice-charge-input").forEach(function(input){'
+        . 'var value=parseFloat(input.value)||0;if(!value){return;}'
+        . 'var part=input.dataset.valueType==="percent"?base*value/100:value;part=Math.round(part*100)/100;'
+        . 'net+=input.dataset.chargeType==="less"?-part:part;});'
+        . 'var total=document.getElementById("booking_wallet_total");'
+        . 'total.value=Math.max(0,Math.round(net*100)/100).toFixed(2);'
+        . 'if(window.jQuery){jQuery(total).trigger("change");}}'
+        . 'document.addEventListener("input",calc);'
+        . 'document.addEventListener("change",function(e){if(e.target&&e.target.id!=="booking_wallet_total"){calc();}});'
+        . 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",calc);}else{calc();}'
+        . '})();</script>';
+}
+

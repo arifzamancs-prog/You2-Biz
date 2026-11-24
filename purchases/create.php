@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/supplier_helper.php';
 
@@ -276,7 +277,9 @@ require_once '../includes/sidebar.php';
                     <?= htmlspecialchars($wallet['wallet_name']); ?>
                 </option>
                 <?php } ?>
+                <?= multi_wallet_option_html($conn, $user_id); ?>
             </select>
+            <?= multi_wallet_panel_html($conn, $user_id, 'payment_wallet_id', '#paid_amount', true); ?>
         </div>
 
         <div class="mt-2" id="payment_wallet_balance_group" style="display:none;">
@@ -395,7 +398,8 @@ $(function(){
         let walletId = selected.val();
         let balance = parseFloat(selected.data("balance")) || 0;
 
-        if(walletId){
+        // Multi-wallet shows the balance of each wallet in its own panel.
+        if(walletId && walletId !== "multi"){
             $("#payment_wallet_balance").text("Present Balance: BDT " + balance.toFixed(2));
             $("#payment_wallet_balance_group").show();
         }else{
@@ -411,7 +415,7 @@ $(function(){
         let paidAmount = parseFloat($("#paid_amount").val()) || 0;
         let walletBalance = parseFloat($("#payment_wallet_id option:selected").data("balance")) || 0;
 
-        if(paidAmount > walletBalance){
+        if($("#payment_wallet_id").val() !== "multi" && paidAmount > walletBalance){
             alert("Paid amount exceeds wallet balance.");
             e.preventDefault();
             return false;

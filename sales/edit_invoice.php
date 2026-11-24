@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/invoice_charge_helper.php';
 require_once '../includes/customer_due_allocation_helper.php';
 require_once '../includes/pending_invoice_stock_helper.php';
@@ -182,6 +183,8 @@ $products = mysqli_query(
 /* Wallets */
 
 $wallets = active_wallets_result($conn, $user_id);
+// Multi-wallet invoice: its saved split fills the wallet amount boxes.
+$invoice_wallet_splits = wallet_splits_get($conn, $user_id, 'invoice', $invoice_id);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -558,7 +561,7 @@ while($wallet=mysqli_fetch_assoc($wallets)){
 <option
 value="<?= $wallet['id']; ?>"
 
-<?= $wallet['id']==$invoice['receive_wallet_id'] ? 'selected' : ''; ?>>
+<?= !$invoice_wallet_splits && $wallet['id']==$invoice['receive_wallet_id'] ? 'selected' : ''; ?>>
 
 <?= htmlspecialchars($wallet['wallet_name']); ?>
 
@@ -566,7 +569,11 @@ value="<?= $wallet['id']; ?>"
 
 <?php } ?>
 
+<?= multi_wallet_option_html($conn, $user_id, (bool)$invoice_wallet_splits); ?>
+
 </select>
+
+<?= multi_wallet_panel_html($conn, $user_id, 'receive_wallet_id', '#paid_amount', false, $invoice_wallet_splits); ?>
 
 </div>
 

@@ -1,6 +1,8 @@
 <?php
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/wallet_split_helper.php';
+ensure_wallet_splits_table($conn);
 require_once '../includes/invoice_posting_helper.php';
 require_once '../includes/booking_invoice_helper.php';
 require_once '../includes/branch_context_helper.php';
@@ -85,10 +87,12 @@ if($type === 'summary'){
         'ssss', [$from, $to, $from, $to]
     );
     $data['wallets'] = $rows(
-        "SELECT COALESCE(w.wallet_name,'Unassigned') wallet_name, COUNT(*) invoices, SUM(i.total_amount) sales, SUM(i.paid_amount) paid
+        "SELECT COALESCE(w.wallet_name, CASE WHEN ws.doc_id IS NOT NULL THEN '" . MULTI_WALLET_NAME . "' ELSE 'Unassigned' END) wallet_name,
+                COUNT(*) invoices, SUM(i.total_amount) sales, SUM(i.paid_amount) paid
          FROM invoices i LEFT JOIN wallets w ON w.id=i.receive_wallet_id
+         LEFT JOIN (SELECT DISTINCT user_id, doc_id FROM wallet_splits WHERE doc_type='invoice') ws ON ws.user_id=i.user_id AND ws.doc_id=i.id
          WHERE 1=1 {$invoice_scope} AND {$posted} AND NOT {$is_return}
-         GROUP BY i.receive_wallet_id, w.wallet_name ORDER BY sales DESC",
+         GROUP BY i.receive_wallet_id, wallet_name ORDER BY sales DESC",
         'ss', [$from, $to]
     );
 }elseif($type === 'product'){

@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/branch_context_helper.php';
 require_once '../includes/smtp_mailer.php';
 require_once '../includes/printing_helper.php';
@@ -26,6 +27,10 @@ $stmt = mysqli_prepare($conn, "SELECT bi.invoice_no, bi.invoice_type, bi.invoice
 mysqli_stmt_bind_param($stmt, 'ii', $invoice_id, $user_id);
 mysqli_stmt_execute($stmt);
 $invoice = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+// Multi-wallet: the PDF cell is narrow, so it names the option instead of every wallet.
+if($invoice && wallet_splits_get($conn, $user_id, 'booking', $invoice_id)){
+    $invoice['wallet_name'] = MULTI_WALLET_NAME;
+}
 
 if(!$invoice){
     header('Location: invoice_list.php?error=' . urlencode('Invoice not found.'));

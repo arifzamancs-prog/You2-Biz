@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/expense_helper.php';
 require_once '../includes/product_category_helper.php';
@@ -25,6 +26,9 @@ $purchase_id = (int)($_POST['purchase_id'] ?? 0);
 require_once '../includes/service_warranty_helper.php';
 $purchase_serial_enabled = product_serial_schema($conn);
 if($purchase_serial_enabled) product_warranty_schema($conn);
+
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -78,7 +82,8 @@ try{
     $due_amount = $grand_total - $paid_amount;
 
     $payment_status = $due_amount <= 0 ? 'paid' : ($paid_amount > 0 ? 'partial' : 'due');
-    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, $user_id, stock_customer_branch($conn));
+    $payment_multi_wallet = is_multi_wallet_value($_POST['payment_wallet_id'] ?? '');
+    if ($paid_amount > 0 && !$payment_multi_wallet) stock_require_wallet($conn, $payment_wallet_id, $user_id, stock_customer_branch($conn));
 
     $notes = trim($_POST['notes']);
 
@@ -143,7 +148,37 @@ if($paid_amount > $grand_total){
 
 }
 
-if($paid_amount > 0){
+// Multi-wallet before or after the edit: each wallet needs its new part, plus what it gets back.
+$old_payment_splits = wallet_splits_get($conn, $user_id, 'purchase', $purchase_id);
+$payment_splits = ($paid_amount > 0 && $payment_multi_wallet)
+    ? multi_wallet_post_splits($conn, $user_id, $paid_amount, false, stock_customer_branch($conn))
+    : [];
+$old_wallet_map = wallet_splits_or_single($old_payment_splits, $old_wallet_id, $old_paid_amount);
+$new_wallet_map = wallet_splits_or_single($payment_splits, $payment_wallet_id, $paid_amount);
+
+if($old_payment_splits || $payment_splits){
+    $need = [];
+
+    foreach($new_wallet_map as $wallet_id => $amount){
+        $extra = round($amount - ($old_wallet_map[$wallet_id] ?? 0), 2);
+
+        if($extra > 0.009){
+            $need[$wallet_id] = $extra;
+        }
+    }
+
+    $short_wallet = wallet_splits_shortfall($conn, $user_id, $need);
+
+    if($short_wallet !== ''){
+        throw new Exception("Insufficient Wallet Balance: " . $short_wallet);
+    }
+
+    if($payment_splits){
+        wallet_splits_save($conn, $user_id, 'purchase', $purchase_id, $payment_splits);
+    }else{
+        wallet_splits_delete($conn, $user_id, 'purchase', $purchase_id);
+    }
+}elseif($paid_amount > 0){
 
     $sql = "SELECT balance
             FROM wallets
@@ -429,7 +464,12 @@ UPDATE WALLET
 ==========================================
 */
 
-if($old_wallet_id == $payment_wallet_id){
+if($old_payment_splits || $payment_splits){
+
+    // Multi-wallet: each wallet moves only by its own difference.
+    wallet_splits_apply_change($conn, $user_id, $old_wallet_map, $new_wallet_map, false);
+
+}elseif($old_wallet_id == $payment_wallet_id){
 
     /*
     Same Wallet
@@ -503,7 +543,11 @@ mysqli_query(
      AND reference_id={$purchase_id}"
 );
 
-if($paid_amount > 0){
+if($paid_amount > 0 && $payment_splits){
+
+    wallet_splits_record_transactions($conn, $purchase_no, $user_id, 'purchase', $purchase_id, $payment_splits, 'Purchase - ' . $purchase_no, $purchase_date);
+
+}elseif($paid_amount > 0){
 
     record_wallet_transaction(
         $conn,
@@ -522,7 +566,8 @@ if($paid_amount > 0){
 $expense_delete = mysqli_prepare($conn, "DELETE FROM expenses WHERE user_id=? AND source_type='purchase_payment' AND source_id=?");
 mysqli_stmt_bind_param($expense_delete, 'ii', $user_id, $purchase_id);
 mysqli_stmt_execute($expense_delete);
-if ($paid_amount > 0) record_supplier_payment_expense($conn, $user_id, $payment_wallet_id, $paid_amount, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
+if ($paid_amount > 0 && $payment_splits) wallet_splits_record_supplier_expenses($conn, $user_id, $payment_splits, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
+elseif ($paid_amount > 0) record_supplier_payment_expense($conn, $user_id, $payment_wallet_id, $paid_amount, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
 
 mysqli_commit($conn);
 

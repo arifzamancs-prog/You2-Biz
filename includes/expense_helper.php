@@ -149,7 +149,8 @@ function reserved_expense_category_name_from_entry_type($entry_type)
  * already debited the wallet, so this function never creates another wallet
  * transaction or changes the wallet balance.
  */
-function record_supplier_payment_expense($conn, $user_id, $wallet_id, $amount, $txn_date, $note, $source_type, $source_id)
+// $one_per_wallet: a Multi-wallet payment records one expense per wallet for the same source.
+function record_supplier_payment_expense($conn, $user_id, $wallet_id, $amount, $txn_date, $note, $source_type, $source_id, $one_per_wallet = false)
 {
     $user_id = (int)$user_id;
     $wallet_id = (int)$wallet_id;
@@ -173,7 +174,7 @@ function record_supplier_payment_expense($conn, $user_id, $wallet_id, $amount, $
     mysqli_stmt_execute($existing_stmt);
     $existing = mysqli_fetch_assoc(mysqli_stmt_get_result($existing_stmt));
 
-    if($existing){
+    if($existing && !$one_per_wallet){
         return (int)$existing['id'];
     }
 

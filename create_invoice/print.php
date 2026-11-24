@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/booking_invoice_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/printing_helper.php';
 require_once '../includes/project_package_helper.php';
 require_once '../includes/branch_context_helper.php';
@@ -45,6 +46,10 @@ mysqli_stmt_bind_param($stmt, 'ii', $id, $user_id);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 $invoice = $result ? mysqli_fetch_assoc($result) : null;
+// Multi-wallet: "Payment by" lists each wallet with its part.
+if($invoice && ($wallet_split_label = wallet_splits_label($conn, $user_id, 'booking', (int)$invoice['id'])) !== ''){
+    $invoice['wallet_name'] = $wallet_split_label;
+}
 
 if(!$invoice){
     header('Location: index.php?type=booking');

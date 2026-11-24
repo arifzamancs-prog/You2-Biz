@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/header.php';
@@ -86,6 +87,8 @@ $products = mysqli_query(
 /* Wallets */
 
 $wallets = active_wallets_result($conn, $user_id);
+// Multi-wallet purchase: its saved split fills the wallet amount boxes.
+$purchase_wallet_splits = wallet_splits_get($conn, $user_id, 'purchase', $purchase_id);
 
 $sql = "SELECT *
 
@@ -433,7 +436,7 @@ while($wallet=mysqli_fetch_assoc($wallets)){
 <option
 value="<?= $wallet['id']; ?>"
 
-<?= $wallet['id']==$purchase['payment_wallet_id'] ? 'selected' : ''; ?>>
+<?= !$purchase_wallet_splits && $wallet['id']==$purchase['payment_wallet_id'] ? 'selected' : ''; ?>>
 
 <?= htmlspecialchars($wallet['wallet_name']); ?>
 
@@ -441,7 +444,11 @@ value="<?= $wallet['id']; ?>"
 
 <?php } ?>
 
+<?= multi_wallet_option_html($conn, $user_id, (bool)$purchase_wallet_splits); ?>
+
 </select>
+
+<?= multi_wallet_panel_html($conn, $user_id, 'payment_wallet_id', '#paid_amount', true, $purchase_wallet_splits); ?>
 
 </div>
 

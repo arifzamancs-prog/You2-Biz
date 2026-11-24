@@ -6,6 +6,9 @@ require_once '../includes/schema_cache_helper.php';
 require_once '../includes/super_admin_config.php';
 require_once '../includes/company_backup_helper.php';
 require_once '../includes/customer_form_helper.php';
+require_once '../includes/wallet_split_helper.php';
+// Multi-wallet splits are restored with the rest; the table must exist before the import starts.
+ensure_wallet_splits_table($conn);
 
 $user_id = (int)($_SESSION['user_id'] ?? 0);
 $target_company_name = '';
@@ -387,6 +390,13 @@ function import_prepare_row_for_insert($conn, $table, $row, $user_id, $manager_i
         $source_table = ['purchase_payment'=>'purchases', 'supplier_payment'=>'supplier_payments'][$row['source_type'] ?? ''] ?? null;
         if($source_table && isset($id_maps[$source_table][(int)($row['source_id'] ?? 0)])){
             $row['source_id'] = $id_maps[$source_table][(int)$row['source_id']];
+        }
+    }
+    // Multi-wallet splits point at an invoice or a purchase.
+    if($table === 'wallet_splits'){
+        $doc_table = ['invoice'=>'invoices', 'purchase'=>'purchases', 'booking'=>'booking_invoices'][$row['doc_type'] ?? ''] ?? null;
+        if($doc_table && isset($id_maps[$doc_table][(int)($row['doc_id'] ?? 0)])){
+            $row['doc_id'] = $id_maps[$doc_table][(int)$row['doc_id']];
         }
     }
 

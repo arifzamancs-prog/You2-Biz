@@ -4,6 +4,7 @@ require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/transaction_helper.php';
 require_once '../includes/wallet_helper.php';
+require_once '../includes/wallet_split_helper.php';
 require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/contact_unique_helper.php';
 require_once '../includes/input_validation_helper.php';
@@ -404,6 +405,9 @@ function purchase_prepare_items($conn, $user_id)
     return $items;
 }
 
+// CREATE TABLE must not run inside the transaction.
+ensure_wallet_splits_table($conn);
+
 mysqli_begin_transaction($conn);
 
 try{
@@ -434,9 +438,15 @@ try{
     $wallet_branch_id = in_array($_SESSION['company_type'] ?? '', ['Housing', 'Restaurant & Cafe'], true)
         ? $branch_id
         : stock_head_office_id($conn, (int)$user_id);
-    if ($paid_amount > 0) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $wallet_branch_id);
+    // Multi-wallet: the paid amount comes from several wallets of the same branch,
+    // each checked for its balance (payment_wallet_id stays 0).
+    $payment_splits = ($paid_amount > 0 && is_multi_wallet_value($_POST['payment_wallet_id'] ?? ''))
+        ? multi_wallet_post_splits($conn, $user_id, $paid_amount, true, $wallet_branch_id)
+        : [];
 
-    if($paid_amount > 0){
+    if ($paid_amount > 0 && !$payment_splits) stock_require_wallet($conn, $payment_wallet_id, (int)$user_id, $wallet_branch_id);
+
+    if($paid_amount > 0 && !$payment_splits){
         $wallet_balance_stmt = mysqli_prepare(
             $conn,
             "SELECT balance
@@ -614,7 +624,12 @@ try{
         }
     }
 
-    if($paid_amount > 0){
+    if($paid_amount > 0 && $payment_splits){
+        wallet_splits_save($conn, $user_id, 'purchase', $purchase_id, $payment_splits);
+        wallet_splits_apply_change($conn, $user_id, [], $payment_splits, false);
+        wallet_splits_record_transactions($conn, $purchase_no, $user_id, 'purchase', $purchase_id, $payment_splits, 'Purchase - ' . $purchase_no, $purchase_date);
+        wallet_splits_record_supplier_expenses($conn, $user_id, $payment_splits, $purchase_date, supplier_display_text('Supplier Payment - ') . $purchase_no, 'purchase_payment', $purchase_id);
+    }elseif($paid_amount > 0){
         debit_wallet($conn, $payment_wallet_id, $user_id, $paid_amount);
 
         record_wallet_transaction(

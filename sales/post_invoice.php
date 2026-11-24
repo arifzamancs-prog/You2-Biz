@@ -9,6 +9,7 @@ require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/pending_invoice_stock_helper.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $invoice_id = (int)($_GET['id'] ?? 0);
@@ -23,6 +24,8 @@ ensure_fifo_inventory_tables($conn);
 if($invoice_id <= 0){
     die("Invalid Invoice");
 }
+
+ensure_wallet_splits_table($conn);
 
 mysqli_begin_transaction($conn);
 
@@ -294,7 +297,22 @@ try{
         }
     }
 
-    if($paid_amount > 0){
+    // Multi-wallet: each wallet gets its part of the payment saved with the invoice.
+    $receive_splits = $paid_amount > 0 ? wallet_splits_get($conn, $user_id, 'invoice', $invoice_id) : [];
+
+    if($paid_amount > 0 && $receive_splits){
+        if(abs(array_sum($receive_splits) - $paid_amount) > 0.009){
+            throw new Exception("Multi-wallet amounts do not match the paid amount. Edit the invoice and try again.");
+        }
+
+        // The wallets must still be active wallets of the invoice's branch.
+        foreach(array_keys($receive_splits) as $split_wallet_id){
+            stock_require_wallet($conn, (int)$split_wallet_id, (int)$user_id, (int)($invoice['branch_id'] ?? 0));
+        }
+
+        wallet_splits_apply_change($conn, $user_id, [], $receive_splits, true);
+        wallet_splits_record_transactions($conn, $invoice['invoice_no'], $user_id, 'sales_invoice', $invoice_id, $receive_splits, 'Sales Invoice - ' . $invoice['invoice_no'], date('Y-m-d'), (int)($invoice['branch_id'] ?? 0));
+    }elseif($paid_amount > 0){
         if((int)$invoice['receive_wallet_id'] <= 0){
             throw new Exception("Receive wallet is required.");
         }

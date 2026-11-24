@@ -3,6 +3,7 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/branch_context_helper.php';
+require_once '../includes/wallet_split_helper.php';
 
 $message = '';
 $user_id = (int)$_SESSION['user_id'];
@@ -36,6 +37,9 @@ if($multi_branch && $_SERVER['REQUEST_METHOD'] == 'POST'){
 
     if($wallet_name == ''){
         $message = "Wallet Name Required";
+    }elseif(is_multi_wallet_name($wallet_name)){
+        // "Multi-wallet" is the option for splitting a payment over wallets.
+        $message = "\"" . MULTI_WALLET_NAME . "\" is reserved. Please use another wallet name.";
     }elseif(!$target_ids){
         $message = "Select a branch for the wallet.";
     }else{
@@ -80,6 +84,11 @@ if($multi_branch && $_SERVER['REQUEST_METHOD'] == 'POST'){
     if($wallet_name == ''){
 
         $message = "Wallet Name Required";
+
+    }elseif(is_multi_wallet_name($wallet_name)){
+
+        // "Multi-wallet" is the option for splitting a payment over wallets.
+        $message = "\"" . MULTI_WALLET_NAME . "\" is reserved. Please use another wallet name.";
 
     }else{
 
