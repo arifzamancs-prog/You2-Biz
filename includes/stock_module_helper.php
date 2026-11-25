@@ -25,8 +25,16 @@ function stock_warehouse_id($conn, $company_id)
     mysqli_stmt_execute($stmt);
     $id = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['id'] ?? 0);
     if ($id <= 0) {
-        $insert = mysqli_prepare($conn, "INSERT INTO branches (user_id,branch_name,status) VALUES (?,'Main Warehouse','active')");
-        mysqli_stmt_bind_param($insert, 'i', $company_id);
+        // Main Warehouse starts with the code MWH and the admin profile's address and phone.
+        $profile = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT address, phone FROM users WHERE id=' . $company_id . ' LIMIT 1')) ?: [];
+        $warehouse_address = trim((string)($profile['address'] ?? ''));
+        $warehouse_phone = trim((string)($profile['phone'] ?? ''));
+        if ($warehouse_address === 'None') $warehouse_address = '';
+        if ($warehouse_phone === 'None') $warehouse_phone = '';
+        $code_taken = mysqli_fetch_row(mysqli_query($conn, "SELECT 1 FROM branches WHERE user_id={$company_id} AND branch_code='MWH' LIMIT 1"));
+        $warehouse_code = $code_taken ? null : 'MWH';
+        $insert = mysqli_prepare($conn, "INSERT INTO branches (user_id,branch_name,branch_code,address,phone,status) VALUES (?,'Main Warehouse',?,?,?,'active')");
+        mysqli_stmt_bind_param($insert, 'isss', $company_id, $warehouse_code, $warehouse_address, $warehouse_phone);
         if (!mysqli_stmt_execute($insert)) throw new RuntimeException('Main Warehouse could not be configured.');
         $id = (int)mysqli_insert_id($conn);
     }

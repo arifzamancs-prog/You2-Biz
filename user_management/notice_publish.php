@@ -2,6 +2,10 @@
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
 require_once '../includes/notice_board_helper.php';
+// Super Admin notices are the login page / admin login notices of the Super Admin menu.
+if (is_super_admin_user()) {
+    header('Location: ' . app_path('super_admin/notice_publish.php')); exit;
+}
 if (!is_admin_user() && !manager_has_permission('notice_publish')) {
     header('Location: ' . app_path('dashboard.php?error=Permission denied')); exit;
 }

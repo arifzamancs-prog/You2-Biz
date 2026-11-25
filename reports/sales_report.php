@@ -16,14 +16,15 @@ if($user_id > 0){ ensure_booking_invoice_type_table($conn, $user_id); ensure_bra
 $invoice_scope = report_owner_scope_sql('i', $user_id) . branch_scope_sql($conn, 'i');
 $booking_scope = report_owner_scope_sql('bi', $user_id) . branch_scope_sql($conn, 'bi');
 
-// Date range: this month so far by default.
+// Date range: today by default.
 $valid_date = static function($value){ $d = DateTime::createFromFormat('!Y-m-d', (string)$value); return $d && $d->format('Y-m-d') === $value ? $value : ''; };
-$from = $valid_date($_GET['from'] ?? '') ?: date('Y-m-01');
+$from = $valid_date($_GET['from'] ?? '') ?: date('Y-m-d');
 $to = $valid_date($_GET['to'] ?? '') ?: date('Y-m-d');
 if($from > $to){ [$from, $to] = [$to, $from]; }
 $report_types = ['summary' => 'Summary', 'product' => 'Product-wise Sales', 'invoice' => 'Invoice Details (with products)', 'customer' => 'Customer-wise Sales'];
 $type = array_key_exists($_GET['type'] ?? '', $report_types) ? $_GET['type'] : 'summary';
-$search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);
+// The free-text search box was removed from this report; the filters are type and dates.
+$search = '';
 
 $rows = function($sql, $types, $params) use ($conn){
     $stmt = mysqli_prepare($conn, $sql);
@@ -154,19 +155,24 @@ require_once '../includes/sidebar.php';
 
 <div class="card report-filter"><div class="card-header"><h3 class="card-title"><i class="fas fa-chart-line mr-2"></i>Sales Report</h3></div><div class="card-body">
 <form method="get"><div class="row align-items-end">
-    <div class="col-md-3 form-group"><label for="sr-type">Report type</label><select id="sr-type" name="type" class="form-control"><?php foreach($report_types as $key => $label){ ?><option value="<?= $key ?>" <?= $type === $key ? 'selected' : '' ?>><?= $h($label) ?></option><?php } ?></select></div>
-    <div class="col-md-2 form-group"><label for="sr-from">From</label><input id="sr-from" type="date" name="from" class="form-control" value="<?= $h($from) ?>" max="<?= date('Y-m-d') ?>"></div>
-    <div class="col-md-2 form-group"><label for="sr-to">To</label><input id="sr-to" type="date" name="to" class="form-control" value="<?= $h($to) ?>" max="<?= date('Y-m-d') ?>"></div>
-    <div class="col-md-3 form-group"><label for="sr-q">Search <small class="text-muted">(invoice, customer, product, code)</small></label><input id="sr-q" name="q" class="form-control" value="<?= $h($search) ?>" placeholder="Optional"></div>
-    <div class="col-md-2 form-group"><button class="btn btn-primary btn-block"><i class="fas fa-filter mr-1"></i>Show</button></div>
+    <div class="col-md-4 form-group"><label for="sr-type">Report type</label><select id="sr-type" name="type" class="form-control"><?php foreach($report_types as $key => $label){ ?><option value="<?= $key ?>" <?= $type === $key ? 'selected' : '' ?>><?= $h($label) ?></option><?php } ?></select></div>
+    <div class="col-md-3 form-group"><label for="sr-from">From</label><input id="sr-from" type="date" name="from" class="form-control" value="<?= $h($from) ?>" max="<?= date('Y-m-d') ?>"></div>
+    <div class="col-md-3 form-group"><label for="sr-to">To</label><input id="sr-to" type="date" name="to" class="form-control" value="<?= $h($to) ?>" max="<?= date('Y-m-d') ?>"></div>
+    <div class="col-md-2 form-group"><button class="btn btn-primary btn-block"><i class="fas fa-search mr-1"></i>Search</button></div>
 </div></form>
 <div class="d-flex flex-wrap" style="gap:6px">
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-m-d'), date('Y-m-d'))) ?>">Today</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-m-d', strtotime('-1 day')), date('Y-m-d', strtotime('-1 day')))) ?>">Yesterday</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-m-d', strtotime('-6 days')), date('Y-m-d'))) ?>">Last 7 days</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-m-01'), date('Y-m-d'))) ?>">This Month</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-m-01', strtotime('first day of last month')), date('Y-m-t', strtotime('last day of last month')))) ?>">Last Month</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?= $h($link(date('Y-01-01'), date('Y-m-d'))) ?>">This Year</a>
+<?php
+// Quick ranges; the one matching the dates on screen is highlighted.
+foreach ([
+    'Today' => [date('Y-m-d'), date('Y-m-d')],
+    'Yesterday' => [date('Y-m-d', strtotime('-1 day')), date('Y-m-d', strtotime('-1 day'))],
+    'Last 7 days' => [date('Y-m-d', strtotime('-6 days')), date('Y-m-d')],
+    'This Month' => [date('Y-m-01'), date('Y-m-d')],
+    'Last Month' => [date('Y-m-01', strtotime('first day of last month')), date('Y-m-t', strtotime('last day of last month'))],
+    'This Year' => [date('Y-01-01'), date('Y-m-d')],
+] as $quick_label => [$quick_from, $quick_to]) { $quick_active = $quick_from === $from && $quick_to === $to; ?>
+    <a class="btn btn-sm <?= $quick_active ? 'btn-secondary active' : 'btn-outline-secondary' ?>" href="<?= $h($link($quick_from, $quick_to)) ?>"><?= $h($quick_label) ?></a>
+<?php } ?>
     <button type="button" onclick="window.print()" class="btn btn-sm btn-info ml-auto"><i class="fas fa-print mr-1"></i>Print</button>
 </div>
 </div></div>

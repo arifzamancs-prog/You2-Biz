@@ -31,6 +31,11 @@ $items = purchase_return_rows(
     [$return_id]
 );
 $profile = purchase_return_rows($conn, 'SELECT name, address, email, phone FROM users WHERE id=?', 'i', [$cid])[0] ?? [];
+// Multi-branch: address and phone of the return's branch.
+if($print_branch_contact = printing_branch_contact($conn, (int)($return['branch_id'] ?? 0))){
+    $profile['address'] = $print_branch_contact['address'];
+    $profile['phone'] = $print_branch_contact['phone'];
+}
 $company_logo_url = current_print_company_logo_url($conn);
 $show_logo = current_printing_option($conn) === 'general' && should_print_company_logo($conn) && $company_logo_url !== '';
 $supplier_word = supplier_display_text('Supplier');

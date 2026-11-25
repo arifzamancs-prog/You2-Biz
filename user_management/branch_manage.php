@@ -66,6 +66,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
         branch_manage_redirect('Branch code is required and may contain only letters, numbers, hyphens, or underscores.', 'danger');
     }
 
+    if ($branch_code === 'HO') {
+        branch_manage_redirect('Branch code HO is reserved for Head Office.', 'danger');
+    }
+
     if ($branch_id === 0 && branch_name_is_reserved($branch_name)) {
         branch_manage_redirect('Main Warehouse is managed automatically at Head Office and cannot be created as a branch.', 'danger');
     }
@@ -92,8 +96,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
         if (!$branch_record) {
             branch_manage_redirect('Branch not found.', 'danger');
         }
+        // Head Office address and phone come from My Profile; it is not edited here.
+        if ((int)$branch_record['is_head_office'] === 1) {
+            branch_manage_redirect('Head Office address and phone are changed from My Profile.', 'danger');
+        }
         // Main Warehouse is a system location. Its inventory lookup relies on
         // the fixed name, but its operational details and code remain editable.
+        // Main Warehouse keeps its fixed name; its code, address and phone stay editable.
         if (branch_name_is_reserved((string)$branch_record['branch_name'])) $branch_name = (string)$branch_record['branch_name'];
         $code_check = mysqli_prepare($conn, 'SELECT id FROM branches WHERE user_id=? AND branch_code=? AND id<>? LIMIT 1');
         mysqli_stmt_bind_param($code_check, 'isi', $user_id, $branch_code, $branch_id); mysqli_stmt_execute($code_check);
@@ -105,13 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? 'branch') === 
         $brand_value = branch_is_fixed_location($branch_record) ? null : ($brands_enabled ? ($brand_id > 0 ? $brand_id : null) : ($branch_record['brand_id'] !== null ? (int)$branch_record['brand_id'] : null));
         mysqli_stmt_bind_param($stmt, 'ssssiii', $branch_name, $branch_code, $address, $phone, $brand_value, $branch_id, $user_id);
         if (mysqli_stmt_execute($stmt)) {
-            if ((int)$branch_record['is_head_office'] === 1) {
-                $profile_sync = mysqli_prepare($conn, 'UPDATE users SET address=?, phone=? WHERE id=?');
-                if ($profile_sync) {
-                    mysqli_stmt_bind_param($profile_sync, 'ssi', $address, $phone, $user_id);
-                    mysqli_stmt_execute($profile_sync);
-                }
-            }
             branch_manage_redirect('Branch updated successfully.');
         }
     } else {
@@ -184,6 +186,7 @@ if (isset($_GET['edit'])) {
     mysqli_stmt_bind_param($stmt, 'ii', $branch_id, $user_id);
     mysqli_stmt_execute($stmt);
     $edit_branch = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    if ($edit_branch && (int)$edit_branch['is_head_office'] === 1) $edit_branch = null;
 }
 $edit_branch_is_fixed = $edit_branch && branch_is_fixed_location($edit_branch);
 
@@ -260,7 +263,7 @@ require_once '../includes/sidebar.php';
                     <div class="form-group">
                         <label for="branch_name">Branch Name</label>
                         <input type="text" class="form-control" id="branch_name" name="branch_name" maxlength="150" required value="<?= htmlspecialchars($edit_branch['branch_name'] ?? ''); ?>" placeholder="e.g. Gulshan Branch" <?= $edit_branch && branch_name_is_reserved((string)$edit_branch['branch_name']) ? 'readonly' : ''; ?>>
-                        <?php if ($edit_branch && branch_name_is_reserved((string)$edit_branch['branch_name'])) { ?><small class="text-muted">Main Warehouse name is system-managed; its code, address and phone can be updated.</small><?php } ?>
+                        <?php if ($edit_branch && branch_name_is_reserved((string)$edit_branch['branch_name'])) { ?><small class="text-muted">Main Warehouse name is system-managed; its code can be changed. Address and phone follow My Profile until you change them here.</small><?php } ?>
                     </div>
                     <div class="form-group">
                         <label for="branch_code">Branch Code</label>
@@ -303,7 +306,11 @@ require_once '../includes/sidebar.php';
                                 <td><?= htmlspecialchars($row['address'] ?: '-'); ?></td>
                                 <td><?= htmlspecialchars($row['phone'] ?: '-'); ?></td>
                                 <td class="text-center">
-                                    <a href="branch_manage.php?edit=<?= (int)$row['id']; ?>" class="btn btn-sm btn-warning" title="Edit"><i class="fas fa-edit"></i></a>
+                                    <?php if ((int)$row['is_head_office'] === 1) { ?>
+                                        <a href="../profile/index.php" class="small text-muted" title="Head Office address and phone are changed from My Profile">My Profile</a>
+                                    <?php } else { ?>
+                                        <a href="branch_manage.php?edit=<?= (int)$row['id']; ?>" class="btn btn-sm btn-warning" title="Edit"><i class="fas fa-edit"></i></a>
+                                    <?php } ?>
                                     <?php if (!branch_is_fixed_location($row)) { $block_reason = branch_delete_block_reason($conn, (int)$row['id']); ?>
                                         <?php if ($block_reason !== '') { ?><span title="<?= htmlspecialchars($block_reason); ?>"><button type="button" class="btn btn-sm btn-danger ml-1" disabled aria-label="Delete unavailable: linked records exist"><i class="fas fa-trash"></i></button></span>
                                         <?php } else { ?><a href="branch_manage.php?delete=<?= (int)$row['id']; ?>" class="btn btn-sm btn-danger ml-1" title="Delete" data-ajax-action-link="true" data-ajax-remove="true" data-confirm="Delete this branch?"><i class="fas fa-trash"></i></a><?php } ?>

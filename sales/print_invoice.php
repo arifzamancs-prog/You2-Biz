@@ -403,6 +403,11 @@ if(is_super_admin_user() && empty($profile)){
     $account_phone = $profile['phone'] ?? '';
     $account_email = $profile['email'] ?? '';
 }
+// Multi-branch: address and phone of the invoice's branch.
+if($print_branch_contact = printing_branch_contact($conn, (int)($invoice['branch_id'] ?? 0))){
+    $account_address = $print_branch_contact['address'];
+    $account_phone = $print_branch_contact['phone'];
+}
 $account_website = is_super_admin_user() && empty($profile) ? '' : company_profile_website($conn, (int)$user_id);
 // My Profile switches: Email / Website can be kept off invoices.
 if(!(is_super_admin_user() && empty($profile))){

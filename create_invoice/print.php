@@ -104,6 +104,11 @@ $print_top_margin = $printing_option === 'custom'
     ? $custom_top_margin
     : (should_use_general_top_margin($conn) ? current_printing_general_top_margin($conn) : 0);
 $company_profile = printing_company_profile_data($conn);
+// Multi-branch: address and phone of the invoice's branch.
+if($print_branch_contact = printing_branch_contact($conn, (int)($invoice['branch_id'] ?? 0))){
+    $company_profile['address'] = $print_branch_contact['address'];
+    $company_profile['phone'] = $print_branch_contact['phone'];
+}
 // My Profile switches: Email / Website can be kept off invoices.
 $invoice_contact_visibility = company_invoice_contact_visibility($conn, (int)($_SESSION['user_id'] ?? 0));
 if(!$invoice_contact_visibility['email']) $company_profile['email'] = 'None';

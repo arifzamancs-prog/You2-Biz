@@ -122,8 +122,8 @@ function ensure_head_office_branch($conn, $user_id)
         $name = 'Head Office';
         $insert = mysqli_prepare(
             $conn,
-            "INSERT INTO branches (user_id, branch_name, address, phone, is_head_office, status)
-             VALUES (?, ?, ?, ?, 1, 'active')"
+            "INSERT INTO branches (user_id, branch_name, branch_code, address, phone, is_head_office, status)
+             VALUES (?, ?, 'HO', ?, ?, 1, 'active')"
         );
 
         if ($insert) {
@@ -155,6 +155,10 @@ function ensure_head_office_branch($conn, $user_id)
     }
 
     $head_office_id = (int)($existing['id'] ?? 0);
+    // Head Office always carries the fixed code HO.
+    if ($head_office_id > 0) {
+        mysqli_query($conn, "UPDATE branches SET branch_code='HO' WHERE id={$head_office_id} AND user_id={$user_id} AND (branch_code IS NULL OR branch_code<>'HO') AND NOT EXISTS (SELECT 1 FROM (SELECT id FROM branches WHERE user_id={$user_id} AND branch_code='HO' AND id<>{$head_office_id}) taken)");
+    }
     $staff_branch_column = mysqli_query($conn, "SHOW COLUMNS FROM staff LIKE 'branch_id'");
     if ($head_office_id > 0 && $staff_branch_column && mysqli_num_rows($staff_branch_column) > 0) {
         $assign_staff = mysqli_prepare(

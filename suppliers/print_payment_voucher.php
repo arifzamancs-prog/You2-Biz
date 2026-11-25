@@ -2,6 +2,7 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/db.php';
+require_once '../includes/printing_helper.php';
 
 $user_id = (int)$_SESSION['user_id'];
 $payment_id = (int)($_GET['id'] ?? 0);
@@ -56,6 +57,11 @@ $company_stmt = mysqli_prepare($conn, 'SELECT name, address, phone, email FROM u
 mysqli_stmt_bind_param($company_stmt, 'i', $user_id);
 mysqli_stmt_execute($company_stmt);
 $company = mysqli_fetch_assoc(mysqli_stmt_get_result($company_stmt)) ?: [];
+// Multi-branch: address and phone of the branch that paid.
+if($print_branch_contact = printing_branch_contact($conn, (int)($payment['branch_id'] ?? 0))){
+    $company['address'] = $print_branch_contact['address'];
+    $company['phone'] = $print_branch_contact['phone'];
+}
 $voucher_no = 'SPV-' . str_pad((string)$payment_id, 6, '0', STR_PAD_LEFT);
 ?>
 <!doctype html><html><head><meta charset="utf-8"><title>Payment Voucher <?= htmlspecialchars($voucher_no); ?></title>

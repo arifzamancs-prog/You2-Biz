@@ -14,6 +14,27 @@ function printing_branch_id($conn)
     return (int)($GLOBALS['printing_branch_context'] ?? selected_branch_id($conn, false));
 }
 
+// Multi-branch prints: the record's branch gives the address and phone (Branch Manage);
+// company name, logo, email and website always stay the admin's own (My Profile).
+// Null when the company is single-branch or the record has no branch.
+function printing_branch_contact($conn, $branch_id = null)
+{
+    $company_id = (int)($_SESSION['user_id'] ?? 0);
+    if(is_super_admin_user() || $company_id <= 0 || !company_multi_branch_enabled($conn, $company_id)) return null;
+
+    $branch_id = $branch_id === null ? printing_branch_id($conn) : (int)$branch_id;
+    if($branch_id <= 0) return null;
+
+    $stmt = mysqli_prepare($conn, 'SELECT address, phone FROM branches WHERE id=? AND user_id=? LIMIT 1');
+    if(!$stmt) return null;
+    mysqli_stmt_bind_param($stmt, 'ii', $branch_id, $company_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    mysqli_stmt_close($stmt);
+
+    return $row ? ['address' => trim((string)$row['address']), 'phone' => trim((string)$row['phone'])] : null;
+}
+
 function printing_ensure_branch_table($conn)
 {
     if(!schema_once('printing_ensure_branch_table')) return true;
@@ -760,7 +781,8 @@ function current_print_company_logo_url($conn)
     $logo_url = branding_logo_url($conn);
     $default_logo_url = branding_default_logo_url();
     $company_default_avatar = basename((string)branding_company_default_avatar_filename($conn));
-    $login_user_id = (int)($_SESSION['login_user_id'] ?? $_SESSION['user_id'] ?? 0);
+    // The admin's (company's) profile photo is the logo on every print, whichever staff or branch prints.
+    $login_user_id = (int)($_SESSION['user_id'] ?? 0);
     $login_avatar = '';
 
     if($login_user_id > 0 && !is_super_admin_user()){

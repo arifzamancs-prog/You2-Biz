@@ -19,6 +19,7 @@ $wallet_scope = branch_scope_sql($conn);
 $booking_scope = branch_scope_sql($conn, 'bi');
 $expense_scope = branch_scope_sql($conn);
 $invoice_scope = branch_scope_sql($conn);
+$invoice_scope_i = branch_scope_sql($conn, 'i');
 $purchase_scope = branch_scope_sql($conn);
 $transaction_scope = branch_scope_sql($conn, 't');
 $dashboard_uses_sales_invoices = sales_module_enabled();
@@ -424,6 +425,8 @@ $wallet_balances = array_map(function($wallet){
 // and the recent list shows bookings.
 require_once 'includes/project_package_helper.php';
 $dashboard_travel_plane = project_package_company_type($conn, $user_id) === 'Travel Agency';
+// Inventory & Sales and Fashion: a second row of cards (dues, low stock, counts) as in You2 Wallet.
+$dashboard_stock_cards = in_array(project_package_company_type($conn, $user_id), ['Stock Product', 'Fashion house'], true);
 if (project_package_company_type($conn, $user_id) === 'Travel Agency') {
     require_once 'includes/travel_booking_helper.php';
     if (travel_booking_schema($conn)) {
@@ -492,6 +495,101 @@ if ($dashboard_uses_sales_invoices && !$dashboard_travel_plane) {
     $chart_sources['customer_due'] = ["SELECT {period} AS period, COALESCE(SUM(due_amount),0) AS total FROM invoices WHERE user_id=? {$invoice_scope} AND accounting_status='posted' AND invoice_date >= ? GROUP BY period", 'invoice_date'];
 } else {
     unset($chart_series['customer_due']);
+}
+
+// Best Selling Products (AJAX): top products sold between two dates, by quantity.
+if ($dashboard_stock_cards && isset($_GET['best_products_from'], $_GET['best_products_to'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    $best_from = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$_GET['best_products_from']);
+    $best_to = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$_GET['best_products_to']);
+    if (!$best_from || !$best_to || $best_from > $best_to) {
+        http_response_code(422);
+        echo json_encode(['error' => 'Select a valid From and To date.']);
+        exit;
+    }
+
+    // Returns are negative lines on credit invoices, so the totals are net of returns.
+    // Free lines (returnable containers given at no price) are not sales and stay out.
+    $best_rows = dashboard_rows(
+        $conn,
+        "SELECT COALESCE(NULLIF(p.product_name, ''), CONCAT('Product #', ii.product_id)) AS name,
+                SUM(ii.quantity) AS qty,
+                SUM(ii.total_price) AS amount
+         FROM invoice_items ii
+         INNER JOIN invoices i ON i.id=ii.invoice_id
+         LEFT JOIN products p ON p.id=ii.product_id
+         WHERE i.user_id=?
+         {$invoice_scope_i}
+         AND i.accounting_status='posted'
+         AND i.invoice_date BETWEEN ? AND ?
+         AND ii.product_id > 0
+         AND ii.unit_price <> 0
+         GROUP BY ii.product_id, p.product_name
+         HAVING qty > 0
+         ORDER BY qty DESC, amount DESC
+         LIMIT 10",
+        "iss",
+        [$user_id, $best_from->format('Y-m-d'), $best_to->format('Y-m-d')]
+    );
+
+    echo json_encode(['rows' => array_map(function ($row) {
+        return ['name' => (string)$row['name'], 'qty' => round((float)$row['qty'], 3), 'amount' => round((float)$row['amount'], 2)];
+    }, $best_rows)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Custom date range (AJAX): bars for every day, month or year between the two dates,
+// chosen by the length of the range, as JSON in the same shape as one period below.
+if (isset($_GET['business_chart_from'], $_GET['business_chart_to'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    $custom_from = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$_GET['business_chart_from']);
+    $custom_to = DateTimeImmutable::createFromFormat('!Y-m-d', (string)$_GET['business_chart_to']);
+    if (!$custom_from || !$custom_to || $custom_from > $custom_to) {
+        http_response_code(422);
+        echo json_encode(['error' => 'Select a valid From and To date.']);
+        exit;
+    }
+
+    $custom_days = (int)$custom_from->diff($custom_to)->days + 1;
+    $custom_group = $custom_days <= 62 ? 'daily' : ($custom_days <= 731 ? 'monthly' : 'yearly');
+    $custom_from_sql = $custom_from->format('Y-m-d');
+    $custom_to_sql = $custom_to->format('Y-m-d');
+
+    // Day totals of every metric inside the range.
+    $custom_totals = [];
+    foreach (array_keys($chart_series) as $key) {
+        $custom_totals[$key] = [];
+        if ($key === 'sales' && $dashboard_travel_plane && function_exists('travel_sales_by_period')) {
+            $custom_totals[$key] = travel_sales_by_period($conn, $user_id, $custom_from_sql, $custom_to_sql, 'day');
+            continue;
+        }
+        if (!isset($chart_sources[$key])) continue;
+        [$sql, $date_column] = $chart_sources[$key];
+        foreach (dashboard_rows($conn, str_replace('{period}', $date_column, $sql), "is", [$user_id, $custom_from_sql]) as $row) {
+            if ($row['period'] <= $custom_to_sql) $custom_totals[$key][$row['period']] = (float)$row['total'];
+        }
+    }
+
+    $custom_buckets = [];
+    for ($day = $custom_from; $day <= $custom_to; $day = $day->modify('+1 day')) {
+        $bucket = $custom_group === 'daily' ? $day->format('d M') : ($custom_group === 'monthly' ? $day->format('M Y') : $day->format('Y'));
+        $custom_buckets[$day->format('Y-m-d')] = $bucket;
+    }
+
+    $custom_labels = array_values(array_unique($custom_buckets));
+    $custom_index = array_flip($custom_labels);
+    $custom_data = [];
+    foreach (array_keys($chart_series) as $key) {
+        $custom_data[$key] = array_fill(0, count($custom_labels), 0);
+        foreach ($custom_totals[$key] as $day => $amount) {
+            $day = substr((string)$day, 0, 10);
+            if (isset($custom_buckets[$day])) $custom_data[$key][$custom_index[$custom_buckets[$day]]] += (float)$amount;
+        }
+        $custom_data[$key] = array_map(function ($value) { return round($value, 2); }, $custom_data[$key]);
+    }
+
+    echo json_encode(['group' => $custom_group, 'labels' => $custom_labels, 'data' => $custom_data], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 $chart_days = $chart_days ?? [];
@@ -608,21 +706,20 @@ require_once 'includes/sidebar.php';
 
 <div class="<?= $dashboard_is_agent ? 'agent-dashboard' : ''; ?>">
 
-<div class="row align-items-center mb-3">
+<div class="row align-items-center mb-2">
 
-    <div class="col-md-8">
+    <div class="col-md-5">
 
-        <h1 class="mb-1">
+        <h1 class="mb-0 d-inline-block align-middle" style="font-size:1.4rem;font-weight:600;line-height:1.2;">
             <?= $dashboard_is_staff_login ? 'Branch Dashboard' : 'Dashboard'; ?>
         </h1>
-
-        <p class="text-muted mb-0">
+        <span class="text-muted small align-middle ml-2">
             Welcome back, <?= htmlspecialchars($user_name); ?>.
-        </p>
+        </span>
 
     </div>
 
-    <div class="col-md-4 text-md-right mt-3 mt-md-0">
+    <div class="col-md-7 text-md-right mt-3 mt-md-0" id="dashShortcutBar">
 
         <?php if (!empty($dashboard_travel_plane)) { ?>
         <!-- Travel Agency: a small plane flying between two airports beside the heading. -->
@@ -663,6 +760,13 @@ require_once 'includes/sidebar.php';
         </script>
         <?php } ?>
 
+        <!-- Shortcuts dragged here from the sidebar; drag one out of this line to remove it. -->
+        <span id="dashShortcuts"></span>
+
+        <a href="#" id="dashLayoutReset" class="btn btn-link btn-sm text-muted agent-dashboard-clickable" title="Cards and charts can be dragged and resized; this restores the original layout">
+            <i class="fas fa-undo-alt mr-1"></i>Reset Layout
+        </a>
+
         <?php if(sales_module_enabled()){ ?>
             <a href="sales/create_invoice.php" class="btn btn-primary agent-dashboard-clickable">
                 <i class="fas fa-file-invoice"></i>
@@ -674,69 +778,57 @@ require_once 'includes/sidebar.php';
 
 </div>
 
-<div class="row">
+<?php
+// Summary cards. Each one renders in both shapes: the top row shows the large coloured
+// box, the bottom row the compact one. Moving a card between rows switches its shape.
+$dashboard_cards = [
+    ['key' => 'wallet_balance', 'href' => 'wallets/index.php', 'color' => 'info', 'icon' => 'fas fa-wallet', 'label' => 'Wallet Balance', 'value' => 'BDT ' . number_format($total_wallet_balance, 2)],
+    ['key' => 'today_sale', 'href' => $dashboard_invoice_list_url, 'color' => 'success', 'icon' => 'fas fa-chart-line', 'label' => "Today's Sale", 'value' => 'BDT ' . number_format($total_sales, 2), 'clickable' => true],
+    ['key' => 'today_expense', 'href' => 'expenses/index.php', 'color' => 'danger', 'icon' => 'fas fa-receipt', 'label' => "Today's Expense", 'value' => 'BDT ' . number_format($today_expense, 2)],
+    ['key' => 'today_purchases', 'href' => 'purchases/index.php', 'color' => 'warning', 'icon' => 'fas fa-shopping-basket', 'label' => "Today's Purchases", 'value' => 'BDT ' . number_format($total_purchases, 2)],
+];
+if ($dashboard_stock_cards) {
+    $dashboard_cards[] = ['key' => 'customer_due', 'href' => 'reports/customer_due_report.php', 'color' => 'primary', 'icon' => 'fas fa-hand-holding-usd', 'label' => 'Customer Due', 'value' => 'BDT ' . number_format($customer_due, 2), 'row' => 'bottom'];
+    $dashboard_cards[] = ['key' => 'supplier_due', 'href' => 'suppliers/supplier_payment.php', 'color' => 'danger', 'icon' => 'fas fa-truck-loading', 'label' => 'Supplier Due', 'value' => 'BDT ' . number_format($supplier_due, 2), 'row' => 'bottom'];
+    $dashboard_cards[] = ['key' => 'low_stock', 'href' => 'reports/stock_alert_report.php', 'color' => 'warning', 'icon' => 'fas fa-exclamation-triangle', 'label' => 'Low Stock', 'value' => (int)$low_stock . ' Products', 'row' => 'bottom'];
+    $dashboard_cards[] = ['key' => 'customers_products', 'href' => '', 'color' => 'success', 'icon' => 'fas fa-users', 'row' => 'bottom',
+        'label_html' => '<a href="customers/index.php" class="dashboard-split-link">Customers</a> / <a href="products/index.php" class="dashboard-split-link">Products</a>',
+        'value_html' => '<a href="customers/index.php" class="dashboard-split-link">' . (int)$total_customers . '</a> / <a href="products/index.php" class="dashboard-split-link">' . (int)$total_products . '</a>'];
+}
 
-    <div class="col-lg-3 col-6">
-        <a href="wallets/index.php" class="dashboard-card-link">
-        <div class="small-box bg-info">
-            <div class="inner">
-                <h3>BDT <?= number_format($total_wallet_balance,2); ?></h3>
-                <p>Wallet Balance</p>
-            </div>
-            <div class="icon">
-                <i class="fas fa-wallet"></i>
-            </div>
-        </div>
-        </a>
-    </div>
+function dashboard_card_html($card)
+{
+    $label = $card['label_html'] ?? htmlspecialchars($card['label']);
+    $value = $card['value_html'] ?? htmlspecialchars($card['value']);
+    $color = htmlspecialchars($card['color']);
+    $icon = htmlspecialchars($card['icon']);
+    $open = $card['href'] !== ''
+        ? '<a href="' . htmlspecialchars($card['href']) . '" class="dashboard-card-link' . (!empty($card['clickable']) ? ' agent-dashboard-clickable' : '') . '">'
+        : '';
+    $close = $card['href'] !== '' ? '</a>' : '';
 
-    <div class="col-lg-3 col-6">
-        <a href="<?= htmlspecialchars($dashboard_invoice_list_url); ?>" class="dashboard-card-link agent-dashboard-clickable">
-        <div class="small-box bg-success">
-            <div class="inner">
-                <h3>BDT <?= number_format($total_sales,2); ?></h3>
-                <p>Today's Sale</p>
-            </div>
-            <div class="icon">
-                <i class="fas fa-chart-line"></i>
-            </div>
-        </div>
-        </a>
-    </div>
+    return '<div class="col-lg-3 col-6 dash-card" data-card="' . htmlspecialchars($card['key']) . '">'
+        . '<div class="dash-card-top">' . $open
+        . '<div class="small-box bg-' . $color . '"><div class="inner"><h3>' . $value . '</h3><p>' . $label . '</p></div><div class="icon"><i class="' . $icon . '"></i></div></div>'
+        . $close . '</div>'
+        . '<div class="dash-card-bottom">' . $open
+        . '<div class="info-box"><span class="info-box-icon bg-' . $color . '"><i class="' . $icon . '"></i></span><div class="info-box-content"><span class="info-box-text">' . $label . '</span><span class="info-box-number">' . $value . '</span></div></div>'
+        . $close . '</div>'
+        . '</div>';
+}
+?>
 
-    <div class="col-lg-3 col-6">
-        <a href="expenses/index.php" class="dashboard-card-link">
-        <div class="small-box bg-danger">
-            <div class="inner">
-                <h3>BDT <?= number_format($today_expense,2); ?></h3>
-                <p>Today's Expense</p>
-            </div>
-            <div class="icon">
-                <i class="fas fa-receipt"></i>
-            </div>
-        </div>
-        </a>
-    </div>
-
-    <div class="col-lg-3 col-6">
-        <a href="purchases/index.php" class="dashboard-card-link">
-        <div class="small-box bg-warning">
-            <div class="inner">
-                <h3>BDT <?= number_format($total_purchases,2); ?></h3>
-                <p>Today's Purchases</p>
-            </div>
-            <div class="icon">
-                <i class="fas fa-shopping-basket"></i>
-            </div>
-        </div>
-        </a>
-    </div>
-
+<?php foreach (['top', 'bottom'] as $card_row) { ?>
+<div class="row dash-card-row" data-row="<?= $card_row; ?>">
+    <?php foreach ($dashboard_cards as $card) {
+        if (($card['row'] ?? 'top') === $card_row) echo dashboard_card_html($card);
+    } ?>
 </div>
+<?php } ?>
 
-<div class="row">
+<div class="row" id="dashPanels">
 
-    <div class="col-lg-8">
+    <div class="col-lg-8 dash-panel" data-panel="business_overview">
 
         <div class="card">
 
@@ -751,6 +843,7 @@ require_once 'includes/sidebar.php';
                         <button type="button" class="btn btn-outline-success" data-period="weekly">Weekly</button>
                         <button type="button" class="btn btn-outline-success" data-period="monthly">Monthly</button>
                         <button type="button" class="btn btn-outline-success" data-period="yearly">Yearly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="custom"><i class="far fa-calendar-alt mr-1"></i>Custom</button>
                     </div>
                 </div>
             </div>
@@ -763,7 +856,16 @@ require_once 'includes/sidebar.php';
                     <button type="button" class="btn btn-outline-secondary" data-metric="all">All</button>
                 </div>
 
-                <div style="height:320px;">
+                <form class="form-inline mb-3 d-none" id="businessChartCustom">
+                    <label class="mr-2 small text-muted" for="businessChartFrom">From</label>
+                    <input type="date" class="form-control form-control-sm mr-2" id="businessChartFrom" value="<?= htmlspecialchars($chart_today->modify('-29 days')->format('Y-m-d')); ?>" max="<?= htmlspecialchars($chart_today->format('Y-m-d')); ?>" required>
+                    <label class="mr-2 small text-muted" for="businessChartTo">To</label>
+                    <input type="date" class="form-control form-control-sm mr-2" id="businessChartTo" value="<?= htmlspecialchars($chart_today->format('Y-m-d')); ?>" required>
+                    <button type="submit" class="btn btn-success btn-sm">Show</button>
+                    <small class="text-danger ml-2" id="businessChartCustomError"></small>
+                </form>
+
+                <div class="dash-resize-target" style="height:320px;">
                     <canvas id="businessChart"></canvas>
                 </div>
             </div>
@@ -772,7 +874,7 @@ require_once 'includes/sidebar.php';
 
     </div>
 
-    <div class="col-lg-4">
+    <div class="col-lg-4 dash-panel" data-panel="wallet_split">
 
         <div class="card">
 
@@ -788,7 +890,7 @@ require_once 'includes/sidebar.php';
             </div>
 
             <div class="card-body">
-                <div style="height:320px;">
+                <div class="dash-resize-target" style="height:320px;">
                     <canvas id="walletChart"></canvas>
                 </div>
             </div>
@@ -797,11 +899,59 @@ require_once 'includes/sidebar.php';
 
     </div>
 
-</div>
+    <?php if($dashboard_stock_cards){ ?>
+    <div class="col-lg-12 dash-panel" data-panel="best_selling_products">
 
-<div class="row">
+        <div class="card">
 
-    <div class="col-lg-12">
+            <div class="card-header">
+                <h3 class="card-title">
+                    Best Selling Products
+                </h3>
+
+                <div class="card-tools">
+                    <div class="btn-group btn-group-sm" id="bestProductsPeriods">
+                        <button type="button" class="btn btn-outline-success" data-period="daily">Daily</button>
+                        <button type="button" class="btn btn-outline-success" data-period="weekly">Weekly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="monthly">Monthly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="yearly">Yearly</button>
+                        <button type="button" class="btn btn-outline-success" data-period="custom"><i class="far fa-calendar-alt mr-1"></i>Custom</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center mb-3">
+                    <div class="btn-group btn-group-sm mr-3 mb-1" id="bestProductsMetric">
+                        <button type="button" class="btn btn-outline-secondary active" data-metric="qty">Quantity</button>
+                        <button type="button" class="btn btn-outline-secondary" data-metric="amount">Amount</button>
+                    </div>
+                    <form class="form-inline mb-1 d-none" id="bestProductsCustom">
+                        <label class="mr-2 small text-muted" for="bestProductsFrom">From</label>
+                        <input type="date" class="form-control form-control-sm mr-2" id="bestProductsFrom" value="<?= htmlspecialchars(date('Y-m-01')); ?>" max="<?= htmlspecialchars(date('Y-m-d')); ?>" required>
+                        <label class="mr-2 small text-muted" for="bestProductsTo">To</label>
+                        <input type="date" class="form-control form-control-sm mr-2" id="bestProductsTo" value="<?= htmlspecialchars(date('Y-m-d')); ?>" required>
+                        <button type="submit" class="btn btn-success btn-sm">Show</button>
+                    </form>
+                    <small class="text-danger ml-2" id="bestProductsCustomError"></small>
+                    <small class="text-muted ml-auto" id="bestProductsRange"></small>
+                </div>
+
+                <div class="dash-resize-target position-relative" style="height:320px;">
+                    <canvas id="bestProductsChart"></canvas>
+                    <div id="bestProductsEmpty" class="d-none align-items-center justify-content-center text-muted" style="position:absolute;top:0;right:0;bottom:0;left:0;">
+                        No products sold in this period.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+    <?php } ?>
+
+
+    <div class="col-lg-12 dash-panel" data-panel="recent_invoices">
 
         <div class="card">
 
@@ -816,7 +966,7 @@ require_once 'includes/sidebar.php';
                 </div>
             </div>
 
-            <div class="card-body p-0">
+            <div class="card-body p-0 dash-resize-target">
                 <table class="table table-striped table-sm mb-0">
                     <thead>
                     <tr>
@@ -861,11 +1011,7 @@ require_once 'includes/sidebar.php';
 
     </div>
 
-</div>
-
-<div class="row">
-
-    <div class="col-lg-12">
+    <div class="col-lg-12 dash-panel" data-panel="recent_wallet_activity">
 
         <div class="card">
 
@@ -880,7 +1026,7 @@ require_once 'includes/sidebar.php';
                 </div>
             </div>
 
-            <div class="card-body p-0">
+            <div class="card-body p-0 dash-resize-target">
                 <table class="table table-striped table-sm mb-0">
                     <thead>
                     <tr>
@@ -970,7 +1116,27 @@ require_once 'includes/sidebar.php';
 
 <?php
 
+$dashboard_layout_key = 'you2biz.dashboard.layout.' . (int)$user_id . '.' . (int)($_SESSION['login_user_id'] ?? $user_id);
 $page_script = '
+<script>window.dashBsTooltip = $.fn.tooltip; window.dashBsButton = $.fn.button;</script>
+<script src="' . htmlspecialchars(app_path('adminlte/plugins/jquery-ui/jquery-ui.min.js')) . '"></script>
+<script>
+// jQuery UI has its own tooltip / button widgets; keep the Bootstrap ones.
+$.fn.tooltip = window.dashBsTooltip;
+$.fn.button = window.dashBsButton;
+</script>
+<script src="' . htmlspecialchars(app_path('assets/js/dashboard_layout.js') . '?v=' . @filemtime(__DIR__ . '/assets/js/dashboard_layout.js')) . '"></script>
+<script>
+$(function(){
+    DashboardLayout.init({ storageKey: ' . json_encode($dashboard_layout_key) . ', resetLink: "#dashLayoutReset", shortcutBar: "#dashShortcutBar", shortcutList: "#dashShortcuts" });
+});
+</script>
+<script src="' . htmlspecialchars(app_path('assets/js/best_products_chart.js') . '?v=' . @filemtime(__DIR__ . '/assets/js/best_products_chart.js')) . '"></script>
+<script>
+$(function(){
+    if (window.BestProductsChart) BestProductsChart.init({ url: window.location.pathname, defaultPeriod: "monthly" });
+});
+</script>
 <script>
 $(function(){
     const businessCanvas = document.getElementById("businessChart");
@@ -1011,19 +1177,51 @@ $(function(){
         });
     }
 
-    $("#businessChartPeriods").on("click", "button", function(){
-        const period = businessData.periods[$(this).data("period")];
+    function showBusinessPeriod(period){
+        businessChart.data.labels = period.labels;
+        businessKeys.forEach(function(key, index){
+            businessChart.data.datasets[index].data = period.data[key] || [];
+        });
+        businessChart.update();
+    }
 
-        if(!businessChart || !period){
+    $("#businessChartPeriods").on("click", "button", function(){
+        const name = $(this).data("period");
+
+        if(!businessChart){
             return;
         }
 
         $(this).addClass("active").siblings().removeClass("active");
-        businessChart.data.labels = period.labels;
-        businessKeys.forEach(function(key, index){
-            businessChart.data.datasets[index].data = period.data[key];
-        });
-        businessChart.update();
+        $("#businessChartCustom").toggleClass("d-none", name !== "custom");
+
+        if(name === "custom"){
+            $("#businessChartCustom").trigger("submit");
+            return;
+        }
+
+        if(businessData.periods[name]){
+            showBusinessPeriod(businessData.periods[name]);
+        }
+    });
+
+    // Custom: any From / To dates; up to 62 days shows days, up to 2 years months, else years.
+    $("#businessChartCustom").on("submit", function(event){
+        event.preventDefault();
+        const from = $("#businessChartFrom").val();
+        const to = $("#businessChartTo").val();
+        const error = $("#businessChartCustomError").text("");
+
+        if(!from || !to || from > to){
+            error.text("From date must be on or before To date.");
+            return;
+        }
+
+        $.getJSON(window.location.pathname, { business_chart_from: from, business_chart_to: to })
+            .done(showBusinessPeriod)
+            .fail(function(xhr){
+                error.text((xhr.responseJSON && xhr.responseJSON.error) || "Could not load this date range.");
+            });
     });
 
     // One metric at a time, or every metric side by side with a legend.
@@ -1075,6 +1273,30 @@ $(function(){
 });
 </script>
 ';
+
+// Super Admin notice for company admins: a popup the first time an admin logs in while
+// it is published; never again for that admin.
+require_once 'includes/system_notice_helper.php';
+if (is_admin_user() && !is_super_admin_user() && !is_manager_user() && !$dashboard_is_agent) {
+    $admin_notice = system_notice_active($conn, 'admin');
+    if ($admin_notice && system_notice_mark_seen($conn, (int)$admin_notice['id'], (int)$user_id)) {
+        $page_script .= '
+<div class="modal fade" id="systemNoticeModal" tabindex="-1" role="dialog" aria-labelledby="systemNoticeTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-primary">
+                <h5 class="modal-title" id="systemNoticeTitle"><i class="fas fa-bullhorn mr-2"></i>' . htmlspecialchars($admin_notice['title']) . '</h5>
+                <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body">' . nl2br(htmlspecialchars($admin_notice['message'])) . '</div>
+            <div class="modal-footer"><button type="button" class="btn btn-primary" data-dismiss="modal">OK</button></div>
+        </div>
+    </div>
+</div>
+<script>$(function(){ $("#systemNoticeModal").modal("show"); });</script>
+';
+    }
+}
 
 require_once 'includes/footer.php';
 ?>

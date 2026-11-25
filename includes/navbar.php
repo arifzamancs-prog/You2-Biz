@@ -296,7 +296,13 @@ if (
             </form>
         </li>
         <?php }elseif(is_manager_user() && isset($conn)){ ?>
-        <li class="nav-item d-flex align-items-center mr-3"><span class="badge badge-primary p-2"><i class="fas fa-code-branch mr-1"></i><?= htmlspecialchars(current_branch_label($conn)); ?></span></li>
+        <?php // Staff: their own office, fixed (shown like the selector, but locked). ?>
+        <li class="nav-item d-flex align-items-center mr-2">
+            <select class="form-control form-control-sm" disabled title="Your office is fixed by your staff access" aria-label="Your office">
+                <option selected><?= htmlspecialchars(current_branch_label($conn)); ?></option>
+            </select>
+            <i class="fas fa-lock text-muted ml-1" title="Your office is fixed by your staff access"></i>
+        </li>
         <?php } ?>
 
         <li class="nav-item dropdown">

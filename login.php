@@ -13,6 +13,7 @@ require_once 'includes/login_email_otp_helper.php';
 require_once 'includes/login_session_helper.php';
 require_once 'includes/customer_portal_helper.php';
 require_once 'includes/staff_helper.php';
+require_once 'includes/system_notice_helper.php';
 
 ensure_manager_access_columns($conn);
 ensure_signup_message_settings_table($conn);
@@ -1008,6 +1009,14 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
 
             <h2>Welcome back</h2>
             <div class="auth-subtitle">Sign in to continue to your account.</div>
+
+            <?php // Super Admin notice for everyone who opens the login page. ?>
+            <?php if($login_page_notice = system_notice_active($conn, 'login')){ ?>
+                <div class="alert alert-info auth-system-notice" role="note" style="border:4px double #dc3545;">
+                    <strong><i class="fas fa-bullhorn mr-1"></i><?= htmlspecialchars($login_page_notice['title']); ?></strong>
+                    <div class="mt-1"><?= nl2br(htmlspecialchars($login_page_notice['message'])); ?></div>
+                </div>
+            <?php } ?>
 
             <?php if($message){ ?>
                 <div class="alert alert-<?= htmlspecialchars($message_type); ?>">

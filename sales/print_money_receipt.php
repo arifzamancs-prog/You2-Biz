@@ -138,6 +138,11 @@ $profile = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 $account_name = $profile['name'] ?? 'Account';
 $account_address = $profile['address'] ?? '';
 $account_phone = $profile['phone'] ?? '';
+// Multi-branch: address and phone of the branch that collected the payment.
+if($print_branch_contact = printing_branch_contact($conn, (int)($receipt['branch_id'] ?? 0))){
+    $account_address = $print_branch_contact['address'];
+    $account_phone = $print_branch_contact['phone'];
+}
 $pos_printing = is_pos_printing($conn);
 $custom_printing = is_custom_printing($conn);
 $custom_size = current_printing_custom_size($conn);

@@ -154,16 +154,12 @@ function selected_branch_id($conn, $for_write = false)
     if (is_manager_user()) {
         $manager_branch = manager_branch_id($conn, $company_id);
 
-        // Under Multi Branch, branch staff are always local. Head Office staff
-        // are global; All Branches only controls use of the navbar selector.
-        if (!manager_is_head_office($conn, $company_id)) {
-            unset($_SESSION['selected_branch_id']);
-            return $manager_branch;
-        }
-
+        // Under Multi Branch, staff work in the office they were given (Head Office
+        // included) and cannot change it. Only Head Office staff with the All Branches
+        // permission use the navbar selector.
         if (!manager_can_view_all_branches($conn, $company_id)) {
             unset($_SESSION['selected_branch_id']);
-            return $for_write ? $manager_branch : 0;
+            return $manager_branch;
         }
     }
 

@@ -357,12 +357,26 @@ if($_SERVER['REQUEST_METHOD']=='POST'){
 
             // The company profile is the Head Office contact record as well.
             ensure_head_office_branch($conn, $user_id);
+            // Main Warehouse follows the profile address / phone until it is given its own
+            // from Branch Manage: a value still equal to the old Head Office one moves along.
+            $head_office_address = $address === 'None' ? '' : $address;
+            $head_office_phone = $phone === 'None' ? '' : $phone;
+            $old_head_office = mysqli_fetch_assoc(mysqli_query($conn, 'SELECT address, phone FROM branches WHERE user_id=' . (int)$user_id . ' AND is_head_office=1 LIMIT 1')) ?: [];
+            foreach(['address' => $head_office_address, 'phone' => $head_office_phone] as $warehouse_field => $warehouse_value){
+                $warehouse_sync = mysqli_prepare($conn, "UPDATE branches SET {$warehouse_field}=? WHERE user_id=? AND is_head_office=0 AND branch_name='Main Warehouse' AND COALESCE({$warehouse_field},'')=?");
+                if($warehouse_sync){
+                    $warehouse_old = trim((string)($old_head_office[$warehouse_field] ?? ''));
+                    mysqli_stmt_bind_param($warehouse_sync, 'sis', $warehouse_value, $user_id, $warehouse_old);
+                    mysqli_stmt_execute($warehouse_sync);
+                }
+            }
             $head_office_sync = mysqli_prepare(
                 $conn,
                 'UPDATE branches SET address=?, phone=? WHERE user_id=? AND is_head_office=1'
             );
             if($head_office_sync){
-                mysqli_stmt_bind_param($head_office_sync, 'ssi', $address, $phone, $user_id);
+                // "None" only marks an empty profile field; the branch keeps it blank.
+                mysqli_stmt_bind_param($head_office_sync, 'ssi', $head_office_address, $head_office_phone, $user_id);
                 mysqli_stmt_execute($head_office_sync);
             }
             if($profile_shows_website){
@@ -461,8 +475,12 @@ if($is_manager && !empty($user['staff_photo'])){
                             type="file"
                             name="avatar"
                             id="avatar_input"
-                            accept="image/*"
+                            accept="image/png,image/jpeg"
                             class="form-control">
+
+                        <button type="button" id="avatar_recrop" class="btn btn-outline-primary btn-sm mt-2 d-none">
+                            <i class="fas fa-crop-alt mr-1"></i>Crop Again
+                        </button>
 
                         <div class="mt-2 text-left">
                             <strong>Company Type:</strong>
@@ -591,27 +609,12 @@ if($is_manager && !empty($user['staff_photo'])){
 
 <?php
 $page_script = '
+<script src="' . htmlspecialchars(app_path('assets/js/image_cropper.js')) . '"></script>
 <script>
-$(function(){
-    $("#avatar_input").on("change", function(){
-        const file = this.files && this.files[0] ? this.files[0] : null;
-
-        if(!file){
-            return;
-        }
-
-        if(!file.type || !file.type.startsWith("image/")){
-            return;
-        }
-
-        const reader = new FileReader();
-
-        reader.onload = function(e){
-            $("#avatar_preview").attr("src", e.target.result);
-        };
-
-        reader.readAsDataURL(file);
-    });
+// Profile photo: crop before upload; the cropped image replaces the chosen file.
+ImageCropper.attach(document.getElementById("avatar_input"), {
+    preview: document.getElementById("avatar_preview"),
+    recropButton: document.getElementById("avatar_recrop")
 });
 </script>
 ';

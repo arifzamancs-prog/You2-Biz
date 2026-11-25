@@ -101,6 +101,11 @@ $account_name = $profile['name'] ?? 'Account';
 $account_address = $profile['address'] ?? '';
 $account_phone = $profile['phone'] ?? '';
 $account_email = $profile['email'] ?? '';
+// Multi-branch: address and phone of the purchase's branch.
+if($print_branch_contact = printing_branch_contact($conn, (int)($purchase['branch_id'] ?? 0))){
+    $account_address = $print_branch_contact['address'];
+    $account_phone = $print_branch_contact['phone'];
+}
 $account_website = company_profile_website($conn, $user_id);
 $contact_visibility = company_invoice_contact_visibility($conn, $user_id);
 if(!$contact_visibility['email']) $account_email = '';

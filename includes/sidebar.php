@@ -622,6 +622,11 @@ if(
                                 'label' => 'Marketing',
                                 'icon' => 'fas fa-sms',
                             ],
+                            [
+                                'href' => app_path('super_admin/notice_publish.php'),
+                                'label' => 'Notice Publish',
+                                'icon' => 'fas fa-bullhorn',
+                            ],
                         ]
                     );
                     ?>
@@ -677,7 +682,8 @@ if(
                 }
                 ?>
 
-                <?php if(is_admin_user() || manager_has_permission('notice_publish')){ ?>
+                <?php // Super Admin publishes from the Super Admin menu (login page / admin login notices). ?>
+                <?php if(!is_super_admin_user() && (is_admin_user() || manager_has_permission('notice_publish'))){ ?>
                     <?php sidebar_item(app_path('user_management/notice_publish.php'), 'Notice Publish', 'fas fa-bullhorn'); ?>
                 <?php } ?>
 
