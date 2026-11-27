@@ -87,7 +87,7 @@ $page_script = <<<'HTML'
 $(function () {
  $('.salary-table').each(function () {
   $(this).DataTable({
-   pageLength: 10, lengthMenu: [[10,25,50,100,-1],[10,25,50,100,'All']],
+   pageLength: 10, lengthMenu: [10, 25, 50, 100],
    autoWidth: false, responsive: false, order: [],
    columnDefs: [{targets: 0, orderable: false, searchable: false}],
    drawCallback: function () {

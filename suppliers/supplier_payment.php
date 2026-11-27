@@ -103,12 +103,11 @@ while($row = mysqli_fetch_assoc($result)){
     <div class="card-body">
 
         <style>
-            #example1 .vendor-column{min-width:160px;width:18%}
-            #example1 .date-column{min-width:100px;width:8%;white-space:nowrap}
-            #example1 .amount-column{min-width:125px;width:12%;white-space:nowrap}
-            #example1 .due-column{min-width:95px;width:8%;white-space:nowrap}
-            #example1 .action-column{min-width:125px;width:125px;white-space:nowrap}
-            #example1.purchase-payment-compact .action-column{min-width:0;width:1%;white-space:nowrap}
+            /* Each column is as wide as its content: numbers, dates and amounts stay on one line. */
+            #example1 th,#example1 td{white-space:nowrap;width:auto}
+            #example1 .purchase-note{white-space:normal;max-width:260px}
+            #example1 .vendor-column{white-space:normal;min-width:140px}
+            #example1 .action-column{width:1%}
         </style>
 
         <table
@@ -141,7 +140,7 @@ while($row = mysqli_fetch_assoc($result)){
                 <td>
                     <?= htmlspecialchars($row['purchase_no']); ?>
                     <?php if($is_inventory_or_fashion && trim((string)($row['notes'] ?? '')) !== ''){ ?>
-                        <div class="small text-muted mt-1"><strong>Note:</strong> <?= nl2br(htmlspecialchars(trim((string)$row['notes']))); ?></div>
+                        <div class="small text-muted mt-1 purchase-note"><strong>Note:</strong> <?= nl2br(htmlspecialchars(trim((string)$row['notes']))); ?></div>
                     <?php } ?>
                 </td>
 
@@ -149,7 +148,7 @@ while($row = mysqli_fetch_assoc($result)){
                     <?= htmlspecialchars(app_date($row['purchase_date'])); ?>
                 </td>
 
-                <td>
+                <td class="vendor-column">
                     <?= htmlspecialchars($row['supplier_name'] ?: (supplier_display_text('Missing Supplier #') . (int)$row['supplier_id'])); ?>
                 </td>
 

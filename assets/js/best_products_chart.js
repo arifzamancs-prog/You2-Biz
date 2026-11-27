@@ -46,9 +46,37 @@
         var rows = [];
         var metric = 'qty';
         var request = null;
+        // Keep the active metric visible on every horizontal bar, not only in its tooltip.
+        var valueLabelsPlugin = {
+            id: 'bestProductsValueLabels',
+            afterDatasetsDraw: function (chartInstance) {
+                var context = chartInstance.ctx;
+                var dataset = chartInstance.data.datasets[0];
+                var bars = chartInstance.getDatasetMeta(0).data;
+                if (!dataset || !bars) return;
+
+                context.save();
+                context.font = '600 12px Arial, sans-serif';
+                context.textBaseline = 'middle';
+
+                bars.forEach(function (bar, index) {
+                    var value = Number(dataset.data[index] || 0);
+                    var text = metric === 'amount' ? money(value) : quantity(value);
+                    var width = context.measureText(text).width;
+                    var fitsInside = Math.abs(bar.x - bar.base) >= width + 14;
+
+                    context.fillStyle = fitsInside ? '#ffffff' : '#343a40';
+                    context.textAlign = fitsInside ? 'right' : 'left';
+                    context.fillText(text, fitsInside ? bar.x - 7 : bar.x + 7, bar.y);
+                });
+
+                context.restore();
+            }
+        };
 
         var chart = new window.Chart(canvas, {
             type: 'bar',
+            plugins: [valueLabelsPlugin],
             data: { labels: [], datasets: [{ label: 'Quantity', data: [], backgroundColor: '#28a745', borderRadius: 4 }] },
             options: {
                 indexAxis: 'y',

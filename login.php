@@ -962,6 +962,24 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
             margin-top:12px;
         }
     }
+    /* Phones: larger, easier-to-read text on the login page. */
+    @media (max-width: 767.98px){
+        .auth-panel h1{font-size:24px}
+        .auth-mobile-brand-title{font-size:22px}
+        .auth-mobile-brand-slogan{font-size:14px;letter-spacing:.02em}
+        .auth-form h2{font-size:28px}
+        .auth-subtitle{font-size:16px}
+        .auth-form .form-group label{font-size:16px}
+        .auth-input{font-size:16px;height:50px}
+        .auth-input::placeholder{font-size:16px}
+        .auth-icon{font-size:17px}
+        .auth-link{font-size:16px}
+        .auth-submit{font-size:18px;height:52px}
+        .auth-form .text-center.mt-4{font-size:16px}
+        .auth-form .text-center.mt-4 mark{font-size:16px}
+        .auth-footer-note{font-size:14px;line-height:1.6}
+        .auth-form .alert{font-size:15px}
+    }
 </style>
 
 <body class="auth-page">
@@ -1074,15 +1092,14 @@ Login - <?= htmlspecialchars($auth_site_title); ?>
 
             <?php if($auth_registration_enabled){ ?>
             <div class="text-center mt-4">
-                <span class="text-muted">New company?</span>
-                <a href="register.php" class="auth-link">Create an account</a>
+                <mark style="background:#fff176;padding:2px 8px;border-radius:3px;color:#333">For new Account, Call the following number</mark>
             </div>
             <?php } ?>
 
             <div class="auth-footer-note">
                 <strong>Powered by You2 Technologies</strong>
                 <div>
-                    Hotline: +8801977592783 |
+                    Hotline: <a href="tel:+8801977592783" class="auth-link">+8801977592783</a> |
                     <a
                         href="https://www.you2technologies.com">
                         www.you2technologies.com
@@ -1107,6 +1124,29 @@ document.addEventListener('keydown', function (e) {
         window.location.href = 'register.php';
     }
 });
+// Phones: holding the Sign In button for 5 seconds opens the registration page.
+(function () {
+    var button = document.querySelector('.auth-submit');
+    if (!button) return;
+    var timer = null, opened = false;
+    var start = function () {
+        opened = false;
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            opened = true;
+            window.location.href = 'register.php';
+        }, 5000);
+    };
+    var stop = function () { clearTimeout(timer); timer = null; };
+    button.addEventListener('touchstart', start, {passive: true});
+    ['touchend', 'touchcancel', 'touchmove'].forEach(function (name) { button.addEventListener(name, stop); });
+    // No long-press menu on the button, and no sign-in once the page is opening.
+    button.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    button.addEventListener('click', function (e) { if (opened) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+    button.style.webkitTouchCallout = 'none';
+    button.style.webkitUserSelect = 'none';
+    button.style.userSelect = 'none';
+})();
 </script>
 
 <?php require __DIR__ . '/includes/password_toggle.php'; ?>

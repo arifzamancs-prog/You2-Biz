@@ -55,10 +55,8 @@ if($return_module_list){
     sales_return_schema($conn);
     $date_scope .= " AND COALESCE(created_by_type,'')<>'sales_refund'";
 }
-// Load 100 invoices at a time; Previous/Next 100 moves between batches.
-$invoice_batch_size = 100;
-$invoice_page = max(1, (int)($_GET['page'] ?? 1));
-
+// Every invoice is loaded; the list shows its first rows at once and the rest follow
+// in the background (includes/quick_load_helper.php).
 if(is_agent_user()){
     $sql = "SELECT *
             FROM invoices
@@ -67,9 +65,6 @@ if(is_agent_user()){
             {$date_scope}
             AND created_by_user_id=?
             ORDER BY id DESC";
-    $count_sql = "SELECT COUNT(*) AS total FROM invoices WHERE user_id=? {$branch_scope} {$date_scope} AND created_by_user_id=?";
-    $count_stmt = mysqli_prepare($conn, $count_sql);
-    mysqli_stmt_bind_param($count_stmt, "ii", $user_id, $agent_user_id);
 }else{
     $sql = "SELECT *
             FROM invoices
@@ -77,17 +72,7 @@ if(is_agent_user()){
             {$branch_scope}
             {$date_scope}
             ORDER BY id DESC";
-    $count_sql = "SELECT COUNT(*) AS total FROM invoices WHERE user_id=? {$branch_scope} {$date_scope}";
-    $count_stmt = mysqli_prepare($conn, $count_sql);
-    mysqli_stmt_bind_param($count_stmt, "i", $user_id);
 }
-
-mysqli_stmt_execute($count_stmt);
-$invoice_total = (int)(mysqli_fetch_assoc(mysqli_stmt_get_result($count_stmt))['total'] ?? 0);
-$invoice_pages = max(1, (int)ceil($invoice_total / $invoice_batch_size));
-$invoice_page = min($invoice_page, $invoice_pages);
-$invoice_offset = ($invoice_page - 1) * $invoice_batch_size;
-$sql .= " LIMIT {$invoice_batch_size} OFFSET {$invoice_offset}";
 
 $stmt = mysqli_prepare($conn, $sql);
 if(is_agent_user()){
@@ -95,11 +80,6 @@ if(is_agent_user()){
 }else{
     mysqli_stmt_bind_param($stmt, "i", $user_id);
 }
-$invoice_page_url = function($page) use ($date_from, $date_to, $invoice_search){
-    $params = array_filter(['date_from' => $date_from, 'date_to' => $date_to, 'invoice_no' => $invoice_search], 'strlen');
-    $params['page'] = $page;
-    return 'invoice_list.php?' . http_build_query($params);
-};
 
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
@@ -190,15 +170,8 @@ if($invoice_ids){
                             <label for="invoice-date-to">To Date</label>
                             <input type="date" class="form-control" id="invoice-date-to" name="date_to" value="<?= htmlspecialchars($date_to, ENT_QUOTES, 'UTF-8') ?>">
                         </div>
-                        <div class="col-md-4 mb-2">
-                            <label for="invoice-no-search">Invoice No</label>
-                            <input type="text" class="form-control" id="invoice-no-search" name="invoice_no" maxlength="100" placeholder="Search invoice no" value="<?= htmlspecialchars($invoice_search, ENT_QUOTES, 'UTF-8') ?>">
-                        </div>
                         <div class="col-md-2 mb-2">
                             <button type="submit" class="btn btn-primary btn-block"><i class="fas fa-filter"></i> Search</button>
-                        </div>
-                        <div class="col-md-2 mb-2">
-                            <a href="invoice_list.php" class="btn btn-secondary btn-block">Reset</a>
                         </div>
                     </form>
 
@@ -231,13 +204,16 @@ if($invoice_ids){
                         <?php
                         $sl = 1;
 
+                        // The latest invoice of each customer is read once per customer, not once per row
+                        // (same rule as can_modify_customer_invoice()).
+                        $latest_customer_invoice = [];
                         foreach($invoice_rows as $row){
-                            $can_modify_invoice = can_modify_customer_invoice(
-                                $conn,
-                                $user_id,
-                                (int)$row['id'],
-                                (int)$row['customer_id']
-                            );
+                            $row_customer_id = (int)$row['customer_id'];
+                            if($row_customer_id > 0 && !isset($latest_customer_invoice[$row_customer_id])){
+                                $latest_customer_invoice[$row_customer_id] = latest_existing_customer_invoice_id($conn, $user_id, $row_customer_id);
+                            }
+                            $can_modify_invoice = (int)$row['id'] > 0
+                                && ($row_customer_id <= 0 || $latest_customer_invoice[$row_customer_id] === (int)$row['id']);
 
                             // An invoice linked to a refund, return or exchange is locked (edit/delete refuse it too).
                             if($can_modify_invoice){
@@ -426,25 +402,6 @@ if($invoice_ids){
 
                     </table>
 
-                    <?php if($invoice_total > $invoice_batch_size){ ?>
-                    <div class="d-flex flex-wrap justify-content-between align-items-center border-top pt-3 mt-3">
-                        <div class="text-muted mb-2">
-                            Loaded invoices <?= number_format($invoice_offset + 1) ?>–<?= number_format(min($invoice_offset + $invoice_batch_size, $invoice_total)) ?> of <?= number_format($invoice_total) ?>
-                        </div>
-                        <div class="mb-2">
-                            <?php if($invoice_page > 1){ ?>
-                                <a href="<?= htmlspecialchars($invoice_page_url($invoice_page - 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-primary"><i class="fas fa-chevron-left mr-1"></i>Previous 100</a>
-                            <?php } else { ?>
-                                <button type="button" class="btn btn-outline-secondary" disabled><i class="fas fa-chevron-left mr-1"></i>Previous 100</button>
-                            <?php } ?>
-                            <?php if($invoice_page < $invoice_pages){ ?>
-                                <a href="<?= htmlspecialchars($invoice_page_url($invoice_page + 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-primary ml-1">Next 100<i class="fas fa-chevron-right ml-1"></i></a>
-                            <?php } else { ?>
-                                <button type="button" class="btn btn-outline-secondary ml-1" disabled>Next 100<i class="fas fa-chevron-right ml-1"></i></button>
-                            <?php } ?>
-                        </div>
-                    </div>
-                    <?php } ?>
 
                     <style>
                         #example1 .invoice-list-no { min-width: 200px; }

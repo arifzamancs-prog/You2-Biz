@@ -463,6 +463,7 @@ $(function () {
     });
 })();
 </script>
+<?php require __DIR__ . '/quick_panel.php'; ?>
 <?php $photo_placeholder_src = function_exists('branding_logo_url') ? branding_logo_url($conn ?? null) : ''; ?>
 <script>
 // photo-col-auto-hide: a table "Photo" column is hidden when no row has a real product
@@ -477,7 +478,11 @@ $(function () {
         var index = Array.prototype.findIndex.call(head.cells, function(th){ return th.textContent.trim().toLowerCase() === 'photo'; });
         if (index < 0 || head.cells[index].classList.contains('photo-column') || table.hasAttribute('data-keep-photo')) return;
         var images = [];
-        Array.prototype.forEach.call(table.tBodies, function(body){
+        // Rows still held back by quick load (a <template> after the table) count too.
+        var heldBack = table.id ? document.querySelector('template[data-ql-for="' + table.id + '"]') : null;
+        var bodies = Array.prototype.slice.call(table.tBodies);
+        if (heldBack) bodies.push({rows: heldBack.content.querySelectorAll('tr')});
+        Array.prototype.forEach.call(bodies, function(body){
             Array.prototype.forEach.call(body.rows, function(row){
                 if (row.cells.length === 1 && row.cells[0].colSpan > 1) return;
                 var cell = row.cells[index];
@@ -494,5 +499,6 @@ $(function () {
     if (css.length) { var style = document.createElement('style'); style.textContent = css.join('\n'); document.head.appendChild(style); }
 })();
 </script>
+<?php if (function_exists('quick_load_runtime_script')) echo quick_load_runtime_script(); ?>
 </body>
 </html>

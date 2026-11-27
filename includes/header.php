@@ -5,6 +5,9 @@ if (isset($conn)) bill_reminder_enforce_lock($conn);
 // Travel agencies see "Client" wherever the app says "Customer".
 require_once __DIR__ . '/travel_agency_helper.php';
 if (travel_agency_active() && !is_super_admin_user()) ob_start('travel_client_terms_html');
+// List pages open with their first rows; the rest load in the background (quick_load_helper.php).
+require_once __DIR__ . '/quick_load_helper.php';
+quick_load_start();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -172,12 +175,10 @@ $app_favicon_version = is_file($app_favicon_path) ? (string)filemtime($app_favic
         padding-right:10px;
     }
 
+    /* Section titles (MAIN, OPERATIONS, ...) are not shown. They stay in the page
+       because the sidebar script uses them to place the menu items. */
     .app-sidebar .nav-sidebar > .nav-header{
-        color:var(--app-sidebar-muted);
-        font-size:11px;
-        font-weight:700;
-        letter-spacing:.08em;
-        padding:14px 10px 6px;
+        display:none;
     }
 
     .app-sidebar .nav-sidebar .nav-link{

@@ -108,7 +108,7 @@ function branding_auth_slogan($conn = null)
         }
     }
 
-    return 'Empower your business with smarter financial control !';
+    return 'YOUR BUSINESS, OUR TECHNOLOGY.';
 }
 
 function branding_registration_enabled($conn = null)

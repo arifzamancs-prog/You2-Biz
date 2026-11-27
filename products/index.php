@@ -7,6 +7,7 @@ require_once '../includes/fifo_inventory_helper.php';
 require_once '../includes/product_category_helper.php';
 require_once '../includes/product_image_helper.php';
 require_once '../includes/project_package_helper.php';
+require_once '../includes/barcode_helper.php';
 
 // Use the company's saved type so the Restaurant & Cafe catalogue is shown
 // even if an older staff session has not yet refreshed its session value.
@@ -30,23 +31,19 @@ ensure_product_subcategory_schema($conn);
 $show_expired_on = is_product_expiry_enabled($conn);
 $multi_branch = company_multi_branch_enabled($conn, $user_id);
 $is_fashion_house = project_package_company_type($conn, $user_id) === 'Fashion house';
-// Only Fashion Retail shows product photos in this list.
-$product_photos_enabled = $product_photos_enabled && $is_fashion_house;
+// Every product shows its photo at the left of the list; one without a photo shows the
+// default (company logo) picture.
+$product_photos_enabled = true;
 // Product setup is central. With Multi Branch enabled, its stock value means
 // Main Warehouse stock; branches sell only after receiving a distribution.
 $stock_branch_id = $multi_branch
     ? stock_warehouse_id($conn, $user_id)
     : stock_head_office_id($conn, $user_id);
 $stock_filter = $stock_branch_id > 0 ? ' AND sb.branch_id=' . $stock_branch_id : '';
-$load_all = ($_GET['load'] ?? '') === 'all';
-$deep_search = trim((string)($_GET['deep_search'] ?? ''));
-$search_filter = $deep_search !== '' ? " AND (p.product_name LIKE ? OR p.sku LIKE ? OR c.category_name LIKE ? OR p.sub_category LIKE ? OR p.status LIKE ?)" : '';
-$list_limit = ($load_all || $deep_search !== '') ? '' : ' LIMIT 200';
 if (empty($_SESSION['product_delete_csrf'])) $_SESSION['product_delete_csrf'] = bin2hex(random_bytes(32));
-$count_stmt = mysqli_prepare($conn, 'SELECT COUNT(*) AS total FROM products WHERE user_id=?');
-mysqli_stmt_bind_param($count_stmt, 'i', $user_id);
-mysqli_stmt_execute($count_stmt);
-$product_total = (int)mysqli_fetch_assoc(mysqli_stmt_get_result($count_stmt))['total'];
+// The pencil beside Sale Price (AJAX, products/update_sale_price.php) for those who see Edit.
+$can_edit_sale_price = manager_can_modify() && stock_can_manage_warehouse($conn);
+if (empty($_SESSION['product_price_token'])) $_SESSION['product_price_token'] = bin2hex(random_bytes(32));
 
 $sql = "SELECT
             p.*,
@@ -59,23 +56,22 @@ $sql = "SELECT
         LEFT JOIN product_categories c
             ON c.id = p.category_id
         WHERE p.user_id=?
-        {$search_filter}
-        ORDER BY p.id DESC{$list_limit}";
+        ORDER BY p.id DESC";
 
 $stmt = mysqli_prepare($conn,$sql);
 
-if ($deep_search !== '') {
-    $search_like = '%' . $deep_search . '%';
-    mysqli_stmt_bind_param($stmt, 'isssss', $user_id, $search_like, $search_like, $search_like, $search_like, $search_like);
-} else mysqli_stmt_bind_param(
-    $stmt,
-    "i",
-    $user_id
-);
+mysqli_stmt_bind_param($stmt, 'i', $user_id);
 
 mysqli_stmt_execute($stmt);
 
 $result = mysqli_stmt_get_result($stmt);
+$product_rows = mysqli_fetch_all($result, MYSQLI_ASSOC);
+// Each product's own barcode (the one its labels carry); missing ones are created here.
+$product_barcodes = product_barcodes_for_items(
+    $conn,
+    $user_id,
+    array_map(fn($product) => ['product' => $product, 'variant' => '', 'position' => 0], $product_rows)
+);
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -117,11 +113,6 @@ require_once '../includes/sidebar.php';
 
     <div class="card-body">
         <div id="product-message" role="status"></div>
-        <div class="row mb-3">
-            <div class="col-md-5"><form method="get"><label for="product-deep-search">Deep Search</label><div class="input-group"><input id="product-deep-search" name="deep_search" class="form-control" value="<?= htmlspecialchars($deep_search) ?>" placeholder="Search all products"><div class="input-group-append"><button class="btn btn-primary">Search</button></div></div></form></div>
-            <div class="col-md-3 d-flex align-items-end"><a href="?load=all" class="btn btn-info mr-2">Total Load (<?= $product_total ?>)</a><a href="index.php" class="btn btn-secondary">Reset</a></div>
-        </div>
-        <p class="text-muted">Loaded <span id="product-loaded-count"><?= mysqli_num_rows($result) ?></span> of <span id="product-total-count"><?= $product_total ?></span> products<?= $deep_search !== '' ? ' — Deep Search results' : '' ?>.</p>
 
         <?php if(isset($_SESSION['error'])){ ?>
             <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -135,15 +126,15 @@ require_once '../includes/sidebar.php';
 
         <style>
             #product-list .product-name-column{min-width:240px}
-            #product-list .product-category-column{min-width:180px}
+            #product-list .product-barcode-column{min-width:150px;white-space:nowrap}
+            #product-list .purchase-price-column{width:1%;white-space:nowrap}
             #product-list .sale-price-column{min-width:100px!important;width:100px!important;white-space:nowrap}
-            #product-list .all-branch-stock-column{min-width:130px!important;width:130px!important}
+            /* Branch Stock and Total Stock: only as wide as their numbers need. */
+            #product-list .all-branch-stock-column,#product-list .branch-stock-column{width:1%!important;min-width:85px!important;white-space:normal}
             #product-list .product-action-column{width:76px!important;min-width:76px!important;white-space:nowrap}
             #product-list.inventory-sales-product-list{table-layout:auto}
             #product-list .product-code-column{min-width:90px;white-space:nowrap}
-            #product-list .product-subcategory-column{min-width:130px}
             #product-list.inventory-sales-product-list .inventory-product-column{min-width:200px}
-            #product-list.inventory-sales-product-list .inventory-category-column{min-width:150px;overflow-wrap:anywhere}
             #product-list.inventory-sales-product-list .purchase-price-column{width:125px;min-width:125px;word-break:normal;overflow-wrap:normal}
             .product-photo-preview{padding:0;border:0;background:transparent;cursor:zoom-in;line-height:0}
             .product-photo-preview img{transition:transform .15s ease}
@@ -157,13 +148,15 @@ require_once '../includes/sidebar.php';
 
             <tr>
 
-                <?php if($product_photos_enabled){ ?><th>Photo</th><?php } ?>
+                <?php if($product_photos_enabled){ ?><th class="photo-column">Photo</th><?php } ?>
                 <th class="product-name-column<?= !$product_photos_enabled ? ' inventory-product-column' : '' ?>">Product</th>
                 <th class="product-code-column">Code</th>
-                <th class="product-category-column<?= !$product_photos_enabled ? ' inventory-category-column' : '' ?>">Category</th>
-                <th class="product-subcategory-column">Sub Category</th>
-                <th<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>Purchase Price</th>
+                <th class="product-barcode-column">Barcode</th>
+                <th class="purchase-price-column">Purchase Price</th>
                 <th class="sale-price-column">Sale Price</th>
+                <?php if($multi_branch){ ?>
+                    <th class="branch-stock-column">Branch Stock</th>
+                <?php } ?>
                 <?php if($show_expired_on){ ?>
                     <th>Expiry on</th>
                 <?php } ?>
@@ -182,7 +175,7 @@ require_once '../includes/sidebar.php';
 
             <tbody>
 
-            <?php while($row = mysqli_fetch_assoc($result)){ ?>
+            <?php foreach($product_rows as $row){ ?>
 
             <?php
             $product_has_transactions = product_has_transactions($conn, (int)$row['id'], $user_id);
@@ -196,6 +189,11 @@ require_once '../includes/sidebar.php';
             mysqli_stmt_bind_param($variant_stock_stmt, 'iii', $row['id'], $user_id, $stock_branch_id);
             mysqli_stmt_execute($variant_stock_stmt);
             $variant_stocks = mysqli_stmt_get_result($variant_stock_stmt);
+            $variant_quantities = [];
+            while($variant_stock = mysqli_fetch_assoc($variant_stocks)){
+                $variant_quantities[$variant_stock['variant_name']] = $variant_stock['quantity'];
+            }
+            mysqli_stmt_close($variant_stock_stmt);
             $total_variant_quantities = [];
 
             if($multi_branch){
@@ -227,22 +225,47 @@ require_once '../includes/sidebar.php';
 
                 <td class="product-code-column"><?= trim((string)$row['sku']) !== '' ? htmlspecialchars($row['sku']) : '-'; ?></td>
 
-                <td<?= !$product_photos_enabled ? ' class="inventory-category-column"' : '' ?>>
-                    <?= htmlspecialchars($row['category_name']); ?>
-                    <?php if (($_SESSION['company_type'] ?? '') === 'Restaurant & Cafe') { ?>
-                    <div class="small text-muted"><?= htmlspecialchars(product_category_type_label($row['category_type'])); ?></div>
+                <?php $product_barcode = $product_barcodes[(int)$row['id']][''] ?? ''; ?>
+                <td class="product-barcode-column">
+                    <?php if($product_barcode !== ''){ ?>
+                        <span class="product-barcode-img" role="button" tabindex="0" data-barcode="<?= htmlspecialchars($product_barcode, ENT_QUOTES, 'UTF-8'); ?>" data-product-id="<?= (int)$row['id']; ?>" data-product-name="<?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="<?= htmlspecialchars($product_barcode, ENT_QUOTES, 'UTF-8'); ?> (click to print)" aria-label="Print barcode of <?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>"><span class="d-none"><?= htmlspecialchars($product_barcode); ?></span></span>
+                    <?php }else{ ?>
+                        -
                     <?php } ?>
                 </td>
 
-                <td class="product-subcategory-column"><?= !empty($row['product_sub_category']) ? htmlspecialchars($row['product_sub_category']) : '-'; ?></td>
-
-                <td<?= !$product_photos_enabled ? ' class="purchase-price-column"' : '' ?>>
+                <td class="purchase-price-column">
                     BDT <?= number_format($row['purchase_price'],2); ?>
                 </td>
 
-                <td>
-                    BDT <?= number_format($row['sale_price'],2); ?>
+                <td class="sale-price-column">
+                    <span class="ppe-value">BDT <?= number_format($row['sale_price'],2); ?></span>
+                    <?php if($can_edit_sale_price){ ?><button type="button" class="btn btn-link btn-sm p-0 ml-1 product-price-edit" data-id="<?= (int)$row['id']; ?>" data-price="<?= htmlspecialchars(number_format((float)$row['sale_price'], 2, '.', '')); ?>" title="Change sale price" aria-label="Change sale price of <?= htmlspecialchars($row['product_name'], ENT_QUOTES, 'UTF-8'); ?>"><i class="fas fa-pen"></i></button><?php } ?>
                 </td>
+
+                <?php if($multi_branch){ ?>
+                    <?php // Branch Stock: every branch except the Main Warehouse (Total Stock − Warehouse Stock). ?>
+                    <td class="branch-stock-column">
+                        <?php if($row['category_type'] === 'non_stock'){ ?>
+                            Not tracked
+                        <?php }else{ ?>
+                            <?= number_format(max(0, (float)$row['total_stock'] - (float)$row['current_stock']), 0); ?>
+                            <?php
+                            $branch_variant_parts = [];
+                            $branch_variant_order = $variants_enabled
+                                ? array_unique(array_merge(product_variant_names($conn, (int)$row['id'], $user_id), array_keys($total_variant_quantities)))
+                                : [];
+                            foreach($branch_variant_order as $variant_name){
+                                $branch_quantity = (float)($total_variant_quantities[$variant_name] ?? 0) - (float)($variant_quantities[$variant_name] ?? 0);
+                                if($branch_quantity > 0){
+                                    $branch_variant_parts[] = htmlspecialchars($variant_name) . ': ' . number_format($branch_quantity, 0);
+                                }
+                            }
+                            ?>
+                            <?php if($branch_variant_parts){ ?><small class="d-block text-muted"><?= implode(' || ', $branch_variant_parts); ?></small><?php } ?>
+                        <?php } ?>
+                    </td>
+                <?php } ?>
 
                 <?php if($show_expired_on){ ?>
                     <td><?= htmlspecialchars(app_date($row['expired_on'] ?? '')); ?></td>
@@ -251,11 +274,6 @@ require_once '../includes/sidebar.php';
                 <td>
                     <?= $row['category_type'] === 'non_stock' ? 'Not tracked' : number_format($row['current_stock'], 0); ?>
                     <?php
-                    $variant_quantities = [];
-                    while($variant_stock = mysqli_fetch_assoc($variant_stocks)){
-                        $variant_quantities[$variant_stock['variant_name']] = $variant_stock['quantity'];
-                    }
-                    mysqli_stmt_close($variant_stock_stmt);
                     $variant_order = $variants_enabled
                         ? array_unique(array_merge(product_variant_names($conn, (int)$row['id'], $user_id), array_keys($variant_quantities)))
                         : [];
@@ -381,17 +399,27 @@ require_once '../includes/sidebar.php';
 
 <?php
 $product_list_non_sortable_columns = $product_photos_enabled ? '[0]' : '[]';
-$page_script = str_replace('__NON_SORTABLE_COLUMNS__', $product_list_non_sortable_columns, <<<'SCRIPT'
+// Clicking a barcode picture opens the barcode print popup.
+$barcode_popup_config = [
+    'url' => app_path('products/barcode_print.php'),
+    'labelsUrl' => is_admin_user() && in_array(project_package_company_type($conn, (int)$user_id), ['Stock Product', 'Fashion house'], true)
+        ? app_path('user_management/barcode_labels.php')
+        : '',
+];
+$page_script = '<script>window.PRODUCT_PRICE_EDIT = ' . json_encode(['url' => app_path('products/update_sale_price.php'), 'token' => $_SESSION['product_price_token']], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>
+<script src="' . htmlspecialchars(app_path('assets/js/product_price_edit.js') . '?v=' . @filemtime(dirname(__DIR__) . '/assets/js/product_price_edit.js')) . '"></script>
+<script src="' . htmlspecialchars(app_path('adminlte/plugins/jsbarcode/JsBarcode.code128.min.js')) . '"></script>
+<script>window.BARCODE_PRINT = ' . json_encode($barcode_popup_config, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>
+<script src="' . htmlspecialchars(app_path('assets/js/barcode_print_popup.js') . '?v=' . @filemtime(dirname(__DIR__) . '/assets/js/barcode_print_popup.js')) . '"></script>
+' . str_replace('__NON_SORTABLE_COLUMNS__', $product_list_non_sortable_columns, <<<'SCRIPT'
 <script>
 $(function () {
     const table = $('#product-list').DataTable({
         responsive: false, autoWidth: false, order: [], pageLength: 10,
-        lengthMenu: [[10,25,50,100,200,-1],[10,25,50,100,200,'All loaded']],
-        dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6 product-quick-search-slot">>rtip',
+        lengthMenu: [10, 25, 50, 100],
+        dom: '<"row align-items-center mb-3"<"col-md-6"l><"col-md-6"f>>rtip',
         columnDefs: [{targets: __NON_SORTABLE_COLUMNS__, orderable: false, searchable: false}]
     });
-    $('#product-list_wrapper .product-quick-search-slot').html('<div class="d-flex align-items-center justify-content-md-end"><label for="product-quick-search" class="mb-0 mr-2 text-nowrap">Quick Search</label><input id="product-quick-search" class="form-control form-control-sm" style="max-width:280px" placeholder="Search loaded products"></div>');
-    $('#product-quick-search').on('input', function(){table.search(this.value).draw();});
     $(document).on('click', '.product-delete', async function(){
         if (!confirm('Delete this product?')) return;
         const button=this; button.disabled=true;
@@ -403,10 +431,6 @@ $(function () {
             catch (_) { throw new Error(response.status===403 ? 'Request could not be verified. Reload this page and try again.' : 'Unexpected server response. Reload this page and try again.'); }
             if (!response.ok || !data.success) throw new Error(data.message || 'Delete failed.');
             table.row($(button).closest('tr')).remove().draw(false);
-            $('#product-loaded-count').text(table.rows().count());
-            const total=Math.max(0,Number($('#product-total-count').text())-1);
-            $('#product-total-count').text(total);
-            $('a[href="?load=all"]').text('Total Load ('+total+')');
             $('#product-message').attr('class','alert alert-success').text('Product deleted.');
         } catch(error) { $('#product-message').attr('class','alert alert-danger').text(error.message); }
         finally {button.disabled=false;}

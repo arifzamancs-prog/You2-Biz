@@ -375,83 +375,16 @@ function block_manager_restricted_actions()
     }
 
     if (is_manager_user()) {
-        $permissions = $_SESSION['access_permissions'] ?? [];
         if(!empty($_SESSION['permissions_configured'])){
-            $always_allowed_paths = ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'staff/leave_application.php', 'help/video_tutorial.php', 'logout.php'];
-            $permission_paths = [
-                'staff' => ['staff/'],
-                'sales' => ['create_invoice/'],
-                'stock_sales' => ['sales/', 'warehouse/sales_report.php'],
-                'products' => ['products/', 'product_categories/'],
-                'warehouse' => ['warehouse/', 'inventory/'],
-                'stock_live_report' => ['warehouse/live_report.php'],
-                'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
-                'projects' => ['project_package/'],
-                'land_ledger' => ['land/'],
-                'customers' => ['customers/'],
-                'suppliers' => ['suppliers/', 'purchases/'],
-                'leads' => ['lead_management/'],
-                'notice_publish' => ['user_management/notice_publish.php'],
-                'wallet_approvals' => ['user_management/wallet_approvals.php'],
-                'reports' => ['reports/'],
-                'parking_dashboard' => ['parking/index.php'],
-                'parking_entry' => ['parking/index.php', 'parking/entry.php', 'parking/print_entry.php'],
-                'parking_exit' => ['parking/index.php', 'parking/exit.php', 'parking/lost_ticket.php', 'parking/print_exit.php', 'parking/shift.php'],
-                'parking_reports' => ['parking/index.php', 'parking/reports.php', 'parking/live.php', 'parking/activity.php', 'parking/export_report.php'],
-                'parking_settings' => ['parking/index.php', 'parking/setup.php', 'parking/slots.php'],
-                'admin_access_management' => ['user_management/index.php'],
-                'attendance_settings' => ['staff/attendance_settings.php'],
-                'branch_management' => ['user_management/branch_manage.php'],
-                'invoice_charges' => ['user_management/invoice_charges.php'],
-                'printing_option' => ['user_management/printing_option.php'],
-                'profit_cash_out' => ['profit_cash_out/'],
-                'sidebar_settings' => ['user_management/sidebar_settings.php'],
-                // Staff granted Tools may export a backup only. Importing or
-                // deleting data remains an administrator-only operation.
-                'tools' => ['tools/export.php'],
-            ];
-
-            if(!in_array($path, $always_allowed_paths, true)){
-                $allowed = false;
-                foreach($permission_paths as $permission => $paths){
-                    foreach($paths as $allowed_path){
-                        if(
-                            str_starts_with($path, $allowed_path)
-                            && (
-                                in_array($permission, $permissions, true)
-                                || (in_array($permission, array_keys(admin_sidebar_permissions()), true)
-                                    && manager_has_selected_admin_sidebar_permission($permission))
-                            )
-                        ){
-                            $allowed = true;
-                        }
-                    }
-                }
-
-                if(!$allowed){
-                    header("Location: " . app_path('dashboard.php?error=Permission denied'));
-                    exit;
-                }
+            if(!manager_configured_path_allowed($path)){
+                header("Location: " . app_path('dashboard.php?error=Permission denied'));
+                exit;
             }
 
             return;
         }
 
-        $agent_allowed_paths = [
-            'dashboard.php',
-            'sales/create_invoice.php',
-            'sales/invoice_list.php',
-            'sales/receive_payment.php',
-            'sales/save_invoice.php',
-            'sales/get_product.php',
-            'profile/index.php',
-            'profile/change_password.php',
-            'staff/profile.php',
-            'staff/leave_application.php',
-            'logout.php',
-        ];
-
-        if (!in_array($path, $agent_allowed_paths, true)) {
+        if (!in_array($path, manager_agent_allowed_paths(), true)) {
             header("Location: " . app_path('dashboard.php?error=Permission denied'));
             exit;
         }
@@ -470,6 +403,108 @@ function block_manager_restricted_actions()
         header("Location: " . app_path('dashboard.php?error=Permission denied'));
         exit;
     }
+}
+
+// Pages every staff account may open, whatever modules it was given.
+function manager_always_allowed_paths()
+{
+    return ['dashboard.php', 'profile/index.php', 'profile/change_password.php', 'staff/profile.php', 'staff/leave_application.php', 'help/video_tutorial.php', 'logout.php', 'quick_panel/api.php'];
+}
+
+// Staff accounts whose module permissions were never configured.
+function manager_agent_allowed_paths()
+{
+    return [
+        'dashboard.php',
+        'sales/create_invoice.php',
+        'sales/invoice_list.php',
+        'sales/receive_payment.php',
+        'sales/save_invoice.php',
+        'sales/get_product.php',
+        'profile/index.php',
+        'profile/change_password.php',
+        'staff/profile.php',
+        'staff/leave_application.php',
+        'logout.php',
+        'quick_panel/api.php',
+    ];
+}
+
+// A configured staff account may open a page when one of its modules covers the path.
+function manager_configured_path_allowed($path)
+{
+    if(in_array($path, manager_always_allowed_paths(), true)){
+        return true;
+    }
+    $permissions = $_SESSION['access_permissions'] ?? [];
+    foreach(manager_permission_paths() as $permission => $paths){
+        foreach($paths as $allowed_path){
+            if(
+                str_starts_with($path, $allowed_path)
+                && (
+                    in_array($permission, $permissions, true)
+                    || (in_array($permission, array_keys(admin_sidebar_permissions()), true)
+                        && manager_has_selected_admin_sidebar_permission($permission))
+                )
+            ){
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// Whether the signed-in user may open an application page (path relative to the
+// app root, e.g. "sales/view_invoice.php"). Mirrors block_manager_restricted_actions()
+// so links offered elsewhere (quick panel search) never lead to "Permission denied".
+function current_user_can_open_path($path)
+{
+    $path = strtolower(ltrim((string)$path, '/'));
+    if(is_super_admin_user()) return false;
+    if(!sales_module_enabled() && preg_match('#^sales/#', $path)) return false;
+    if(!products_module_enabled() && preg_match('#^(?:products|product_categories)/#', $path)) return false;
+    if(!is_manager_user()) return true;
+    if(str_contains(basename($path), 'delete') || str_contains(basename($path), 'remove')) return false;
+    if(!empty($_SESSION['permissions_configured'])) return manager_configured_path_allowed($path);
+
+    return in_array($path, manager_agent_allowed_paths(), true);
+}
+
+function manager_permission_paths()
+{
+    return [
+        'staff' => ['staff/'],
+        'sales' => ['create_invoice/'],
+        'stock_sales' => ['sales/', 'warehouse/sales_report.php'],
+        'products' => ['products/', 'product_categories/'],
+        'warehouse' => ['warehouse/', 'inventory/'],
+        'stock_live_report' => ['warehouse/live_report.php'],
+        'wallets' => ['wallets/', 'categories/', 'moneyin/', 'expenses/', 'transfers/', 'transactions/', 'profit_cash_out/'],
+        'projects' => ['project_package/'],
+        'land_ledger' => ['land/'],
+        'customers' => ['customers/'],
+        'suppliers' => ['suppliers/', 'purchases/'],
+        'leads' => ['lead_management/'],
+        'notice_publish' => ['user_management/notice_publish.php'],
+        'wallet_approvals' => ['user_management/wallet_approvals.php'],
+        'reports' => ['reports/'],
+        'parking_dashboard' => ['parking/index.php'],
+        'parking_entry' => ['parking/index.php', 'parking/entry.php', 'parking/print_entry.php'],
+        'parking_exit' => ['parking/index.php', 'parking/exit.php', 'parking/lost_ticket.php', 'parking/print_exit.php', 'parking/shift.php'],
+        'parking_reports' => ['parking/index.php', 'parking/reports.php', 'parking/live.php', 'parking/activity.php', 'parking/export_report.php'],
+        'parking_settings' => ['parking/index.php', 'parking/setup.php', 'parking/slots.php'],
+        'admin_access_management' => ['user_management/index.php'],
+        'attendance_settings' => ['staff/attendance_settings.php'],
+        'branch_management' => ['user_management/branch_manage.php'],
+        'invoice_charges' => ['user_management/invoice_charges.php'],
+        'printing_option' => ['user_management/printing_option.php'],
+        'profit_cash_out' => ['profit_cash_out/'],
+        'sidebar_settings' => ['user_management/sidebar_settings.php'],
+        // Staff granted Tools may export a backup only. Importing or
+        // deleting data remains an administrator-only operation.
+        'tools' => ['tools/export.php'],
+    ];
 }
 
 block_manager_restricted_actions();

@@ -288,7 +288,7 @@ function sidebar_is_active($href)
 function sidebar_group_active($items)
 {
     foreach($items as $item){
-        if(sidebar_is_active($item['href']) || ($item['href'] === app_path('sales/receive_stock.php') && (int)($item['badge'] ?? 0) > 0)){
+        if(sidebar_is_active($item['href'])){
             return true;
         }
     }
@@ -573,7 +573,7 @@ if(
             <ul class="nav nav-pills nav-sidebar flex-column nav-compact"
                 data-widget="treeview"
                 role="menu"
-                data-accordion="false">
+                data-accordion="true">
 
                 <li class="nav-header">MAIN</li>
 

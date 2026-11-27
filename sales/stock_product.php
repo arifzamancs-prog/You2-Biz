@@ -467,7 +467,7 @@ require_once '../includes/sidebar.php';
 <?php } ?>
 
 <div class="card card-outline card-primary">
-    <div class="card-header"><h3 class="card-title"><i class="fas fa-boxes mr-2"></i>My Stock — <?= htmlspecialchars($current_branch_label); ?></h3><div class="card-tools"><div class="input-group input-group-sm" style="width:260px"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input type="search" id="my-stock-search" class="form-control" placeholder="Search product or Code" aria-label="Search stock"></div></div></div>
+    <div class="card-header"><h3 class="card-title"><i class="fas fa-boxes mr-2"></i>My Stock — <?= htmlspecialchars($current_branch_label); ?></h3></div>
     <div class="card-body">
         <p class="text-muted">Only stock available in the current branch is shown here.</p>
         <div class="table-responsive"><table class="table table-bordered table-striped mb-0" id="my-stock-table">
@@ -715,7 +715,6 @@ $page_script = <<<HTML
                     initHistoryTable();
                     document.getElementById('adjust-note').value = '';
                     resetRows();
-                    document.getElementById('my-stock-search').dispatchEvent(new Event('input'));
                 }
                 messageBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
             } catch (err) {
@@ -728,30 +727,27 @@ $page_script = <<<HTML
         });
     }
 
-    // My Stock: Show entries + paging; the search box in the card header filters the table.
-    const search = document.getElementById('my-stock-search');
+    // My Stock: Show entries, Search and paging. The search text is kept when the table
+    // is drawn again after a stock save.
+    let stockSearch = '';
     function initStockTable(){
         if(!\$ || !\$.fn.DataTable) return;
-        \$('#my-stock-table').DataTable({
+        const table = \$('#my-stock-table').DataTable({
             pageLength: 10,
-            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
-            dom: "<'row'<'col-sm-12'l>>" + "<'row'<'col-sm-12'tr>>" + "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>",
+            lengthMenu: [10, 25, 50, 100],
+            dom: "<'row'<'col-sm-12 col-md-6'l><'col-sm-12 col-md-6'f>>" + "<'row'<'col-sm-12'tr>>" + "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>",
             order: [],
             autoWidth: false,
             language: {emptyTable: 'No stock is available in this branch.', zeroRecords: 'No matching product was found.'}
         });
-        \$('#my-stock-table').DataTable().search(search.value.trim()).draw();
+        if(stockSearch !== '') table.search(stockSearch).draw();
+        table.on('search.dt', function(){ stockSearch = table.search(); });
     }
     function destroyStockTable(){
         if(\$ && \$.fn.DataTable && \$.fn.DataTable.isDataTable('#my-stock-table')){
             \$('#my-stock-table').DataTable().destroy();
         }
     }
-    search.addEventListener('input', function(){
-        if(\$ && \$.fn.DataTable && \$.fn.DataTable.isDataTable('#my-stock-table')){
-            \$('#my-stock-table').DataTable().search(search.value.trim()).draw();
-        }
-    });
     initStockTable();
 
     // Stock Add/Remove History: 10 entries per page with search.

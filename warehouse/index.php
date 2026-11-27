@@ -101,16 +101,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
 $branches = mysqli_query($conn, "SELECT id,branch_name,branch_code,is_head_office FROM branches WHERE user_id={$company_id} AND status='active' ORDER BY CASE WHEN branch_name='Main Warehouse' THEN 0 WHEN is_head_office=1 THEN 1 ELSE 2 END, branch_name");
 $stock_location_id = $central ? $warehouse_id : $scope_id;
 $scope_sql = " AND b.id={$stock_location_id}";
-$warehouse_deep_search = trim((string)($_GET['warehouse_deep_search'] ?? ''));
-$warehouse_load_all = ($_GET['warehouse_load'] ?? '') === 'all';
-$warehouse_search_sql = '';
-if ($warehouse_deep_search !== '') {
-    $warehouse_search_like = mysqli_real_escape_string($conn, $warehouse_deep_search);
-    $warehouse_search_sql = " AND (p.product_name LIKE '%{$warehouse_search_like}%' OR p.sku LIKE '%{$warehouse_search_like}%')";
-}
-$warehouse_limit_sql = $warehouse_load_all ? '' : ' LIMIT 200';
-$warehouse_total_result = mysqli_query($conn, "SELECT COUNT(*) AS total FROM products p INNER JOIN product_categories c ON c.id=p.category_id WHERE p.user_id={$company_id} AND c.category_type='stock_product'{$warehouse_search_sql} AND (EXISTS (SELECT 1 FROM stock_batches sb WHERE sb.user_id=p.user_id AND sb.product_id=p.id AND sb.branch_id={$stock_location_id} AND sb.remaining_quantity<>0) OR EXISTS (SELECT 1 FROM invoice_items ii INNER JOIN invoices i ON i.id=ii.invoice_id WHERE i.user_id=p.user_id AND i.branch_id={$stock_location_id} AND ii.product_id=p.id AND ii.quantity>0 AND i.accounting_status='pending'))");
-$warehouse_product_total = (int)(mysqli_fetch_assoc($warehouse_total_result)['total'] ?? 0);
 $stock = mysqli_query($conn, "SELECT p.id AS product_id,p.product_name,p.sku,p.photo_path,p.sale_price,b.id AS branch_id,b.branch_name,b.is_head_office,
     COALESCE(SUM(sb.remaining_quantity),0) AS quantity,
     COALESCE(SUM(sb.remaining_quantity*sb.unit_cost),0) AS cost,
@@ -126,7 +116,7 @@ $stock = mysqli_query($conn, "SELECT p.id AS product_id,p.product_name,p.sku,p.p
     WHERE p.user_id={$company_id} AND c.category_type='stock_product' {$scope_sql}
     GROUP BY p.id,p.product_name,p.sku,p.photo_path,p.sale_price,p.user_id,b.id,b.branch_name,b.is_head_office
     HAVING quantity<>0 OR reserved<>0
-    ORDER BY b.is_head_office DESC,b.branch_name,p.product_name{$warehouse_limit_sql}");
+    ORDER BY b.is_head_office DESC,b.branch_name,p.product_name");
 $history_scope = $scope_id > 0 ? " AND d.to_branch_id={$scope_id}" : '';
 $history = mysqli_query($conn, "SELECT MIN(d.id) AS id,MIN(d.reference_no) AS reference_no,GROUP_CONCAT(d.distribution_ids ORDER BY d.id) AS distribution_ids,MIN(d.created_at) AS created_at,d.user_id,d.from_branch_id,d.to_branch_id,d.status,d.note,
     SUM(d.quantity) AS quantity,SUM(d.total_cost) AS total_cost,SUM(d.damaged_quantity) AS damaged_quantity,
@@ -206,7 +196,7 @@ require_once '../includes/sidebar.php';
 </form>
 <p class="text-muted">Loaded <?= mysqli_num_rows($setup_products) ?> of <?= $setup_product_total ?> products.</p>
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
-    <label class="mb-0">Show <select id="setup-product-length" class="custom-select custom-select-sm mx-1" style="width:auto"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="-1">All loaded</option></select> entries</label>
+    <label class="mb-0">Show <select id="setup-product-length" class="custom-select custom-select-sm mx-1" style="width:auto"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select> entries</label>
     <div class="d-flex align-items-center"><label for="product-list-search" class="mb-0 mr-2">Quick Search</label><input id="product-list-search" class="form-control form-control-sm" style="width:280px;max-width:100%" placeholder="Search loaded products"></div>
 </div>
 <div class="<?= $is_fashion_house ? '' : 'mt-4'; ?>"><?php if(!$is_fashion_house){ ?><h6 class="font-weight-bold">Product List</h6><?php } ?><div class="table-responsive"><table class="table table-bordered table-sm mb-0"<?php if($is_fashion_house){ ?> style="table-layout:fixed;min-width:1280px"<?php } ?>><?php if($is_fashion_house){ ?><colgroup><col style="width:50px"><col style="width:6%"><col style="width:14%"><col style="width:8%"><col style="width:7%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:11%"><col style="width:7%"></colgroup><?php } ?><thead><tr><th>SL</th><th>Photo</th><th>Product</th><th>Category</th><th>Code</th><th>Purchase Price</th><th>Sale Price</th><?php if($is_fashion_house){ ?><th>On Hand</th><th>Warehouse St.</th><th>All Br. Stock</th><th>All Br. Sold</th><th>All Br. Damaged</th><?php } ?><th>Status</th></tr></thead><tbody id="setup-product-list"><?php $setup_sl=0; while ($product = mysqli_fetch_assoc($setup_products)) { $setup_photo = product_image_url($conn, $product['photo_path'] ?? ''); ?><tr><td class="setup-sl"><?= ++$setup_sl ?></td><td><button type="button" class="warehouse-photo-preview" data-photo-src="<?= htmlspecialchars($setup_photo, ENT_QUOTES, 'UTF-8'); ?>" data-photo-alt="<?= htmlspecialchars($product['product_name'], ENT_QUOTES, 'UTF-8'); ?>" title="Click to view larger photo"><img src="<?=htmlspecialchars($setup_photo)?>" style="width:34px;height:34px;object-fit:cover;border-radius:3px" alt="<?= htmlspecialchars($product['product_name']); ?>"></button></td><td><?= htmlspecialchars($product['product_name']); ?></td><td><?= htmlspecialchars($product['category_name'] ?? '-'); ?></td><td><?= htmlspecialchars($product['sku'] ?? ''); ?></td><td><?= number_format((float)$product['purchase_price'], 2); ?></td><td><?= number_format((float)$product['sale_price'], 2); ?></td><?php if($is_fashion_house){ ?><td><?= number_format((float)$product['total_stock'], 0); ?></td><td><?= number_format((float)$product['warehouse_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_stock'], 0); ?></td><td><?= number_format((float)$product['all_branch_sold'], 0); ?></td><td><?= number_format((float)$product['damaged_quantity'], 0); ?></td><?php } ?><td><span class="badge badge-<?= $product['status'] === 'active' ? 'success' : 'secondary'; ?>"><?= htmlspecialchars(ucfirst($product['status'])); ?></span></td></tr><?php } ?></tbody></table></div></div>
@@ -219,12 +209,7 @@ require_once '../includes/sidebar.php';
     <div class="card-body">
         <?php if ($message !== '') { ?><div class="alert alert-success"><?= htmlspecialchars($message); ?></div><?php } ?>
         <?php if ($error !== '') { ?><div class="alert alert-danger"><?= htmlspecialchars($error); ?></div><?php } ?>
-        <form method="get" class="form-row mb-3">
-            <div class="col-md-6"><label for="warehouse-deep-search">Deep Search</label><div class="input-group"><input id="warehouse-deep-search" name="warehouse_deep_search" class="form-control" placeholder="Search all warehouse products" value="<?= htmlspecialchars($warehouse_deep_search) ?>"><div class="input-group-append"><button class="btn btn-primary">Search</button></div></div></div>
-            <div class="col-md-6 d-flex align-items-end"><a href="?warehouse_load=all<?= $warehouse_deep_search !== '' ? '&warehouse_deep_search=' . urlencode($warehouse_deep_search) : '' ?>" class="btn btn-info mr-2">Total Load (<?= $warehouse_product_total ?>)</a><a href="index.php" class="btn btn-secondary">Reset</a></div>
-        </form>
-        <p class="text-muted">Loaded <?= mysqli_num_rows($stock) ?> of <?= $warehouse_product_total ?> products<?= $warehouse_deep_search !== '' ? ' — Deep Search results' : '' ?>.</p>
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3"><label class="mb-0">Show <select id="warehouse-stock-length" class="custom-select custom-select-sm mx-1" style="width:auto"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="-1">All loaded</option></select> entries</label><div class="d-flex align-items-center"><label for="warehouse-stock-search" class="mb-0 mr-2">Quick Search</label><input id="warehouse-stock-search" class="form-control form-control-sm" style="width:280px;max-width:100%" placeholder="Search loaded products" aria-label="Search warehouse stock"></div></div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3"><label class="mb-0">Show <select id="warehouse-stock-length" class="custom-select custom-select-sm mx-1" style="width:auto"><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select> entries</label><div class="d-flex align-items-center"><label for="warehouse-stock-search" class="mb-0 mr-2 font-weight-normal">Search:</label><input type="search" id="warehouse-stock-search" class="form-control form-control-sm" style="width:200px;max-width:100%" aria-label="Search warehouse stock"></div></div>
         <div class="table-responsive"><table class="table table-bordered table-striped" id="warehouse-stock-table">
             <thead><tr><th>Photo</th><th>Product</th><th>Code</th><th>On Hand</th><th>Damaged</th><th>Stock Cost</th><th>Sale Cost</th></tr></thead>
             <tbody><?php while ($row = mysqli_fetch_assoc($stock)) {
@@ -278,7 +263,7 @@ require_once '../includes/sidebar.php';
 </div>
 <?php } ?>
 <div class="card"><div class="card-header"><h3 class="card-title">Distribution History</h3><div class="card-tools" style="width:300px"><div class="input-group input-group-sm"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input id="distribution-history-search" class="form-control" placeholder="Search product, branch, status or note"></div></div></div><div class="card-body">
-<div class="mb-3"><label for="distribution-history-count" class="font-weight-normal">Show <select id="distribution-history-count" class="custom-select custom-select-sm d-inline-block mx-1" style="width:auto"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="500">All (latest 500)</option></select> entries</label></div>
+<div class="mb-3"><label for="distribution-history-count" class="font-weight-normal">Show <select id="distribution-history-count" class="custom-select custom-select-sm d-inline-block mx-1" style="width:auto"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select> entries</label></div>
 <style>
 .distribution-history-table{table-layout:fixed;min-width:1500px;width:100%}
 .distribution-history-table th,.distribution-history-table td{vertical-align:middle;overflow-wrap:anywhere}

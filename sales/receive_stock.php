@@ -520,9 +520,12 @@ $my_pending = count(array_filter($my_requests, static fn($request) => $request['
 </div></div></section>
 
 <section class="content"><div class="container-fluid"><div class="card">
-    <div class="card-header"><h3 class="card-title">Distribution History</h3><div class="card-tools" style="width:300px"><div class="input-group input-group-sm"><div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div><input id="receive-history-search" class="form-control" aria-label="Search distribution history" placeholder="Search product, branch, status or note"></div></div></div>
+    <div class="card-header"><h3 class="card-title">Distribution History</h3></div>
     <div class="card-body">
-    <div class="mb-3"><label for="receive-history-count" class="font-weight-normal">Show <select id="receive-history-count" class="custom-select custom-select-sm d-inline-block mx-1" style="width:auto"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="500">All (latest 500)</option></select> entries</label></div>
+    <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+        <label for="receive-history-count" class="font-weight-normal mb-0">Show <select id="receive-history-count" class="custom-select custom-select-sm d-inline-block mx-1" style="width:auto"><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select> entries</label>
+        <label for="receive-history-search" class="font-weight-normal mb-0">Search: <input type="search" id="receive-history-search" class="form-control form-control-sm d-inline-block ml-1" style="width:200px" aria-label="Search distribution history"></label>
+    </div>
     <style>
     .receive-history-table{table-layout:fixed;min-width:1500px;width:100%}
     .receive-history-table th,.receive-history-table td{vertical-align:middle;overflow-wrap:anywhere}

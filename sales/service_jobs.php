@@ -4,7 +4,6 @@ require_once __DIR__ . '/_sw_init.php';
 
 $statuses = sw_service_statuses();
 $status = (string)($_GET['status'] ?? 'open');
-$q = trim((string)($_GET['q'] ?? ''));
 $from = sw_parse_date($_GET['from'] ?? '');
 $to = sw_parse_date($_GET['to'] ?? '');
 
@@ -13,10 +12,6 @@ if ($status === 'open') {
     $where .= " AND j.status IN ('received','ready')";
 } elseif (isset($statuses[$status])) {
     $where .= " AND j.status='" . mysqli_real_escape_string($conn, $status) . "'";
-}
-if ($q !== '') {
-    $like = "'%" . mysqli_real_escape_string($conn, $q) . "%'";
-    $where .= " AND (j.job_no LIKE {$like} OR j.customer_name LIKE {$like} OR j.customer_phone LIKE {$like} OR j.item_name LIKE {$like} OR j.brand_model LIKE {$like} OR j.serial_no LIKE {$like})";
 }
 if ($from) {
     $where .= " AND DATE(j.received_at) >= '{$from}'";
@@ -53,23 +48,24 @@ require_once __DIR__ . '/../includes/sidebar.php';
         <div class="card-header">
             <form class="form-row align-items-end" method="get">
                 <input type="hidden" name="status" value="<?= sw_h($status); ?>">
-                <div class="col-md-4 mb-2"><input name="q" class="form-control form-control-sm" value="<?= sw_h($q); ?>" placeholder="Job no, customer, phone, product, serial"></div>
-                <div class="col-md-2 mb-2"><input type="date" name="from" class="form-control form-control-sm" value="<?= sw_h($from); ?>" title="Received from"></div>
-                <div class="col-md-2 mb-2"><input type="date" name="to" class="form-control form-control-sm" value="<?= sw_h($to); ?>" title="Received to"></div>
+                <div class="col-md-3 mb-2"><label class="small mb-1" for="service-from">Received From</label><input type="date" id="service-from" name="from" class="form-control form-control-sm" value="<?= sw_h($from); ?>"></div>
+                <div class="col-md-3 mb-2"><label class="small mb-1" for="service-to">Received To</label><input type="date" id="service-to" name="to" class="form-control form-control-sm" value="<?= sw_h($to); ?>"></div>
                 <div class="col-md-2 mb-2"><button class="btn btn-sm btn-outline-primary btn-block"><i class="fas fa-search mr-1"></i>Search</button></div>
             </form>
         </div>
-        <div class="card-body table-responsive p-0">
-            <table class="table table-hover table-sm mb-0">
-                <thead class="thead-light"><tr><th>Job</th><th>Customer</th><th>Product &amp; Problem</th><th>Delivery</th><th class="text-right">Charge</th><th class="text-right">Advance</th><th>Status</th><th></th></tr></thead>
+        <div class="card-body">
+            <table class="table table-hover table-sm mb-0" id="service-jobs-table">
+                <thead class="thead-light"><tr><th>Job</th><th>Customer</th><th>Phone</th><th>Product &amp; Problem</th><th>Serial</th><th>Delivery</th><th class="text-right">Charge</th><th class="text-right">Advance</th><th>Status</th><th></th></tr></thead>
                 <tbody>
-                <?php $shown = 0; while ($rows && ($row = mysqli_fetch_assoc($rows))) { $shown++;
+                <?php while ($rows && ($row = mysqli_fetch_assoc($rows))) {
                     $open = in_array($row['status'], ['received', 'ready'], true);
                     $late = $open && $row['delivery_date'] && $row['delivery_date'] < $today; ?>
                     <tr>
                         <td class="text-nowrap"><a href="service_view.php?id=<?= (int)$row['id']; ?>"><strong><?= sw_h($row['job_no']); ?></strong></a><div class="small text-muted"><?= sw_datetime($row['received_at']); ?></div></td>
-                        <td><?= sw_h($row['customer_name']); ?><div class="small text-muted"><?= sw_h($row['customer_phone']); ?><?= (int)$row['customer_id'] === 0 ? ' · Walk-in' : ''; ?></div></td>
+                        <td><?= sw_h($row['customer_name']); ?><?= (int)$row['customer_id'] === 0 ? '<div class="small text-muted">Walk-in</div>' : ''; ?></td>
+                        <td class="text-nowrap"><?= trim((string)$row['customer_phone']) !== '' ? sw_h($row['customer_phone']) : '—'; ?></td>
                         <td><?= sw_h(trim($row['item_name'] . ' ' . $row['brand_model'])); ?><div class="small text-muted text-truncate" style="max-width:260px"><?= sw_h($row['problem']); ?></div></td>
+                        <td class="text-nowrap"><?= trim((string)$row['serial_no']) !== '' ? sw_h($row['serial_no']) : '—'; ?></td>
                         <td class="text-nowrap <?= $late ? 'text-danger font-weight-bold' : ''; ?>"><?= sw_date($row['delivery_date']); ?><?= $late ? '<div class="small">Overdue</div>' : ''; ?></td>
                         <td class="text-right"><?= $row['status'] === 'delivered' ? sw_amount($row['invoice_total']) : '<span class="text-muted">est. ' . sw_amount($row['estimated_charge']) . '</span>'; ?></td>
                         <td class="text-right"><?= (float)$row['advance_amount'] > 0 ? sw_amount($row['advance_amount']) : '—'; ?></td>
@@ -80,10 +76,23 @@ require_once __DIR__ . '/../includes/sidebar.php';
                         </td>
                     </tr>
                 <?php } ?>
-                <?php if (!$shown) { ?><tr><td colspan="8" class="text-center text-muted py-4">No service job found.</td></tr><?php } ?>
                 </tbody>
             </table>
         </div>
     </div>
 </div></section>
-<?php require_once __DIR__ . '/../includes/footer.php'; ?>
+<?php
+// Show entries + Search (searches every column of the loaded jobs, phone and serial included).
+$page_script = <<<'SCRIPT'
+<script>
+$(function () {
+    $('#service-jobs-table').DataTable({
+        order: [], pageLength: 25, autoWidth: false, responsive: false,
+        lengthMenu: [10, 25, 50, 100],
+        columnDefs: [{targets: -1, orderable: false, searchable: false}],
+        language: {emptyTable: 'No service job found.', zeroRecords: 'No matching service job.'}
+    });
+});
+</script>
+SCRIPT;
+require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -248,7 +248,7 @@ require_once '../includes/sidebar.php';
             <div class="alert alert-<?= htmlspecialchars($message_type); ?>"><?= htmlspecialchars($message); ?></div>
         <?php } ?>
 
-        <table id="example1" class="table table-bordered table-striped">
+        <table data-no-quick-load id="example1" class="table table-bordered table-striped">
             <thead>
                 <tr>
                     <th width="90">Lead ID</th>

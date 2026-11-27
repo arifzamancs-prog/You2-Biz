@@ -44,15 +44,10 @@ $run_query = function($sql) use ($conn, $bind_types, $bind_values){
     return mysqli_stmt_get_result($stmt);
 };
 
-// Load 100 transactions at a time; Previous/Next 100 moves between batches.
-$txn_batch_size = 100;
-$txn_page = max(1, (int)($_GET['page'] ?? 1));
+// Every transaction is loaded; the list shows its first rows at once and the rest follow
+// in the background (includes/quick_load_helper.php).
 $summary = mysqli_fetch_assoc($run_query("SELECT COUNT(*) AS total_rows, COALESCE(SUM(t.amount),0) AS total_amount FROM transactions t{$where_sql}"));
-$txn_total = (int)($summary['total_rows'] ?? 0);
 $total_amount = (float)($summary['total_amount'] ?? 0);
-$txn_pages = max(1, (int)ceil($txn_total / $txn_batch_size));
-$txn_page = min($txn_page, $txn_pages);
-$txn_offset = ($txn_page - 1) * $txn_batch_size;
 
 $result = $run_query("SELECT
             t.*,
@@ -70,17 +65,11 @@ $result = $run_query("SELECT
         LEFT JOIN wallets tw
         ON tw.id = tr.to_wallet_id
         {$where_sql}
-        ORDER BY t.id DESC
-        LIMIT {$txn_batch_size} OFFSET {$txn_offset}");
+        ORDER BY t.id DESC");
 $transactions = [];
 while($row = mysqli_fetch_assoc($result)){
     $transactions[] = $row;
 }
-$txn_page_url = function($page) use ($from_date, $to_date, $txn_search){
-    $params = array_filter(['from_date' => $from_date, 'to_date' => $to_date, 'txn_no' => $txn_search], 'strlen');
-    $params['page'] = $page;
-    return 'index.php?' . http_build_query($params);
-};
 
 require_once '../includes/header.php';
 require_once '../includes/navbar.php';
@@ -126,20 +115,6 @@ require_once '../includes/sidebar.php';
 
                         <div class="col-md-2">
 
-                            <label>Txn No</label>
-
-                            <input
-                                type="text"
-                                name="txn_no"
-                                class="form-control"
-                                maxlength="100"
-                                placeholder="Search txn no"
-                                value="<?= htmlspecialchars($txn_search); ?>">
-
-                        </div>
-
-                        <div class="col-md-2">
-
                             <label>&nbsp;</label>
 
                             <button
@@ -164,20 +139,6 @@ require_once '../includes/sidebar.php';
                                 Print
 
                             </button>
-
-                        </div>
-
-                        <div class="col-md-2">
-
-                            <label>&nbsp;</label>
-
-                            <a
-                                href="index.php"
-                                class="btn btn-secondary btn-block">
-
-                                Reset
-
-                            </a>
 
                         </div>
 
@@ -391,25 +352,6 @@ require_once '../includes/sidebar.php';
 
                 </table>
 
-                <?php if($txn_total > $txn_batch_size){ ?>
-                <div class="d-flex flex-wrap justify-content-between align-items-center border-top pt-3 mt-3 d-print-none">
-                    <div class="text-muted mb-2">
-                        Loaded transactions <?= number_format($txn_offset + 1) ?>–<?= number_format(min($txn_offset + $txn_batch_size, $txn_total)) ?> of <?= number_format($txn_total) ?>
-                    </div>
-                    <div class="mb-2">
-                        <?php if($txn_page > 1){ ?>
-                            <a href="<?= htmlspecialchars($txn_page_url($txn_page - 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-outline-primary"><i class="fas fa-chevron-left mr-1"></i>Previous 100</a>
-                        <?php } else { ?>
-                            <button type="button" class="btn btn-outline-secondary" disabled><i class="fas fa-chevron-left mr-1"></i>Previous 100</button>
-                        <?php } ?>
-                        <?php if($txn_page < $txn_pages){ ?>
-                            <a href="<?= htmlspecialchars($txn_page_url($txn_page + 1), ENT_QUOTES, 'UTF-8') ?>" class="btn btn-primary ml-1">Next 100<i class="fas fa-chevron-right ml-1"></i></a>
-                        <?php } else { ?>
-                            <button type="button" class="btn btn-outline-secondary ml-1" disabled>Next 100<i class="fas fa-chevron-right ml-1"></i></button>
-                        <?php } ?>
-                    </div>
-                </div>
-                <?php } ?>
 
             </div>
 

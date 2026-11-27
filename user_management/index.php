@@ -983,7 +983,7 @@ require_once '../includes/sidebar.php';
 
             <div class="card-body">
 
-                <table
+                <table data-no-quick-load
                     id="example1"
                     class="table table-bordered table-striped">
 

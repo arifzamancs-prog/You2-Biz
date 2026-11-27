@@ -6,8 +6,12 @@
  *
  * Sidebar menu links can also be dropped on the header bar as shortcut buttons.
  *
+ * The Edit button (placed after the Reset link) shows an x on every card, panel and
+ * shortcut button; pressing it removes that item. Reset Layout brings cards and charts back.
+ *
  * DashboardLayout.init({ storageKey: "...", resetLink: "#dashLayoutReset",
- *     shortcutBar: "#dashShortcutBar", shortcutList: "#dashShortcuts" })
+ *     shortcutBar: "#dashShortcutBar", shortcutList: "#dashShortcuts",
+ *     defaultPanelOrder: ["first_panel", "second_panel"] })
  */
 (function ($, window, document) {
     'use strict';
@@ -40,7 +44,21 @@
             'body.dash-shortcut-dragging #dashShortcutBar{outline:2px dashed #94a3b8}' +
             'body.dash-shortcut-dragging #dashShortcutBar{outline-color:#94a3b8;background:rgba(148,163,184,.08)}' +
             'body.dash-shortcut-dragging #dashShortcutBar.dash-shortcut-over{outline-color:#2563eb;background:rgba(37,99,235,.08)}' +
-            '.dash-shortcut{cursor:grab}.dash-shortcut.dash-shortcut-moving{opacity:.4}';
+            '.dash-shortcut{cursor:grab;position:relative}.dash-shortcut.dash-shortcut-moving{opacity:.4}' +
+            '.dash-shortcut-remove{display:none;position:absolute;top:-9px;right:-9px;z-index:5;width:20px;height:20px;border:2px solid #fff;border-radius:50%;' +
+            'background:#e03131;color:#fff;font-size:10px;line-height:1;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.3)}' +
+            '.dash-shortcut-remove:hover{background:#c92a2a}' +
+            'body.dash-editing .dash-shortcut-remove{display:flex}' +
+            'body.dash-editing .dash-shortcut{outline:2px dashed #94a3b8;outline-offset:2px}' +
+            '.dash-hidden{display:none!important}' +
+            '.dash-remove{display:none;position:absolute;top:-9px;right:0;z-index:20;width:26px;height:26px;padding:0;border:2px solid #fff;border-radius:50%;' +
+            'background:#e03131;color:#fff;font-size:12px;line-height:1;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)}' +
+            '.dash-remove:hover,.dash-remove:focus{background:#c92a2a;outline:none;transform:scale(1.1)}' +
+            'body.dash-editing .dash-remove{display:flex}' +
+            'body.dash-editing .dash-card>div>a>div,body.dash-editing .dash-card>div>div,body.dash-editing .dash-panel>.card{outline:2px dashed #94a3b8;outline-offset:2px}' +
+            'body.dash-editing .dash-card a{cursor:grab}' +
+            '#dashLayoutEdit{text-decoration:none}' +
+            '#dashLayoutEdit.dash-edit-active{color:#fff!important;background:#2563eb;border-radius:4px}';
         document.head.appendChild(style);
     }
 
@@ -77,7 +95,27 @@
         var key = options.storageKey;
         var $cardRows = $('.dash-card-row');
         var $panels = $('#dashPanels');
+        var defaultPanelOrder = Array.isArray(options.defaultPanelOrder)
+            ? options.defaultPanelOrder
+            : $panels.children('.dash-panel').map(function () { return $(this).data('panel'); }).get();
+
+        // Establish the page's intended desktop layout before optionally restoring a
+        // personal saved layout. Reset Layout therefore returns to this order.
+        defaultPanelOrder.forEach(function (panelKey) {
+            var $panel = $panels.children('.dash-panel[data-panel="' + panelKey + '"]');
+            if ($panel.length) $panel.appendTo($panels);
+        });
         var saved = read(key);
+
+        // Cards and panels the user removed stay hidden until Reset Layout.
+        if (saved && saved.hidden) {
+            (saved.hidden.cards || []).forEach(function (cardKey) {
+                $('.dash-card[data-card="' + cardKey + '"]').addClass('dash-hidden');
+            });
+            (saved.hidden.panels || []).forEach(function (panelKey) {
+                $panels.children('.dash-panel[data-panel="' + panelKey + '"]').addClass('dash-hidden');
+            });
+        }
 
         // Restore a saved layout; cards or panels it does not know stay where they are.
         if (saved && saved.cards) {
@@ -89,17 +127,31 @@
             });
         }
         if (saved && saved.panels) {
+            var savedPanelKeys = [];
             saved.panels.forEach(function (panel) {
                 var $panel = $panels.children('.dash-panel[data-panel="' + panel.key + '"]');
                 if (!$panel.length) return;
+                savedPanelKeys.push(panel.key);
                 $panel.appendTo($panels);
                 if (panel.cols) setCols($panel, panel.cols);
                 if (panel.height) setTargetHeight(targetOf($panel), panel.height);
             });
+            // Panels added after this layout was saved: right after the panel they follow on the page.
+            defaultPanelOrder.forEach(function (panelKey, index) {
+                if (savedPanelKeys.indexOf(panelKey) !== -1) return;
+                var $panel = $panels.children('.dash-panel[data-panel="' + panelKey + '"]');
+                for (var i = index - 1; i >= 0; i--) {
+                    var $before = $panels.children('.dash-panel[data-panel="' + defaultPanelOrder[i] + '"]');
+                    if ($before.length) { $panel.insertAfter($before); return; }
+                }
+                $panel.prependTo($panels);
+            });
         }
 
         function save() {
-            var layout = { cards: {}, panels: [] };
+            var layout = { cards: {}, panels: [], hidden: { cards: [], panels: [] } };
+            $('.dash-card.dash-hidden').each(function () { layout.hidden.cards.push($(this).data('card')); });
+            $panels.children('.dash-panel.dash-hidden').each(function () { layout.hidden.panels.push($(this).data('panel')); });
             $cardRows.each(function () {
                 layout.cards[$(this).data('row')] = $(this).children('.dash-card').map(function () {
                     return $(this).data('card');
@@ -121,7 +173,7 @@
 
         $cardRows.sortable({
             connectWith: '.dash-card-row',
-            items: '> .dash-card',
+            items: '> .dash-card:not(.dash-hidden)',
             distance: 8,
             tolerance: 'pointer',
             placeholder: 'col-lg-3 col-6 dash-card-placeholder',
@@ -136,7 +188,7 @@
         });
 
         $panels.sortable({
-            items: '> .dash-panel',
+            items: '> .dash-panel:not(.dash-hidden)',
             handle: '.card-header',
             cancel: 'button, a, input, select, label, .btn, .badge',
             distance: 8,
@@ -179,6 +231,8 @@
             });
         });
 
+        initEditing($(options.resetLink), $cardRows, $panels, save);
+
         if (options.shortcutBar) initShortcuts(key + '.shortcuts', $(options.shortcutBar), $(options.shortcutList));
 
         $(options.resetLink).on('click', function (event) {
@@ -186,6 +240,84 @@
             try { window.localStorage.removeItem(key); } catch (e) { /* ignore */ }
             window.location.reload();
         });
+    }
+
+    /*
+     * Edit mode: an x on every card and panel removes it from the dashboard.
+     */
+    function initEditing($reset, $cardRows, $panels, save) {
+        if (!$reset.length) return;
+
+        var $edit = $('<a href="#" id="dashLayoutEdit" class="btn btn-link btn-sm text-muted mr-1 agent-dashboard-clickable" role="button"></a>');
+        $edit.insertAfter($reset);
+
+        function hiddenCount() {
+            return $('.dash-card.dash-hidden').length + $panels.children('.dash-panel.dash-hidden').length;
+        }
+
+        function editing() {
+            return document.body.classList.contains('dash-editing');
+        }
+
+        function paint() {
+            var on = editing();
+            var hidden = hiddenCount();
+            $edit.toggleClass('dash-edit-active', on)
+                .html(on ? '<i class="fas fa-check mr-1"></i>Done' : '<i class="fas fa-pen"></i>')
+                .attr('title', on
+                    ? 'Finish editing'
+                    : 'Edit dashboard: remove cards and charts' + (hidden ? ' (' + hidden + ' removed; Reset Layout brings them back)' : ''))
+                .attr('aria-label', on ? 'Finish editing the dashboard' : 'Edit dashboard');
+        }
+
+        function setEditing(on) {
+            document.body.classList.toggle('dash-editing', on);
+            paint();
+        }
+
+        function removeButton(title) {
+            return $('<button type="button" class="dash-remove"><i class="fas fa-times"></i></button>')
+                .attr('title', 'Remove ' + title)
+                .attr('aria-label', 'Remove ' + title);
+        }
+
+        $cardRows.children('.dash-card').each(function () {
+            var $card = $(this);
+            var title = $.trim($card.find('.info-box-text').first().text()) || 'card';
+            $card.append(removeButton(title));
+        });
+        $panels.children('.dash-panel').each(function () {
+            var $panel = $(this);
+            var title = $.trim($panel.find('.card-title').first().text()) || 'chart';
+            $panel.children('.card').first().before(removeButton(title));
+        });
+
+        $(document).on('click', '.dash-remove', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var $item = $(this).closest('.dash-card, .dash-panel');
+            $item.addClass('dash-hidden');
+            save();
+            paint();
+            // Charts in the remaining panels redraw for their new width.
+            window.dispatchEvent(new Event('resize'));
+        });
+
+        // While editing, a card is not opened by a click.
+        $(document).on('click', '.dash-card a', function (event) {
+            if (editing()) event.preventDefault();
+        });
+
+        $edit.on('click', function (event) {
+            event.preventDefault();
+            setEditing(!editing());
+        });
+
+        $(document).on('keydown', function (event) {
+            if (event.key === 'Escape' && editing()) setEditing(false);
+        });
+
+        paint();
     }
 
     /*
@@ -227,6 +359,11 @@
                     .attr('data-index', index);
                 $('<i class="mr-1"></i>').addClass(shortcut.icon || 'fas fa-link').appendTo($button);
                 $('<span></span>').text(shortcut.label).appendTo($button);
+                // Shown in Edit mode: removes the button (dragging it out of the line still works too).
+                $('<span class="dash-shortcut-remove" role="button"><i class="fas fa-times"></i></span>')
+                    .attr('title', 'Remove ' + shortcut.label)
+                    .attr('aria-label', 'Remove ' + shortcut.label)
+                    .appendTo($button);
                 $list.append($button);
             });
         }
@@ -287,6 +424,19 @@
             moving = null;
             document.body.classList.remove('dash-shortcut-dragging');
             $bar.removeClass('dash-shortcut-over');
+        });
+
+        $list.on('click', '.dash-shortcut', function (event) {
+            var remove = event.target.closest && event.target.closest('.dash-shortcut-remove');
+            if (!remove && !document.body.classList.contains('dash-editing')) return;
+            event.preventDefault();   // while editing a button is not opened
+            if (!remove) return;
+            var index = parseInt(this.getAttribute('data-index'), 10);
+            if (!isNaN(index)) {
+                shortcuts.splice(index, 1);
+                store();
+                render();
+            }
         });
 
         $list.on('dragstart', '.dash-shortcut', function (event) {

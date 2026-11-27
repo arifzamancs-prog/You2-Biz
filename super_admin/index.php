@@ -1532,7 +1532,7 @@ require_once '../includes/sidebar.php';
             <h3 class="card-title">Subscription Requests</h3>
         </div>
         <div class="card-body">
-            <table id="subscriptionRequestsTable" class="table table-bordered table-striped">
+            <table data-no-quick-load id="subscriptionRequestsTable" class="table table-bordered table-striped">
                 <thead>
                     <tr>
                         <th>Date</th>
@@ -1649,7 +1649,7 @@ require_once '../includes/sidebar.php';
     </div>
 
     <div class="card-body">
-        <table id="example1" class="table table-bordered table-hover sa-company-table">
+        <table data-no-quick-load id="example1" class="table table-bordered table-hover sa-company-table">
             <thead>
                 <tr>
                     <th>Company</th>

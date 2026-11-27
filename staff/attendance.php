@@ -357,7 +357,7 @@ $(function () {
  ['attendance-roster', 'attendance-log', 'attendance-yearly'].forEach(function (id) {
   $('#' + id).DataTable({
    pageLength: 10,
-   lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+   lengthMenu: [10, 25, 50, 100],
    searching: true,
    lengthChange: true,
    autoWidth: false,
